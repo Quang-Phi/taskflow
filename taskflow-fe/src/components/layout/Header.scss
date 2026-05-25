@@ -1,0 +1,181 @@
+@import '../../styles/variables';
+@import '../../styles/mixins';
+
+.header {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: $sidebar-width;
+  height: $header-height;
+  background: $bg-header;
+  border-bottom: 1px solid $border-color;
+  @include flex-between;
+  padding: 0 20px;
+  z-index: $z-header;
+  transition: left $transition-slow, right 0.3s ease;
+
+  &.sidebar-collapsed {
+    left: $sidebar-collapsed;
+  }
+
+  &.ai-sidebar-open {
+    right: 440px;
+  }
+
+  // ===== LEFT =====
+  &__left {
+    @include flex-start;
+    gap: 16px;
+    flex: 1;
+  }
+
+  &__breadcrumb {
+    @include flex-start;
+    gap: 6px;
+    font-size: $font-size-sm;
+    color: $text-tertiary;
+
+    span {
+      color: $text-secondary;
+      &:last-child {
+        color: $text-primary;
+        font-weight: 500;
+      }
+    }
+
+    .separator {
+      color: $text-muted;
+      font-size: 10px;
+    }
+  }
+
+  // ===== CENTER (SEARCH) =====
+  &__search {
+    @include flex-center;
+    flex: 0 1 400px;
+
+    &-input {
+      width: 100%;
+      height: 34px;
+      background: $bg-input;
+      border: 1px solid $border-color;
+      border-radius: $radius-md;
+      @include flex-start;
+      gap: 8px;
+      padding: 0 12px;
+      color: $text-tertiary;
+      font-size: $font-size-sm;
+      cursor: pointer;
+      transition: all $transition-fast;
+
+      &:hover {
+        border-color: $border-light;
+        background: $bg-card-hover;
+      }
+
+      .search-icon {
+        font-size: 14px;
+      }
+
+      .search-shortcut {
+        margin-left: auto;
+        font-size: 10px;
+        background: $bg-card;
+        border: 1px solid $border-color;
+        border-radius: 3px;
+        padding: 1px 5px;
+        color: $text-muted;
+      }
+    }
+  }
+
+  // ===== RIGHT =====
+  &__right {
+    @include flex-start;
+    gap: 4px;
+  }
+
+  &__icon-btn {
+    width: 34px;
+    height: 34px;
+    @include flex-center;
+    border-radius: $radius-md;
+    color: $text-secondary;
+    cursor: pointer;
+    transition: all $transition-fast;
+    border: none;
+    background: none;
+    position: relative;
+    font-size: 16px;
+
+    &:hover {
+      background: $bg-card-hover;
+      color: $text-primary;
+    }
+
+    .notification-badge {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      background: $danger;
+      color: white;
+      font-size: 9px;
+      font-weight: 700;
+      border-radius: $radius-full;
+      border: 1.5px solid $bg-header;
+      min-width: 14px;
+      height: 14px;
+      padding: 0 3px;
+      @include flex-center;
+      line-height: 1;
+    }
+  }
+
+  &__create-btn {
+    @include flex-center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 14px;
+    background: $primary;
+    border: none;
+    border-radius: $radius-md;
+    color: white;
+    font-size: $font-size-sm;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all $transition-fast;
+    margin-left: 8px;
+
+    &:hover {
+      background: $primary-dark;
+    }
+
+    .anticon {
+      font-size: 12px;
+    }
+  }
+
+  &__divider {
+    width: 1px;
+    height: 24px;
+    background: $border-color;
+    margin: 0 8px;
+  }
+
+  &__avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: $radius-full;
+    background: linear-gradient(135deg, $primary, #a855f7);
+    @include flex-center;
+    color: white;
+    font-size: $font-size-sm;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity $transition-fast;
+
+    &:hover {
+      opacity: 0.85;
+    }
+  }
+}

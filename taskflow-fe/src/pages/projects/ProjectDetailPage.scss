@@ -1,0 +1,1245 @@
+@import '../../styles/variables';
+@import '../../styles/mixins';
+
+.project-detail {
+
+  // ===== HEADER =====
+  &__header {
+    @include flex-between;
+    margin-bottom: 4px;
+
+    &-left {
+      @include flex-start;
+      gap: 12px;
+
+      .project-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: $radius-lg;
+        @include flex-center;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .project-info {
+        h1 {
+          font-size: $font-size-2xl;
+          font-weight: 700;
+          color: $text-primary;
+        }
+
+        .project-id {
+          font-size: $font-size-xs;
+          color: $text-muted;
+        }
+      }
+    }
+  }
+
+  // ===== TABS =====
+  &__tabs {
+    @include flex-start;
+    gap: 0;
+    border-bottom: 1px solid $border-color;
+    margin-bottom: 20px;
+
+    .tab {
+      padding: 12px 18px;
+      font-size: $font-size-sm;
+      font-weight: 500;
+      color: $text-tertiary;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all $transition-fast;
+      @include flex-start;
+      gap: 6px;
+
+      &:hover {
+        color: $text-primary;
+      }
+
+      &.active {
+        color: $primary-light;
+        border-bottom-color: $primary;
+      }
+
+      .tab-badge {
+        background: $bg-input;
+        padding: 1px 7px;
+        border-radius: 10px;
+        font-size: 10px;
+        color: $text-tertiary;
+      }
+    }
+  }
+
+  // ===== BOARD TOOLBAR =====
+  &__toolbar {
+    @include flex-between;
+    margin-bottom: 16px;
+  }
+
+  &__toolbar-left {
+    @include flex-start;
+    gap: 8px;
+  }
+
+  &__toolbar-right {
+    @include flex-start;
+    gap: 8px;
+  }
+
+  &__filter-btn {
+    @include flex-center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    background: $bg-input;
+    border: 1px solid $border-color;
+    border-radius: $radius-md;
+    color: $text-secondary;
+    font-size: $font-size-sm;
+    font-family: $font-family;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+      border-color: $border-light;
+      color: $text-primary;
+    }
+  }
+
+  &__add-task-btn {
+    @include flex-center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 14px;
+    background: $primary;
+    border: none;
+    border-radius: $radius-md;
+    color: white;
+    font-size: $font-size-sm;
+    font-weight: 500;
+    font-family: $font-family;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+      background: $primary-dark;
+    }
+  }
+
+  // ===== KANBAN BOARD =====
+  &__board {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    padding-bottom: 20px;
+    min-height: calc(100vh - 240px);
+    @include scrollbar-thin;
+  }
+
+  // ===== COLUMN =====
+  &__column {
+    flex: 0 0 300px;
+    min-width: 300px;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 240px);
+
+    &-header {
+      @include flex-between;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border-radius: $radius-md;
+
+      &-left {
+        @include flex-start;
+        gap: 8px;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: $radius-full;
+      }
+
+      .status-label {
+        font-size: $font-size-sm;
+        font-weight: 600;
+        color: $text-primary;
+      }
+
+      .count {
+        font-size: $font-size-xs;
+        color: $text-tertiary;
+        background: $bg-input;
+        padding: 1px 7px;
+        border-radius: 10px;
+      }
+
+      .add-btn {
+        width: 24px;
+        height: 24px;
+        @include flex-center;
+        background: none;
+        border: none;
+        color: $text-tertiary;
+        cursor: pointer;
+        border-radius: $radius-sm;
+        font-size: 13px;
+        transition: all $transition-fast;
+
+        &:hover {
+          background: $bg-card-hover;
+          color: $primary-light;
+        }
+      }
+    }
+
+    &-body {
+      overflow-y: auto;
+      padding: 2px;
+      @include scrollbar-thin;
+    }
+
+    // Column header backgrounds now applied dynamically via inline style
+  }
+
+  // ===== TASK CARD =====
+  &__task-card {
+    @include card-base;
+    padding: 14px;
+    cursor: grab;
+    user-select: none;
+    margin-bottom: 8px;
+
+    &:hover {
+      border-color: $border-light;
+      box-shadow: $shadow-sm;
+    }
+
+    &:active {
+      cursor: grabbing;
+    }
+
+    &.dragging {
+      opacity: 0.6;
+      box-shadow: $shadow-lg;
+      transform: rotate(2deg);
+    }
+
+    &-top {
+      @include flex-between;
+      margin-bottom: 8px;
+    }
+
+    &-id {
+      font-size: $font-size-xs;
+      color: $text-muted;
+      font-weight: 500;
+    }
+
+    &-priority {
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
+
+      &--urgent {
+        background: $priority-urgent;
+      }
+
+      &--high {
+        background: $priority-high;
+      }
+
+      &--medium {
+        background: $priority-medium;
+      }
+
+      &--low {
+        background: $priority-low;
+      }
+
+      &--none {
+        background: $priority-none;
+      }
+    }
+
+    &-title {
+      font-size: $font-size-base;
+      font-weight: 500;
+      color: $text-primary;
+      line-height: 1.4;
+      margin-bottom: 10px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    &-labels {
+      @include flex-start;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+
+      .label-chip {
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 500;
+      }
+    }
+
+    &-bottom {
+      @include flex-between;
+    }
+
+    &-meta {
+      @include flex-start;
+      gap: 10px;
+      font-size: $font-size-xs;
+      color: $text-tertiary;
+
+      .meta-item {
+        @include flex-start;
+        gap: 3px;
+
+        .anticon {
+          font-size: 12px;
+        }
+      }
+    }
+
+    &-assignee {
+      width: 24px;
+      height: 24px;
+      border-radius: $radius-full;
+      @include flex-center;
+      font-size: 10px;
+      font-weight: 600;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    &-date {
+      font-size: $font-size-xs;
+      color: $text-tertiary;
+
+      &.overdue {
+        color: $danger;
+        font-weight: 500;
+      }
+    }
+  }
+
+  // ===== ADD CARD INLINE =====
+  &__add-card {
+    @include flex-center;
+    gap: 6px;
+    padding: 10px;
+    border: 1px dashed $border-color;
+    border-radius: $radius-md;
+    color: $text-muted;
+    font-size: $font-size-sm;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+      border-color: $primary;
+      color: $primary-light;
+      background: $primary-bg;
+    }
+  }
+
+  // ===== INLINE CREATE FORM =====
+  &__inline-create {
+    @include card-base;
+    padding: 12px;
+
+    input {
+      width: 100%;
+      background: $bg-input;
+      border: 1px solid $border-color;
+      border-radius: $radius-sm;
+      padding: 8px 10px;
+      color: $text-primary;
+      font-size: $font-size-sm;
+      font-family: $font-family;
+      outline: none;
+      margin-bottom: 8px;
+
+      &:focus {
+        border-color: $primary;
+      }
+    }
+
+    &-actions {
+      @include flex-between;
+
+      .left {
+        @include flex-start;
+        gap: 6px;
+      }
+
+      button {
+        height: 28px;
+        padding: 0 10px;
+        border-radius: $radius-sm;
+        font-size: $font-size-xs;
+        font-family: $font-family;
+        cursor: pointer;
+        transition: all $transition-fast;
+
+        &.create {
+          background: $primary;
+          color: white;
+          border: none;
+          font-weight: 500;
+
+          &:hover {
+            background: $primary-dark;
+          }
+        }
+
+        &.cancel {
+          background: none;
+          border: 1px solid $border-color;
+          color: $text-secondary;
+
+          &:hover {
+            border-color: $border-light;
+          }
+        }
+      }
+    }
+  }
+
+  // ===== TASK DETAIL PANEL =====
+  &__task-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(1000px, 95vw);
+    background: $bg-card;
+    border-left: 1px solid $border-color;
+    z-index: $z-modal;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -8px 0 30px rgba(0, 0, 0, 0.4);
+    animation: slideIn 0.25s ease;
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(100%);
+      }
+
+      to {
+        transform: translateX(0);
+      }
+    }
+  }
+
+  &__panel-header {
+    @include flex-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid $border-color;
+    flex-shrink: 0;
+
+    &-left {
+      @include flex-start;
+      gap: 8px;
+
+      .task-id {
+        font-size: $font-size-sm;
+        color: $text-muted;
+      }
+    }
+
+    &-right {
+      @include flex-start;
+      gap: 4px;
+    }
+
+    .panel-btn {
+      width: 30px;
+      height: 30px;
+      @include flex-center;
+      background: none;
+      border: none;
+      color: $text-tertiary;
+      cursor: pointer;
+      border-radius: $radius-sm;
+
+      &:hover {
+        background: $bg-card-hover;
+        color: $text-primary;
+      }
+    }
+  }
+
+  &__panel-body {
+    flex: 1;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    @include scrollbar-thin;
+  }
+
+  &__panel-content {
+    padding: 20px;
+    border-right: 1px solid $border-color;
+
+    .task-title-input {
+      width: 100%;
+      font-size: $font-size-xl;
+      font-weight: 600;
+      color: $text-primary;
+      background: none;
+      border: none;
+      outline: none;
+      padding: 0;
+      margin-bottom: 16px;
+      font-family: $font-family;
+
+      &::placeholder {
+        color: $text-muted;
+      }
+    }
+
+    .task-description {
+      font-size: $font-size-sm;
+      color: $text-secondary;
+      line-height: 1.7;
+      margin-bottom: 20px;
+      padding: 12px;
+      background: $bg-input;
+      border-radius: $radius-md;
+      min-height: 80px;
+      border: 1px solid transparent;
+      cursor: text;
+
+      &:hover {
+        border-color: $border-color;
+      }
+
+      &.placeholder {
+        color: $text-muted;
+        font-style: italic;
+      }
+    }
+
+    .task-description-textarea {
+      width: 100%;
+      font-size: $font-size-sm;
+      color: $text-secondary;
+      line-height: 1.7;
+      margin-bottom: 20px;
+      padding: 12px;
+      background: $bg-input;
+      border: 1px solid $border-color;
+      border-radius: $radius-md;
+      min-height: 120px;
+      outline: none;
+      font-family: $font-family;
+      resize: vertical;
+
+      &:focus {
+        border-color: $primary;
+      }
+
+      &::placeholder {
+        color: $text-muted;
+        font-style: italic;
+      }
+    }
+  }
+
+  // ===== PANEL SIDEBAR =====
+  &__panel-sidebar {
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  &__panel-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    &-label {
+      font-size: $font-size-xs;
+      font-weight: 600;
+      color: $text-tertiary;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    &-value {
+      @include flex-start;
+      gap: 8px;
+      font-size: $font-size-sm;
+      color: $text-primary;
+      padding: 6px 8px;
+      border-radius: $radius-sm;
+      cursor: pointer;
+      transition: background $transition-fast;
+
+      &:hover {
+        background: $bg-card-hover;
+      }
+    }
+
+    .status-badge {
+      @include flex-start;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: $radius-sm;
+      font-size: $font-size-xs;
+      font-weight: 500;
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: $radius-full;
+      }
+
+      &.backlog {
+        background: rgba(107, 112, 132, 0.15);
+        color: $status-backlog;
+
+        .dot {
+          background: $status-backlog;
+        }
+      }
+
+      &.todo {
+        background: rgba(156, 160, 176, 0.15);
+        color: $status-todo;
+
+        .dot {
+          background: $status-todo;
+        }
+      }
+
+      &.in-progress {
+        background: rgba(59, 130, 246, 0.15);
+        color: $status-in-progress;
+
+        .dot {
+          background: $status-in-progress;
+        }
+      }
+
+      &.in-review {
+        background: rgba(168, 85, 247, 0.15);
+        color: $status-in-review;
+
+        .dot {
+          background: $status-in-review;
+        }
+      }
+
+      &.done {
+        background: rgba(34, 197, 94, 0.15);
+        color: $status-done;
+
+        .dot {
+          background: $status-done;
+        }
+      }
+    }
+
+    .priority-badge {
+      @include flex-start;
+      gap: 6px;
+      font-size: $font-size-xs;
+
+      .priority-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+      }
+    }
+
+    .assignee-badge {
+      @include flex-start;
+      gap: 8px;
+
+      .avatar {
+        width: 22px;
+        height: 22px;
+        border-radius: $radius-full;
+        @include flex-center;
+        font-size: 9px;
+        font-weight: 600;
+        color: white;
+      }
+    }
+  }
+
+  // ===== CHECKLIST =====
+  &__checklist {
+    margin-top: 20px;
+
+    &-header {
+      @include flex-between;
+      margin-bottom: 10px;
+
+      h4 {
+        font-size: $font-size-sm;
+        font-weight: 600;
+        color: $text-primary;
+      }
+
+      .progress-text {
+        font-size: $font-size-xs;
+        color: $text-tertiary;
+      }
+    }
+
+    &-progress {
+      height: 4px;
+      background: $bg-input;
+      border-radius: 2px;
+      margin-bottom: 12px;
+      overflow: hidden;
+
+      &-fill {
+        height: 100%;
+        background: $success;
+        border-radius: 2px;
+        transition: width 0.3s ease;
+      }
+    }
+
+    &-item {
+      @include flex-start;
+      gap: 8px;
+      padding: 6px 0;
+
+      input[type="checkbox"] {
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        border: 2px solid $border-light;
+        border-radius: 3px;
+        cursor: pointer;
+        transition: all $transition-fast;
+        flex-shrink: 0;
+        @include flex-center;
+
+        &:checked {
+          background: $success;
+          border-color: $success;
+
+          &::after {
+            content: '✓';
+            color: white;
+            font-size: 10px;
+            font-weight: 700;
+          }
+        }
+      }
+
+      span {
+        font-size: $font-size-sm;
+        color: $text-primary;
+
+        &.done {
+          text-decoration: line-through;
+          color: $text-muted;
+        }
+      }
+    }
+  }
+
+  // ===== COMMENTS =====
+  &__comments {
+    margin-top: 24px;
+    border-top: 1px solid $border-color;
+    padding-top: 20px;
+
+    h4 {
+      font-size: $font-size-sm;
+      font-weight: 600;
+      color: $text-primary;
+      margin-bottom: 14px;
+    }
+  }
+
+  &__comment {
+    @include flex-start;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 0;
+
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: $radius-full;
+      @include flex-center;
+      font-size: 10px;
+      font-weight: 600;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    &-body {
+      flex: 1;
+
+      .name {
+        font-size: $font-size-sm;
+        font-weight: 500;
+        color: $text-primary;
+
+        .time {
+          font-weight: 400;
+          color: $text-muted;
+          margin-left: 6px;
+          font-size: $font-size-xs;
+        }
+      }
+
+      .text {
+        font-size: $font-size-sm;
+        color: $text-secondary;
+        line-height: 1.5;
+        margin-top: 4px;
+      }
+    }
+  }
+
+  &__comment-input {
+    @include flex-start;
+    gap: 10px;
+    margin-top: 12px;
+
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: $radius-full;
+      @include flex-center;
+      font-size: 10px;
+      font-weight: 600;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    input {
+      flex: 1;
+      height: 36px;
+      background: $bg-input;
+      border: 1px solid $border-color;
+      border-radius: $radius-md;
+      padding: 0 12px;
+      color: $text-primary;
+      font-size: $font-size-sm;
+      font-family: $font-family;
+      outline: none;
+
+      &::placeholder {
+        color: $text-muted;
+      }
+
+      &:focus {
+        border-color: $primary;
+      }
+    }
+  }
+
+  // ===== BACKDROP =====
+  &__backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: calc(#{$z-modal} - 1);
+    animation: fadeIn 0.2s ease;
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+  }
+
+  // ===== CALENDAR TAB =====
+  &__calendar-container {
+    .ant-picker-calendar {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+
+      .ant-picker-calendar-header {
+        padding: 12px;
+        background: transparent !important;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .ant-picker-cell {
+        color: var(--text-primary);
+
+        &-in-view {
+          color: var(--text-primary);
+        }
+
+        &-today .ant-picker-calendar-date {
+          border-top-color: var(--primary) !important;
+          background: rgba(99, 102, 241, 0.05);
+        }
+      }
+
+      .ant-picker-calendar-date {
+        border-top: 2px solid var(--border-color);
+        margin: 0 !important;
+        padding: 4px 0 !important;
+        min-height: 100px !important;
+        background: transparent !important;
+        transition: all 0.2s;
+        overflow: visible !important;
+
+        &:hover {
+          background: rgba(255, 255, 255, 0.02);
+        }
+      }
+
+      .ant-picker-calendar-date-value {
+        padding: 0 12px;
+      }
+
+      .ant-picker-calendar-date-content {
+        overflow: visible !important;
+      }
+
+      .calendar-tasks-list {
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100%;
+        overflow: visible !important;
+      }
+    }
+
+    .calendar-task-item {
+      &:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+        filter: brightness(1.1);
+      }
+    }
+  }
+
+  .search-task-board-input {
+    input {
+      background-color: transparent !important;
+    }
+  }
+}
+
+// Pulse animation for running timer
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+
+  70% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.status-item-hover:hover {
+  background: rgba(99, 102, 241, 0.06) !important;
+}
+
+.clickup-status-checkbox:hover {
+  filter: brightness(1.15);
+}
+
+.task-calendar {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  color: var(--text-primary);
+
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  &__nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  &__btn {
+    background: var(--bg-body);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+
+    &:hover {
+      background: var(--border-color);
+      border-color: var(--text-secondary);
+    }
+
+    &.icon-btn {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+    }
+  }
+
+  &__arrows {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  &__title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+  }
+
+  &__weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+    margin-bottom: 4px;
+  }
+
+  &__weekday {
+    text-align: center;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  &__grid {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-card);
+  }
+
+  &__week {
+    position: relative;
+    min-height: 120px;
+    border-bottom: 1px solid var(--border-color);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  &__week-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  &__day {
+    border-right: 1px solid var(--border-color);
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+
+    &:last-child {
+      border-right: none;
+    }
+
+    &.outside-month {
+      opacity: 0.3;
+      background: rgba(0, 0, 0, 0.01);
+    }
+
+    &.today {
+      background: rgba(99, 102, 241, 0.03);
+      
+      .task-calendar__day-number {
+        background: var(--primary);
+        color: #fff;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        margin-top: -2px;
+        margin-right: -4px;
+      }
+    }
+  }
+
+  &__day-number {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  &__week-events {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 32px;
+  }
+
+  &__track {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    min-height: 26px;
+  }
+
+  &__event {
+    cursor: pointer;
+    font-size: 11px;
+    padding: 3px 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    margin: 1px 0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.12);
+      filter: brightness(1.08);
+    }
+  }
+
+  &__event-title {
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.project-detail__timesheet {
+  .timesheet-filters {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px 24px;
+    margin-bottom: 16px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+
+  .timesheet-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .timesheet-stat-card {
+    background: var(--bg-card);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: transform 0.2s, border-color 0.2s;
+
+    &:hover {
+      transform: translateY(-2px);
+      border-color: var(--border-light);
+    }
+  }
+
+  .timesheet-charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+
+    .chart-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px;
+    }
+  }
+
+  .timesheet-logs-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+  }
+
+  .timesheet-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+
+    th {
+      padding: 12px 16px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border-color);
+      font-size: 13px;
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 13px;
+    }
+
+    .timesheet-row-hover:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+  }
+}

@@ -1,0 +1,160 @@
+// ===== THEME VARIABLES (CSS CUSTOM PROPERTIES) =====
+:root {
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --primary-dark: #4f46e5;
+  --primary-bg: rgba(99, 102, 241, 0.08);
+
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.1);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.1);
+  --info: #3b82f6;
+  --info-bg: rgba(59, 130, 246, 0.1);
+
+  // Default: Dark Theme
+  --bg-body: #0f1117;
+  --bg-sidebar: #161821;
+  --bg-header: #1a1c27;
+  --bg-card: #1e2030;
+  --bg-card-hover: #252840;
+  --bg-input: #252840;
+  --bg-dropdown: #1e2030;
+  --bg-modal: #1e2030;
+  --bg-tooltip: #2a2d42;
+
+  --border-color: #2a2d42;
+  --border-light: #333654;
+  --divider: #222539;
+
+  --text-primary: #e8eaed;
+  --text-secondary: #9ca0b0;
+  --text-tertiary: #6b7084;
+  --text-muted: #505468;
+  --text-white: #ffffff;
+  
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-dropdown: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme="light"] {
+  --bg-body: #f8fafc;
+  --bg-sidebar: #ffffff;
+  --bg-header: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-input: #f1f5f9;
+  --bg-dropdown: #ffffff;
+  --bg-modal: #ffffff;
+  --bg-tooltip: #0f172a;
+
+  --border-color: #e2e8f0;
+  --border-light: #f1f5f9;
+  --divider: #e2e8f0;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-muted: #94a3b8;
+  --text-white: #0f172a;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-dropdown: 0 8px 30px rgba(0, 0, 0, 0.1);
+}
+
+// ===== COLOR PALETTE =====
+$primary: var(--primary);
+$primary-light: var(--primary-light);
+$primary-dark: var(--primary-dark);
+$primary-bg: var(--primary-bg);
+
+$success: var(--success);
+$success-bg: var(--success-bg);
+$warning: var(--warning);
+$warning-bg: var(--warning-bg);
+$danger: var(--danger);
+$danger-bg: var(--danger-bg);
+$info: var(--info);
+$info-bg: var(--info-bg);
+
+// ===== THEME =====
+$bg-body: var(--bg-body);
+$bg-sidebar: var(--bg-sidebar);
+$bg-header: var(--bg-header);
+$bg-card: var(--bg-card);
+$bg-card-hover: var(--bg-card-hover);
+$bg-input: var(--bg-input);
+$bg-dropdown: var(--bg-dropdown);
+$bg-modal: var(--bg-modal);
+$bg-tooltip: var(--bg-tooltip);
+
+$border-color: var(--border-color);
+$border-light: var(--border-light);
+$divider: var(--divider);
+
+$text-primary: var(--text-primary);
+$text-secondary: var(--text-secondary);
+$text-tertiary: var(--text-tertiary);
+$text-muted: var(--text-muted);
+$text-white: var(--text-white);
+
+// ===== TYPOGRAPHY =====
+$font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+$font-size-xs: 11px;
+$font-size-sm: 12px;
+$font-size-base: 13px;
+$font-size-md: 14px;
+$font-size-lg: 16px;
+$font-size-xl: 18px;
+$font-size-2xl: 20px;
+$font-size-3xl: 24px;
+
+// ===== SPACING =====
+$sidebar-width: 240px;
+$sidebar-collapsed: 60px;
+$header-height: 52px;
+
+// ===== BORDER RADIUS =====
+$radius-sm: 4px;
+$radius-md: 6px;
+$radius-lg: 8px;
+$radius-xl: 12px;
+$radius-full: 50%;
+
+// ===== SHADOWS =====
+$shadow-sm: var(--shadow-sm);
+$shadow-md: var(--shadow-md);
+$shadow-lg: var(--shadow-lg);
+$shadow-dropdown: var(--shadow-dropdown);
+
+// ===== TRANSITIONS =====
+$transition-fast: 0.15s ease;
+$transition-base: 0.2s ease;
+$transition-slow: 0.3s ease;
+
+// ===== Z-INDEX =====
+$z-sidebar: 100;
+$z-header: 99;
+$z-dropdown: 200;
+$z-modal: 300;
+$z-tooltip: 400;
+
+// ===== PRIORITY COLORS =====
+$priority-urgent: #ef4444;
+$priority-high: #f97316;
+$priority-medium: #f59e0b;
+$priority-low: #3b82f6;
+$priority-none: #6b7084;
+
+// ===== STATUS COLORS =====
+$status-backlog: #6b7084;
+$status-todo: #9ca0b0;
+$status-in-progress: #3b82f6;
+$status-in-review: #a855f7;
+$status-done: #22c55e;

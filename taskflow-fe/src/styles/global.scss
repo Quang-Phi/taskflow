@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import 'variables';
+@import 'mixins';
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: $font-family;
+  font-size: $font-size-base;
+  color: $text-primary;
+  background: $bg-body;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+}
+
+a {
+  color: $primary-light;
+  text-decoration: none;
+  &:hover {
+    color: $primary;
+  }
+}
+
+// ===== ANT DESIGN DARK OVERRIDES =====
+.ant-btn-primary {
+  background: $primary !important;
+  border-color: $primary !important;
+  &:hover {
+    background: $primary-dark !important;
+    border-color: $primary-dark !important;
+  }
+}
+
+.ant-input,
+.ant-select-selector,
+.ant-picker {
+  background: $bg-input !important;
+  border-color: $border-color !important;
+  color: $text-primary !important;
+  &:hover, &:focus {
+    border-color: $primary !important;
+  }
+}
+
+.ant-modal-content {
+  background: $bg-modal !important;
+  border: 1px solid $border-color;
+}
+
+.ant-modal-header {
+  background: transparent !important;
+  border-bottom-color: $border-color !important;
+}
+
+.ant-modal-title {
+  color: $text-primary !important;
+}
+
+.ant-table {
+  background: transparent !important;
+  .ant-table-thead > tr > th {
+    background: $bg-card !important;
+    color: $text-secondary !important;
+    border-bottom-color: $border-color !important;
+    font-size: $font-size-sm;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+  .ant-table-tbody > tr > td {
+    border-bottom-color: $border-color !important;
+    color: $text-primary;
+  }
+  .ant-table-tbody > tr:hover > td {
+    background: $bg-card-hover !important;
+  }
+}
+
+.ant-dropdown-menu {
+  background: $bg-dropdown !important;
+  border: 1px solid $border-color;
+  box-shadow: $shadow-dropdown;
+  .ant-dropdown-menu-item {
+    color: $text-primary !important;
+    &:hover {
+      background: $bg-card-hover !important;
+    }
+  }
+}
+
+.ant-tooltip-inner {
+  background: $bg-tooltip !important;
+}
+
+// ===== UTILITY CLASSES =====
+.text-primary { color: $text-primary; }
+.text-secondary { color: $text-secondary; }
+.text-muted { color: $text-muted; }
+.text-success { color: $success; }
+.text-danger { color: $danger; }
+.text-warning { color: $warning; }

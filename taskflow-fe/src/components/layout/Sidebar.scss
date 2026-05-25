@@ -1,0 +1,269 @@
+@import '../../styles/variables';
+@import '../../styles/mixins';
+
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: $sidebar-width;
+  background: $bg-sidebar;
+  border-right: 1px solid $border-color;
+  display: flex;
+  flex-direction: column;
+  z-index: $z-sidebar;
+  transition: width $transition-slow;
+  @include scrollbar-thin;
+
+  .sidebar__logo {
+    padding: 12px 10px;
+  }
+
+  &.collapsed {
+    width: $sidebar-collapsed;
+
+    .sidebar__logo-text,
+    .sidebar__nav-label,
+    .sidebar__section-title,
+    .sidebar__project-name,
+    .sidebar__project-badge,
+    .sidebar__nav-arrow {
+      display: none;
+    }
+
+    .sidebar__logo {
+      justify-content: center;
+    }
+
+    .sidebar__nav-item {
+      justify-content: center;
+      padding: 0;
+      width: 36px;
+      height: 36px;
+      margin: 2px auto;
+      border-radius: $radius-md;
+
+      .sidebar__nav-badge {
+        position: absolute;
+        top: 2px;
+        right: 4px;
+        margin: 0;
+        z-index: 1;
+        font-size: 9px;
+        min-width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        padding: 0 3px;
+      }
+    }
+
+    .sidebar__project-item {
+      justify-content: center;
+      padding: 0;
+    }
+
+    .sidebar__collapse-btn {
+      justify-content: center;
+    }
+  }
+
+  // ===== LOGO =====
+  &__logo {
+    @include flex-start;
+    gap: 10px;
+    padding: 16px 18px;
+    border-bottom: 1px solid $border-color;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, $primary, $primary-light);
+      border-radius: $radius-md;
+      @include flex-center;
+      color: white;
+      font-weight: 700;
+      font-size: $font-size-md;
+      flex-shrink: 0;
+    }
+
+    &-text {
+      font-size: $font-size-lg;
+      font-weight: 700;
+      color: $text-primary;
+      @include text-ellipsis;
+    }
+  }
+
+  // ===== NAVIGATION =====
+  &__nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 10px;
+    @include scrollbar-thin;
+  }
+
+  &__section {
+    margin-bottom: 8px;
+  }
+
+  &__section-title {
+    font-size: $font-size-xs;
+    font-weight: 600;
+    color: $text-tertiary;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 8px 8px 4px;
+  }
+
+  &__nav-item {
+    @include flex-start;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: $radius-md;
+    color: $text-secondary;
+    cursor: pointer;
+    transition: all $transition-fast;
+    font-size: $font-size-base;
+    position: relative;
+    user-select: none;
+
+    &:hover {
+      background: $bg-card-hover;
+      color: $text-primary;
+    }
+
+    &.active {
+      background: $primary-bg;
+      color: $primary-light;
+
+      .sidebar__nav-icon {
+        color: $primary-light;
+      }
+    }
+
+    .sidebar__nav-icon {
+      font-size: 16px;
+      flex-shrink: 0;
+      width: 18px;
+      text-align: center;
+    }
+
+    .sidebar__nav-label {
+      flex: 1;
+      @include text-ellipsis;
+      font-weight: 500;
+    }
+
+    .sidebar__nav-badge {
+      background: $danger;
+      color: white;
+      font-size: 10px;
+      min-width: 18px;
+      height: 18px;
+      border-radius: 9px;
+      @include flex-center;
+      padding: 0 5px;
+      font-weight: 600;
+    }
+
+    .sidebar__nav-arrow {
+      font-size: 10px;
+      color: $text-tertiary;
+      transition: transform $transition-fast;
+
+      &.expanded {
+        transform: rotate(90deg);
+      }
+    }
+  }
+
+  // ===== PROJECTS LIST =====
+  &__projects {
+    padding: 0 0 0 12px;
+    max-height: 250px;
+    overflow-y: auto;
+    @include scrollbar-thin;
+  }
+
+  &__project-item {
+    @include flex-start;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: $radius-md;
+    color: $text-secondary;
+    cursor: pointer;
+    transition: all $transition-fast;
+    font-size: $font-size-sm;
+
+    &:hover {
+      background: $bg-card-hover;
+      color: $text-primary;
+    }
+
+    &.active {
+      color: $text-primary;
+    }
+  }
+
+  &__project-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: $radius-full;
+    flex-shrink: 0;
+  }
+
+  &__project-name {
+    flex: 1;
+    @include text-ellipsis;
+  }
+
+  &__project-badge {
+    font-size: 10px;
+    color: $text-tertiary;
+    background: $bg-input;
+    padding: 1px 6px;
+    border-radius: $radius-sm;
+  }
+
+  &__add-project {
+    @include flex-start;
+    gap: 8px;
+    padding: 6px 10px;
+    color: $text-tertiary;
+    cursor: pointer;
+    font-size: $font-size-sm;
+    transition: color $transition-fast;
+
+    &:hover {
+      color: $primary-light;
+    }
+  }
+
+  // ===== COLLAPSE BTN =====
+  &__footer {
+    padding: 8px 10px;
+    border-top: 1px solid $border-color;
+    flex-shrink: 0;
+  }
+
+  &__collapse-btn {
+    @include flex-start;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: $radius-md;
+    color: $text-tertiary;
+    cursor: pointer;
+    font-size: $font-size-sm;
+    transition: all $transition-fast;
+    width: 100%;
+    border: none;
+    background: none;
+
+    &:hover {
+      background: $bg-card-hover;
+      color: $text-primary;
+    }
+  }
+}

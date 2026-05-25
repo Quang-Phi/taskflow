@@ -1,0 +1,385 @@
+@import '../../styles/variables';
+@import '../../styles/mixins';
+
+.my-tasks {
+  &__header {
+    @include flex-between;
+    margin-bottom: 24px;
+
+    h1 {
+      font-size: $font-size-3xl;
+      font-weight: 700;
+      color: $text-primary;
+    }
+
+    p {
+      font-size: $font-size-sm;
+      color: $text-secondary;
+      margin-top: 4px;
+    }
+  }
+
+  &__toolbar {
+    @include flex-between;
+    margin-bottom: 20px;
+  }
+
+  &__quick-filters {
+    @include flex-start;
+    gap: 6px;
+
+    .qf-btn {
+      height: 32px;
+      padding: 0 14px;
+      background: $bg-input;
+      border: 1px solid $border-color;
+      border-radius: $radius-md;
+      color: $text-secondary;
+      font-size: $font-size-sm;
+      font-family: $font-family;
+      cursor: pointer;
+      transition: all $transition-fast;
+      @include flex-center;
+      gap: 6px;
+
+      .count {
+        color: $text-muted;
+        font-size: $font-size-xs;
+      }
+
+      &:hover {
+        border-color: $border-light;
+        color: $text-primary;
+      }
+
+      &.active {
+        border-color: $primary;
+        color: $primary-light;
+        background: $primary-bg;
+      }
+    }
+  }
+
+  &__filter-trigger-btn {
+    @include flex-center;
+    height: 32px;
+    padding: 0 14px;
+    background: $bg-card;
+    border: 1px solid $border-color;
+    border-radius: 8px;
+    color: $text-secondary;
+    font-size: $font-size-sm;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+      background: $bg-card-hover;
+      border-color: $border-light;
+      color: $text-primary;
+    }
+
+    &:focus {
+      outline: none;
+    }
+  }
+
+  &__view-options {
+    @include flex-start;
+    gap: 8px;
+  }
+
+  &__group-select {
+    height: 32px;
+    padding: 0 10px;
+    background: $bg-input;
+    border: 1px solid $border-color;
+    border-radius: $radius-md;
+    color: $text-secondary;
+    font-size: $font-size-sm;
+    font-family: $font-family;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7084' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+  }
+
+  // ===== GROUP =====
+  &__group {
+    margin-bottom: 8px;
+
+    &-header {
+      @include flex-start;
+      gap: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      border-radius: $radius-md;
+      transition: background $transition-fast;
+
+      &:hover {
+        background: $bg-card-hover;
+      }
+
+      .chevron {
+        font-size: 10px;
+        color: $text-muted;
+        transition: transform $transition-fast;
+
+        &.expanded {
+          transform: rotate(90deg);
+        }
+      }
+
+      .priority-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+
+      .group-label {
+        font-size: $font-size-sm;
+        font-weight: 600;
+        color: $text-primary;
+      }
+
+      .group-count {
+        font-size: $font-size-xs;
+        color: $text-tertiary;
+        background: $bg-input;
+        padding: 1px 7px;
+        border-radius: 10px;
+      }
+    }
+
+    &-body {
+      padding-left: 8px;
+    }
+  }
+
+  // ===== TASK ROW =====
+  &__task-row {
+    display: grid;
+    grid-template-columns: 32px 1fr 140px 100px 100px 80px 40px;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: $radius-md;
+    cursor: pointer;
+    background: $bg-card;
+    border: 1px solid $border-color;
+    margin-bottom: 6px;
+    transition: all $transition-fast;
+
+    &:hover {
+      background: $bg-card-hover;
+      border-color: $border-light;
+
+      .my-tasks__task-actions {
+        opacity: 1;
+      }
+    }
+  }
+
+  &__task-checkbox {
+    width: 18px;
+    height: 18px;
+    border-radius: $radius-full;
+    border: 2px solid $border-color;
+    cursor: pointer;
+    @include flex-center;
+    transition: all $transition-fast;
+    background: none;
+    flex-shrink: 0;
+    font-size: 9px;
+    color: transparent;
+
+    &.todo {
+      border-color: $status-todo;
+    }
+
+    &.in-progress {
+      border-color: $status-in-progress;
+      color: $status-in-progress;
+    }
+
+    &.in-review {
+      border-color: $status-in-review;
+      color: $status-in-review;
+    }
+
+    &.done {
+      border-color: $status-done;
+      background: $status-done;
+      color: white;
+    }
+
+    &:hover {
+      border-color: $primary-light;
+    }
+  }
+
+  &__task-info {
+    min-width: 0;
+
+    .title {
+      font-size: $font-size-base;
+      font-weight: 500;
+      color: $text-primary;
+      @include text-ellipsis;
+    }
+
+    .subtitle {
+      @include flex-start;
+      gap: 6px;
+      margin-top: 2px;
+
+      .task-id {
+        font-size: $font-size-xs;
+        color: $text-muted;
+      }
+
+      .project-tag {
+        @include flex-start;
+        gap: 4px;
+        font-size: $font-size-xs;
+        color: $text-tertiary;
+
+        &::before {
+          content: '';
+          display: inline-block;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--dot-color, #6b7084);
+          flex-shrink: 0;
+        }
+      }
+    }
+  }
+
+  &__task-labels {
+    @include flex-start;
+    gap: 4px;
+    flex-wrap: wrap;
+
+    .label {
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 500;
+    }
+  }
+
+  &__task-status {
+    span {
+      @include flex-start;
+      gap: 5px;
+      font-size: $font-size-xs;
+      padding: 3px 8px;
+      border-radius: $radius-sm;
+
+      &::before {
+        content: '';
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        flex-shrink: 0;
+      }
+
+      &.backlog {
+        background: rgba(107, 112, 132, 0.15);
+        color: $status-backlog;
+      }
+
+      &.todo {
+        background: rgba(156, 160, 176, 0.15);
+        color: $status-todo;
+      }
+
+      &.in-progress {
+        background: rgba(59, 130, 246, 0.15);
+        color: $status-in-progress;
+      }
+
+      &.in-review {
+        background: rgba(168, 85, 247, 0.15);
+        color: $status-in-review;
+      }
+
+      &.done {
+        background: rgba(34, 197, 94, 0.15);
+        color: $status-done;
+      }
+    }
+  }
+
+  &__task-date {
+    font-size: $font-size-xs;
+    color: $text-tertiary;
+
+    &.overdue {
+      color: $danger;
+      font-weight: 500;
+    }
+
+    &.today {
+      color: $warning;
+      font-weight: 500;
+    }
+  }
+
+  &__task-assignee {
+    width: 24px;
+    height: 24px;
+    border-radius: $radius-full;
+    @include flex-center;
+    font-size: 10px;
+    font-weight: 600;
+    color: white;
+  }
+
+  &__task-actions {
+    opacity: 0;
+    transition: opacity $transition-fast;
+    text-align: right;
+
+    button {
+      width: 26px;
+      height: 26px;
+      @include flex-center;
+      background: none;
+      border: none;
+      color: $text-tertiary;
+      cursor: pointer;
+      border-radius: $radius-sm;
+
+      &:hover {
+        background: $bg-card-hover;
+        color: $text-primary;
+      }
+    }
+  }
+
+  &__empty {
+    @include flex-center;
+    flex-direction: column;
+    padding: 60px;
+    color: $text-muted;
+
+    .anticon {
+      font-size: 40px;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      color: $text-secondary;
+      margin-bottom: 4px;
+    }
+  }
+}

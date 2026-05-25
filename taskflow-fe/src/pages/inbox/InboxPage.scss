@@ -1,0 +1,40 @@
+@import '../../styles/variables';
+@import '../../styles/mixins';
+
+.inbox-page {
+  &__header { margin-bottom: 24px;
+    h1 { font-size: $font-size-3xl; font-weight: 700; color: $text-primary; }
+    p { font-size: $font-size-sm; color: $text-secondary; margin-top: 4px; }
+  }
+  &__tabs { @include flex-between; margin-bottom: 20px;
+    &-left { @include flex-start; gap: 0; border-bottom: 1px solid $border-color; }
+    .tab { padding: 10px 16px; font-size: $font-size-sm; font-weight: 500; color: $text-tertiary; cursor: pointer; border-bottom: 2px solid transparent;
+      &:hover { color: $text-primary; } &.active { color: $primary-light; border-bottom-color: $primary; }
+      .badge { background: $danger; color: white; font-size: 10px; padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
+    }
+    .mark-read { height: 30px; padding: 0 12px; background: none; border: 1px solid $border-color; border-radius: $radius-md; color: $text-secondary; font-size: $font-size-xs; font-family: $font-family; cursor: pointer;
+      &:hover { border-color: $border-light; color: $text-primary; }
+    }
+  }
+  &__list { display: flex; flex-direction: column; gap: 2px; }
+  &__item {
+    @include flex-start; gap: 14px; padding: 14px 16px; border-radius: $radius-md; cursor: pointer; transition: background $transition-fast; position: relative;
+    &:hover { background: $bg-card-hover; }
+    &.unread { background: rgba(99,102,241,0.04);
+      &::before { content: ''; position: absolute; left: 4px; top: 50%; transform: translateY(-50%); width: 6px; height: 6px; border-radius: $radius-full; background: $primary; }
+    }
+    .avatar { width: 34px; height: 34px; border-radius: $radius-full; @include flex-center; font-size: 13px; font-weight: 600; color: white; flex-shrink: 0; }
+    .content { flex: 1; min-width: 0;
+      .text { font-size: $font-size-sm; color: $text-secondary; line-height: 1.4;
+        strong { color: $text-primary; font-weight: 500; }
+        .highlight { color: $primary-light; }
+      }
+      .time { font-size: $font-size-xs; color: $text-muted; margin-top: 3px; }
+    }
+    .type-icon { width: 28px; height: 28px; border-radius: $radius-md; @include flex-center; font-size: 13px; flex-shrink: 0; }
+  }
+  &__empty { @include flex-center; flex-direction: column; padding: 80px; color: $text-muted;
+    .anticon { font-size: 48px; margin-bottom: 12px; }
+    h3 { color: $text-secondary; font-size: $font-size-lg; margin-bottom: 4px; }
+  }
+}
