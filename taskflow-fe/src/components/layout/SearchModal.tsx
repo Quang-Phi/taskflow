@@ -4,6 +4,7 @@ import { SearchOutlined, FolderOpenOutlined, FileTextOutlined, UserOutlined, Arr
 import api from '../../services/api';
 import { useTranslation } from '../../utils/i18n';
 import './SearchModal.scss';
+import TaskTypeBadge from '../tasks/TaskTypeBadge';
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -84,14 +85,14 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
       });
     });
 
-    results.tasks.forEach((t) => {
+    results.tasks.forEach((task) => {
       flat.push({
-        id: t.id,
+        id: task.id,
         type: 'task',
-        title: t.title,
-        subtitle: t.project?.name ? `#${t.id} - ${t.project.name}` : `#${t.id}`,
-        url: `/projects/${t.project_id}?task_id=${t.id}`,
-        original: t,
+        title: task.title,
+        subtitle: task.project?.name ? `#${task.id} - ${task.project.name}` : `#${task.id}`,
+        url: `/projects/${task.project_id}?task_id=${task.id}`,
+        original: task,
       });
     });
 
@@ -208,25 +209,25 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
               {results.tasks.length > 0 && (
                 <div className="search-results-group">
                   <div className="group-title">{t('search.modal.group.tasks' as any, { count: results.tasks.length }) || `Công việc (${results.tasks.length})`}</div>
-                  {results.tasks.map((t) => {
-                    const flatIdx = flatItems.findIndex((item) => item.type === 'task' && item.id === t.id);
+                  {results.tasks.map((task) => {
+                    const flatIdx = flatItems.findIndex((item) => item.type === 'task' && item.id === task.id);
                     const isSelected = flatIdx === selectedIndex;
                     return (
                       <div
-                        key={`task-${t.id}`}
+                        key={`task-${task.id}`}
                         className={`search-result-item ${isSelected ? 'selected' : ''}`}
                         onClick={() => {
-                          navigate(`/projects/${t.project_id}?task_id=${t.id}`);
+                          navigate(`/projects/${task.project_id}?task_id=${task.id}`);
                           onClose();
                         }}
                         onMouseEnter={() => setSelectedIndex(flatIdx)}
                       >
-                        <FileTextOutlined className="item-icon task" />
+                        <TaskTypeBadge type={task.type || 'task'} size="badge" />
                         <div className="item-details">
-                          <span className="item-title">{t.title}</span>
+                          <span className="item-title">{task.title}</span>
                           <span className="item-subtitle">
-                            #{t.id} {t.project?.name ? `• ${t.project.name}` : ''}
-                            {t.assignee?.name ? ` • ${t('search.modal.task.assignee' as any, { name: t.assignee.name }) || `Giao cho: ${t.assignee.name}`}` : ''}
+                            #{task.id} {task.project?.name ? `• ${task.project.name}` : ''}
+                            {task.assignee?.name ? ` • ${t('search.modal.task.assignee' as any, { name: task.assignee.name }) || `Giao cho: ${task.assignee.name}`}` : ''}
                           </span>
                         </div>
                         {isSelected && <ArrowRightOutlined className="arrow-icon" />}

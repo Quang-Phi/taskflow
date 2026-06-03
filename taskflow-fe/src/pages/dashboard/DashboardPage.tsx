@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Spin, message } from 'antd';
+import { TaskDetailPanel } from '../../components/tasks/TaskDetailPanel';
 import {
   ProjectOutlined,
   ThunderboltOutlined,
@@ -8,10 +9,12 @@ import {
   CheckCircleOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
+  CheckOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { useTranslation } from '../../utils/i18n';
 import './DashboardPage.scss';
+import TaskTypeBadge from '../../components/tasks/TaskTypeBadge';
 
 interface DashboardData {
   stats: {
@@ -25,11 +28,15 @@ interface DashboardData {
     title: string;
     status: string;
     priority: string;
+    project_id?: number | null;
     project_name: string;
     project_color: string;
+    project_statuses?: any[];
+    type?: string;
     due_date: string | null;
     is_overdue: boolean;
     assignee_initials: string;
+    assignee_photo?: string | null;
   }>;
   activities: Array<{
     id: number;
@@ -54,6 +61,7 @@ interface DashboardData {
     id: number;
     title: string;
     due_date: string;
+    project_id?: number | null;
     is_today: boolean;
     is_tomorrow: boolean;
     project_name: string;
@@ -61,26 +69,58 @@ interface DashboardData {
   }>;
 }
 
+const getTaskStatusInfo = (task: any) => {
+  const statuses = task.project_statuses && task.project_statuses.length > 0 ? task.project_statuses : [
+    { id: 'backlog', name: 'BACKLOG', color: '#6b7084', type: 'not_started' },
+    { id: 'todo', name: 'TO DO', color: '#9ca0b0', type: 'not_started' },
+    { id: 'in_progress', name: 'IN PROGRESS', color: '#3b82f6', type: 'active' },
+    { id: 'review', name: 'REVIEW', color: '#a855f7', type: 'active' },
+    { id: 'done', name: 'COMPLETE', color: '#22c55e', type: 'closed' }
+  ];
+  
+  const current = statuses.find((s: any) => s.id === task.status) || {
+    id: task.status,
+    color: task.status === 'done' ? '#22c55e' : (task.status === 'in_progress' ? '#3b82f6' : (task.status === 'review' ? '#a855f7' : '#9ca0b0')),
+    type: task.status === 'done' ? 'closed' : (task.status === 'todo' ? 'not_started' : 'active')
+  };
+
+  const idx = statuses.findIndex((s: any) => s.id === current.id);
+  const percentage = statuses.length > 0 ? ((idx + 1) / statuses.length) * 100 : 25;
+  const isClosed = current.type === 'closed' || task.status === 'done';
+
+  return {
+    color: current.color,
+    percentage,
+    isClosed
+  };
+};
+
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
-  const { t, lang } = useTranslation();
+  const { t, lang, locale } = useTranslation();
   const [profile, setProfile] = useState<any>(null);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [greeting, setGreeting] = useState('');
 
-  const isVi = lang === 'vi';
+
+  const fetchDashboardData = async () => {
+    try {
+      const dashRes = await api.getDashboardStats();
+      if (dashRes?.success) setData(dashRes.data);
+    } catch (err) {
+      console.error('Dashboard data refresh error:', err);
+    }
+  };
 
   useEffect(() => {
     const fetchAll = async () => {
       try {
         setLoading(true);
-        const [meRes, dashRes] = await Promise.all([
-          api.getMe(),
-          api.getDashboardStats(),
-        ]);
+        const meRes = await api.getMe();
         if (meRes) setProfile(meRes);
-        if (dashRes?.success) setData(dashRes.data);
+        await fetchDashboardData();
       } catch (err) {
         console.error('Dashboard load error:', err);
         message.error(t('dashboard.load_error' as any) || 'Failed to load dashboard');
@@ -95,10 +135,10 @@ const DashboardPage: React.FC = () => {
   useEffect(() => {
     const getGreetingText = () => {
       const hour = new Date().getHours();
-      const name = profile?.name ? (profile.name.split(' ').pop() || profile.name) : (isVi ? 'bạn' : 'User');
+      const name = profile?.name ? (profile.name.split(' ').pop() || profile.name) : t('dashboard.user_fallback');
       
       let greetings: string[] = [];
-      if (isVi) {
+      if (lang === 'vi') {
         if (hour >= 5 && hour < 12) {
           greetings = [
             `Chào buổi sáng, ${name} 👋`,
@@ -164,31 +204,263 @@ const DashboardPage: React.FC = () => {
     };
 
     setGreeting(getGreetingText());
-  }, [profile, isVi]);
+  }, [profile, lang]);
 
   // Format relative time
   const timeAgo = (iso: string): string => {
     const now = Date.now();
     const diff = now - new Date(iso).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return lang === 'vi' ? 'Vừa xong' : 'Just now';
-    if (mins < 60) return lang === 'vi' ? `${mins} phút trước` : `${mins}m ago`;
+    if (mins < 1) return t('dashboard.time.just_now');
+    if (mins < 60) return t('dashboard.time.minutes_ago', { n: mins });
     const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return lang === 'vi' ? `${hrs} giờ trước` : `${hrs}h ago`;
+    if (hrs < 24) return t('dashboard.time.hours_ago', { n: hrs });
     const days = Math.floor(hrs / 24);
-    return lang === 'vi' ? `${days} ngày trước` : `${days}d ago`;
+    return t('dashboard.time.days_ago', { n: days });
   };
 
   // Format due date for display
   const formatDueDate = (dateStr: string | null): string => {
     if (!dateStr) return '';
     const d = new Date(dateStr);
-    return d.toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US', { day: '2-digit', month: 'short' });
+    return d.toLocaleDateString(locale, { day: '2-digit', month: 'short' });
   };
 
-  // Translate activity action
-  const translateAction = (action: string): string => {
-    const actionMap: Record<string, string> = lang === 'vi' ? {
+  // Render activity description with full translation support
+  const renderActivityText = (act: any) => {
+    const details = act.details || '';
+    const taskLink = (
+      <span
+        className="highlight"
+        style={{ cursor: 'pointer', textDecoration: 'underline' }}
+        onClick={() => setSelectedTaskId(act.task_id)}
+      >
+        {act.task_title}
+      </span>
+    );
+
+    const getStatusText = (statusId: string) => {
+      if (statusId === 'todo') return t('timesheet.status.todo');
+      if (statusId === 'in_progress') return t('timesheet.status.in_progress');
+      if (statusId === 'review') return t('timesheet.status.review');
+      if (statusId === 'done') return t('timesheet.status.done');
+      if (statusId === 'backlog') return t('timesheet.status.backlog');
+      return statusId;
+    };
+
+    if (act.action === 'created') {
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã tạo công việc' : 'created task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_status') {
+      const match = details.match(/Changed status from '(.*)' to '(.*)'/);
+      if (match) {
+        const fromName = getStatusText(match[1]);
+        const toName = getStatusText(match[2]);
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đổi trạng thái của' : 'changed status of'} {taskLink} {lang === 'vi' ? `từ "${fromName}" sang "${toName}"` : `from "${fromName}" to "${toName}"`}
+          </>
+        );
+      }
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đổi trạng thái của' : 'changed status of'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_assignee') {
+      if (details.includes('Removed assignee')) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã bỏ phân công người thực hiện công việc' : 'removed assignee from task'} {taskLink}
+          </>
+        );
+      }
+      const match = details.match(/Assigned to (.*)/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã giao công việc' : 'assigned task'} {taskLink} {lang === 'vi' ? `cho ${match[1]}` : `to ${match[1]}`}
+          </>
+        );
+      }
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã thay đổi người thực hiện công việc' : 'changed assignee of task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'commented') {
+      const match = details.match(/Posted a comment: "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã bình luận vào công việc' : 'commented on task'} {taskLink}: <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span>
+          </>
+        );
+      }
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã bình luận vào công việc' : 'commented on task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'started_timer') {
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã bắt đầu bấm giờ cho công việc' : 'started timer for task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'stopped_timer') {
+      const match = details.match(/Logged (.*)\./);
+      const rawDuration = match ? match[1] : '';
+      let duration = rawDuration;
+      if (lang === 'vi') {
+        duration = duration.replace(/h/g, 'h').replace(/m/g, 'p').replace(/s/g, 's');
+      }
+
+      if (details.includes('due to starting timer on another task')) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã dừng bấm giờ' : 'stopped timer for'} {taskLink} {lang === 'vi' ? `(do bấm giờ ở task khác - Ghi nhận ${duration})` : `(due to starting timer on another task - Logged ${duration})`}
+          </>
+        );
+      }
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã dừng bấm giờ cho công việc' : 'stopped timer for task'} {taskLink} {lang === 'vi' ? `(Ghi nhận ${duration})` : `(Logged ${duration})`}
+        </>
+      );
+    }
+
+    if (act.action === 'added_time') {
+      const durationMatch = details.match(/Manually added ([^\.]+)\./);
+      const rawDuration = durationMatch ? durationMatch[1] : '';
+      let duration = rawDuration;
+      if (lang === 'vi') {
+        duration = duration.replace(/h/g, 'h').replace(/m/g, 'p').replace(/s/g, 's');
+      }
+
+      const noteMatch = details.match(/Note: (.*)/);
+      const noteText = noteMatch ? (lang === 'vi' ? ` với ghi chú: "${noteMatch[1]}"` : ` with note: "${noteMatch[1]}"`) : '';
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã thêm thủ công' : 'manually added'} {duration} {lang === 'vi' ? 'cho công việc' : 'to task'} {taskLink}{noteText}
+        </>
+      );
+    }
+
+    if (act.action === 'deleted_time') {
+      const match = details.match(/Deleted time log ([^\.]+)\./);
+      const rawDuration = match ? match[1] : '';
+      let duration = rawDuration;
+      if (lang === 'vi') {
+        duration = duration.replace(/h/g, 'h').replace(/m/g, 'p').replace(/s/g, 's');
+      }
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã xóa log thời gian' : 'deleted time log'} {duration} {lang === 'vi' ? 'của công việc' : 'from task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_title') {
+      const match = details.match(/Updated title to '(.*)'/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đổi tên công việc thành' : 'renamed task to'} "{match[1]}"
+          </>
+        );
+      }
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đổi tên công việc' : 'renamed task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_description') {
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã cập nhật mô tả của công việc' : 'updated description of task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_estimated_hours') {
+      const match = details.match(/Updated estimated hours to (.*)/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã cập nhật thời gian ước tính công việc' : 'updated estimated hours for task'} {taskLink} {lang === 'vi' ? `thành ${match[1]} giờ` : `to ${match[1]}h`}
+          </>
+        );
+      }
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã cập nhật thời gian ước tính công việc' : 'updated estimated hours for task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_actual_hours') {
+      const match = details.match(/Updated actual hours to (.*)/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã cập nhật thời gian thực tế công việc' : 'updated actual hours for task'} {taskLink} {lang === 'vi' ? `thành ${match[1]} giờ` : `to ${match[1]}h`}
+          </>
+        );
+      }
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã cập nhật thời gian thực tế công việc' : 'updated actual hours for task'} {taskLink}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_priority') {
+      const match = details.match(/Changed priority to '(.*)'/);
+      const prio = match ? match[1] : '';
+      const prioLabel = prio ? t(`tasks.priority.${prio}` as any) : prio;
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã thay đổi độ ưu tiên công việc' : 'changed priority of task'} {taskLink} {lang === 'vi' ? `thành "${prioLabel}"` : `to "${prioLabel}"`}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_start_date') {
+      const match = details.match(/Changed start date to (.*)/);
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã thay đổi ngày bắt đầu công việc' : 'changed start date of task'} {taskLink} {match ? (lang === 'vi' ? `thành ${match[1]}` : `to ${match[1]}`) : ''}
+        </>
+      );
+    }
+
+    if (act.action === 'updated_due_date') {
+      const match = details.match(/Changed due date to (.*)/);
+      return (
+        <>
+          <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã thay đổi hạn chót công việc' : 'changed due date of task'} {taskLink} {match ? (lang === 'vi' ? `thành ${match[1]}` : `to ${match[1]}`) : ''}
+        </>
+      );
+    }
+
+    // Default fallback
+    const fallbackMap: Record<string, string> = lang === 'vi' ? {
       created: 'đã tạo',
       updated: 'đã cập nhật',
       updated_status: 'đã đổi trạng thái',
@@ -203,7 +475,13 @@ const DashboardPage: React.FC = () => {
       commented: 'commented on',
       deleted: 'deleted',
     };
-    return actionMap[action] || action;
+    const translatedActionText = fallbackMap[act.action] || act.action;
+    return (
+      <>
+        <strong>{act.user_name}</strong> {translatedActionText} {taskLink}
+        {act.details && <span style={{ color: 'var(--text-muted)' }}> — {act.details}</span>}
+      </>
+    );
   };
 
   // Get avatar color from name
@@ -243,7 +521,18 @@ const DashboardPage: React.FC = () => {
       {/* Stat Cards */}
       <div className="dashboard__stats">
         {statCards.map((stat) => (
-          <div key={stat.key} className={`dashboard__stat-card dashboard__stat-card--${stat.key}`} onClick={() => navigate(stat.key === 'projects' ? '/projects' : '/my-tasks')}>
+          <div
+            key={stat.key}
+            className={`dashboard__stat-card dashboard__stat-card--${stat.key}`}
+            onClick={() => {
+              if (stat.key === 'projects') {
+                navigate('/projects');
+              } else {
+                const filterVal = stat.key === 'completed' ? 'done' : stat.key;
+                navigate(`/my-tasks?filter=${filterVal}`);
+              }
+            }}
+          >
             <div className="dashboard__stat-card-header">
               <div className={`dashboard__stat-card-icon dashboard__stat-card-icon--${stat.iconClass}`}>
                 {stat.icon}
@@ -277,17 +566,44 @@ const DashboardPage: React.FC = () => {
             <div className="dashboard__task-list">
               {(!data?.my_tasks || data.my_tasks.length === 0) ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  {lang === 'vi' ? 'Chưa có công việc nào' : 'No tasks assigned'}
+                  {t('dashboard.no_tasks')}
                 </div>
               ) : (
                 data.my_tasks.map((task) => (
-                  <div key={task.id} className="dashboard__task-item" onClick={() => navigate('/my-tasks')}>
+                  <div key={task.id} className="dashboard__task-item" onClick={() => {
+                    setSelectedTaskId(task.id);
+                  }}>
                     <div className={`dashboard__task-item-priority dashboard__task-item-priority--${task.priority}`} />
-                    <div className={`dashboard__task-item-status dashboard__task-item-status--${task.status?.replace('_', '-')}`}>
-                      {task.status === 'done' && '✓'}
-                    </div>
+                    {(() => {
+                      const { color, percentage, isClosed } = getTaskStatusInfo(task);
+                      return (
+                        <div
+                          className={`dashboard__task-item-status ${isClosed ? 'done' : ''}`}
+                          style={{
+                            borderColor: color,
+                            backgroundColor: isClosed ? color : 'transparent',
+                            color: isClosed ? 'white' : 'transparent',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 0,
+                          }}
+                        >
+                          {isClosed ? (
+                            <CheckOutlined style={{ fontSize: '8px' }} />
+                          ) : (
+                            <div style={{
+                              width: '10px',
+                              height: '10px',
+                              borderRadius: '50%',
+                              background: `conic-gradient(${color} 0% ${percentage}%, transparent ${percentage}% 100%)`
+                            }} />
+                          )}
+                        </div>
+                      );
+                    })()}
                     <div className="dashboard__task-item-content">
-                      <div className="dashboard__task-item-title">{task.title}</div>
+                      <div className="dashboard__task-item-title"><TaskTypeBadge type={task.type || 'task'} size="icon" />{task.title}</div>
                       <div className="dashboard__task-item-meta">
                         <span className="dashboard__task-item-project">
                           <span className="dot" style={{ background: task.project_color }} />
@@ -298,7 +614,26 @@ const DashboardPage: React.FC = () => {
                     <span className={`dashboard__task-item-date ${task.is_overdue ? 'overdue' : ''}`}>
                       {formatDueDate(task.due_date)}
                     </span>
-                    <div className="dashboard__task-item-avatar">{task.assignee_initials}</div>
+                    <div 
+                      className="dashboard__task-item-avatar"
+                      style={{
+                        background: task.assignee_photo ? 'none' : undefined,
+                        overflow: 'hidden',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {task.assignee_photo ? (
+                        <img 
+                          src={task.assignee_photo} 
+                          alt={task.assignee_initials} 
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} 
+                        />
+                      ) : (
+                        task.assignee_initials
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -313,19 +648,34 @@ const DashboardPage: React.FC = () => {
             <div className="dashboard__activity-list">
               {(!data?.activities || data.activities.length === 0) ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  {lang === 'vi' ? 'Chưa có hoạt động nào' : 'No recent activity'}
+                  {t('dashboard.no_activity')}
                 </div>
               ) : (
                 data.activities.map((act) => (
                   <div key={act.id} className="dashboard__activity-item">
-                    <div className="dashboard__activity-avatar" style={{ background: getAvatarColor(act.user_name) }}>
-                      {act.user_name.charAt(0)}
+                    <div 
+                      className="dashboard__activity-avatar" 
+                      style={{ 
+                        background: act.user_photo ? 'none' : getAvatarColor(act.user_name),
+                        overflow: 'hidden',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {act.user_photo ? (
+                        <img 
+                          src={act.user_photo} 
+                          alt={act.user_name} 
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} 
+                        />
+                      ) : (
+                        act.user_name.charAt(0)
+                      )}
                     </div>
                     <div className="dashboard__activity-content">
                       <p>
-                        <strong>{act.user_name}</strong> {translateAction(act.action)}{' '}
-                        <span className="highlight">{act.task_title}</span>
-                        {act.details && <span style={{ color: 'var(--text-muted)' }}> — {act.details}</span>}
+                        {renderActivityText(act)}
                       </p>
                       <div className="time">{timeAgo(act.created_at)}</div>
                     </div>
@@ -346,7 +696,7 @@ const DashboardPage: React.FC = () => {
             <div className="dashboard__project-list">
               {(!data?.project_progress || data.project_progress.length === 0) ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  {lang === 'vi' ? 'Chưa có dự án nào' : 'No projects yet'}
+                  {t('dashboard.no_projects')}
                 </div>
               ) : (
                 data.project_progress.map((proj) => (
@@ -378,11 +728,13 @@ const DashboardPage: React.FC = () => {
             <div className="dashboard__task-list">
               {(!data?.upcoming_deadlines || data.upcoming_deadlines.length === 0) ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  {lang === 'vi' ? 'Không có hạn chót sắp tới' : 'No upcoming deadlines'}
+                  {t('dashboard.no_deadlines')}
                 </div>
               ) : (
                 data.upcoming_deadlines.map((task) => (
-                  <div key={task.id} className="dashboard__task-item" onClick={() => navigate('/my-tasks')}>
+                  <div key={task.id} className="dashboard__task-item" onClick={() => {
+                    setSelectedTaskId(task.id);
+                  }}>
                     <div className="dashboard__task-item-content">
                       <div className="dashboard__task-item-title">{task.title}</div>
                       <div className="dashboard__task-item-meta">
@@ -406,6 +758,15 @@ const DashboardPage: React.FC = () => {
           </div>
         </div>
       </div>
+      {selectedTaskId && (
+        <TaskDetailPanel
+          taskId={selectedTaskId}
+          onClose={() => setSelectedTaskId(null)}
+          onUpdate={() => {
+            fetchDashboardData();
+          }}
+        />
+      )}
     </div>
   );
 };

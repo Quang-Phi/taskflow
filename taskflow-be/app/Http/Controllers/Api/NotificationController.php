@@ -55,6 +55,7 @@ class NotificationController extends Controller
             return [
                 'id' => $n->id,
                 'user' => $actorName,
+                'photo' => $n->actor?->photo,
                 'avatar' => $n->type === 'deadline' ? '⏰' : $initials,
                 'color' => $n->type === 'deadline' ? '#ef4444' : $colors[$charSum % count($colors)],
                 'action' => $n->action,

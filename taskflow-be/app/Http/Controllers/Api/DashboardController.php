@@ -64,15 +64,19 @@ class DashboardController extends Controller
             ->get()
             ->map(function ($task) use ($user, $now) {
                 return [
-                    'id' => $task->id,
-                    'title' => $task->title,
-                    'status' => $task->status,
-                    'priority' => $task->priority,
-                    'project_name' => $task->project?->name,
-                    'project_color' => $task->project?->color ?? '#6366f1',
-                    'due_date' => $task->due_date?->toDateString(),
-                    'is_overdue' => $task->due_date && $task->due_date->lt($now->copy()->startOfDay()),
+                    'id'               => $task->id,
+                    'title'            => $task->title,
+                    'type'             => $task->type ?? 'task',
+                    'status'           => $task->status,
+                    'priority'         => $task->priority,
+                    'project_id'       => $task->project_id,
+                    'project_name'     => $task->project?->name,
+                    'project_color'    => $task->project?->color ?? '#6366f1',
+                    'project_statuses' => $task->project?->statuses,
+                    'due_date'         => $task->due_date?->toDateString(),
+                    'is_overdue'       => $task->due_date && $task->due_date->lt($now),
                     'assignee_initials' => $this->getInitials($user->name),
+                    'assignee_photo'   => $user->photo,
                 ];
             });
 
@@ -169,6 +173,7 @@ class DashboardController extends Controller
                     'due_date' => $dueDate->toDateString(),
                     'is_today' => $isToday,
                     'is_tomorrow' => $isTomorrow,
+                    'project_id' => $task->project_id,
                     'project_name' => $task->project?->name,
                     'project_color' => $task->project?->color ?? '#6366f1',
                 ];

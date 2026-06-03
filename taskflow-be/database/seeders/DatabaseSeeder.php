@@ -15,11 +15,30 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        User::updateOrCreate(
+            ['id' => 632],
+            [
+                'bitrix_id' => 632,
+                'name' => 'Admin Phi',
+                'first_name' => 'Phi',
+                'last_name' => 'Admin',
+                'email' => 'sa@esuhai.com',
+                'role' => 'admin',
+                'active' => true,
+            ]
+        );
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        User::updateOrCreate(
+            ['id' => 2],
+            [
+                'bitrix_id' => 2,
+                'name' => 'Trần Nguyễn Đông Ban',
+                'first_name' => 'Ban',
+                'last_name' => 'Trần Nguyễn Đông',
+                'email' => 'ban@esuhai.com',
+                'role' => 'employee',
+                'active' => true,
+            ]
+        );
     }
 }

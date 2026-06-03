@@ -13,6 +13,11 @@ import {
   PlayCircleOutlined,
   PauseCircleOutlined,
   DeleteOutlined,
+  UserAddOutlined,
+  CheckSquareOutlined,
+  CommentOutlined,
+  LikeOutlined,
+  StarOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { getEcho } from '../../services/echo';
@@ -52,6 +57,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
   const [todayEntries, setTodayEntries] = useState<any[]>([]);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isMac, setIsMac] = useState(true);
 
   const fetchTimerData = async () => {
     try {
@@ -70,6 +76,11 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
 
   useEffect(() => {
     fetchTimerData();
+
+    if (typeof window !== 'undefined') {
+      const mac = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent || navigator.platform || '');
+      setIsMac(mac);
+    }
 
     const handleUpdate = () => {
       fetchTimerData();
@@ -121,7 +132,8 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
     }
     const started = new Date(runningTimer.started_at).getTime();
     const updateElapsed = () => {
-      const diffSec = Math.floor((Date.now() - started) / 1000);
+      const offset = Number(localStorage.getItem('taskflow_server_time_offset') || 0);
+      const diffSec = Math.floor((Date.now() + offset - started) / 1000);
       setElapsed(diffSec > 0 ? diffSec : 0);
     };
     updateElapsed();
@@ -206,7 +218,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
 
     channel.listen('.notification.received', (data: { notification: any }) => {
       console.log('[Echo] Notification received:', data);
-      
+
       // Increment unread count
       setUnreadCount(prev => prev + 1);
 
@@ -220,17 +232,111 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
       const actorName = data.notification.actor?.name || 'System';
       const actionText = data.notification.action || '';
       const targetText = data.notification.target || '';
-      
-      notification.info({
-        message: lang === 'vi' ? 'Thông báo mới' : 'New Notification',
-        description: `${actorName} ${actionText} "${targetText}"`,
+
+      const getNotificationIcon = (type: string) => {
+        const iconsMap: Record<string, React.ReactNode> = {
+          task_assigned: <UserAddOutlined />,
+          status_changed: <CheckSquareOutlined />,
+          comment: <CommentOutlined />,
+          mention: <CommentOutlined />,
+          reply: <CommentOutlined />,
+          reaction: <LikeOutlined />,
+          deadline: <ClockCircleOutlined />,
+          evaluation: <StarOutlined />,
+          project_added: <UserAddOutlined />,
+        };
+        return iconsMap[type] || <BellOutlined />;
+      };
+
+      const getNotificationIconColors = (type: string) => {
+        const colorsMap: Record<string, { bg: string; color: string }> = {
+          task_assigned: { bg: 'rgba(168,85,247,0.12)', color: '#a855f7' },
+          status_changed: { bg: 'rgba(59,130,246,0.12)', color: '#3b82f6' },
+          comment: { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' },
+          mention: { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' },
+          reply: { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' },
+          reaction: { bg: 'rgba(59,130,246,0.12)', color: '#3b82f6' },
+          deadline: { bg: 'rgba(239,68,68,0.12)', color: '#ef4444' },
+          evaluation: { bg: 'rgba(34,197,94,0.12)', color: '#22c55e' },
+          project_added: { bg: 'rgba(99,102,241,0.12)', color: '#6366f1' },
+        };
+        return colorsMap[type] || { bg: 'rgba(99,102,241,0.12)', color: '#6366f1' };
+      };
+
+      const translateActionVi = (action: string): string => {
+        const map: Record<string, string> = {
+          'assigned you a task': 'đã giao cho bạn một công việc',
+          'commented on': 'đã bình luận vào',
+          'mentioned you on': 'đã nhắc đến bạn trong',
+          'replied to your comment on': 'đã trả lời bình luận của bạn trong',
+          'replied to a comment on': 'đã trả lời một bình luận trong',
+          'reacted to your comment on': 'đã bày tỏ cảm xúc về bình luận của bạn trong',
+          'changed status of': 'đã thay đổi trạng thái',
+          'added you to project': 'đã thêm bạn vào dự án',
+          'published performance evaluation': 'đã công bố kết quả đánh giá',
+        };
+        return map[action] || action;
+      };
+
+      const colors = getNotificationIconColors(data.notification.type);
+      const actionTextVi = lang === 'vi' ? translateActionVi(actionText) : actionText;
+
+      notification.open({
+        message: (
+          <span style={{ color: '#e8eaed', fontWeight: 600, fontSize: '13px', marginLeft: '6px', display: 'inline-block' }}>
+            {t('header.new_notification')}
+          </span>
+        ),
+        description: (
+          <div style={{ color: '#9ca0b0', fontSize: '12px', marginTop: '4px', marginLeft: '6px', lineHeight: '1.4' }}>
+            <strong style={{ color: '#e8eaed' }}>{actorName}</strong> {actionTextVi} <span style={{ color: '#818cf8', fontWeight: 500 }}>"{targetText}"</span>
+          </div>
+        ),
         placement: 'bottomRight',
         duration: 5,
+        style: {
+          background: '#1e2030',
+          border: '1px solid #2a2d42',
+          borderRadius: '10px',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+        },
+        icon: (
+          <div style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '14px',
+            flexShrink: 0,
+            background: colors.bg,
+            color: colors.color
+          }}>
+            {getNotificationIcon(data.notification.type)}
+          </div>
+        ),
+        closeIcon: (
+          <span style={{ color: '#6b7084', fontSize: '12px', transition: 'color 0.2s' }} className="custom-notification-close">✕</span>
+        ),
       });
+    });
+
+    channel.listen('.timer.updated', (data: any) => {
+      console.log('[Echo] Timer updated privately:', data);
+      if (data?.serverTime) {
+        const serverTimeMs = new Date(data.serverTime).getTime();
+        if (!isNaN(serverTimeMs)) {
+          const offset = serverTimeMs - Date.now();
+          localStorage.setItem('taskflow_server_time_offset', String(offset));
+        }
+      }
+      window.dispatchEvent(new Event('timer-updated'));
     });
 
     return () => {
       channel.stopListening('.notification.received');
+      channel.stopListening('.timer.updated');
       echo.leaveChannel(`App.Models.User.${user.id}`);
     };
   }, [user, unreadCount, lang]);
@@ -248,12 +354,12 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
       label: t('header.new_project'),
       onClick: () => navigate('/projects?create=true'),
     },
-    {
-      key: 'member',
-      icon: <TeamOutlined />,
-      label: t('header.invite_member'),
-      onClick: () => navigate('/members'),
-    },
+    // {
+    //   key: 'member',
+    //   icon: <TeamOutlined />,
+    //   label: t('header.invite_member'),
+    //   onClick: () => navigate('/members'),
+    // },
   ];
 
   const profileMenuItems: MenuProps['items'] = [
@@ -296,7 +402,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
         <div className="header__search-input" onClick={() => window.dispatchEvent(new Event('open-global-search'))} style={{ cursor: 'pointer' }}>
           <SearchOutlined className="search-icon" />
           <span>{t('header.search')}</span>
-          <span className="search-shortcut">⌘K</span>
+          <span className="search-shortcut">{isMac ? '⌘K' : 'Ctrl+K'}</span>
         </div>
       </div>
 
@@ -334,7 +440,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
               {/* Target Progress */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-secondary)' }}>
-                  {lang === 'vi' ? 'Hôm nay' : 'Today'}
+                  {t('header.today')}
                 </span>
                 <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {((todayEntries.reduce((sum: number, entry: any) => sum + Math.abs(entry.duration || 0), 0) + (runningTimer ? elapsed : 0)) / 3600).toFixed(2)}h / 8.0h
@@ -353,7 +459,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
                   <div>
                     <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />
-                      {lang === 'vi' ? 'Đang chạy' : 'Running'}
+                      {t('header.timer.running')}
                     </div>
                     <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)', marginBottom: '2px', wordBreak: 'break-all' }}>
                       {runningTimer.task?.title}
@@ -373,13 +479,13 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
                         onClick={handleStopTimer}
                         style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
                       >
-                        {lang === 'vi' ? 'Dừng' : 'Stop'}
+                        {t('header.timer.stop')}
                       </Button>
                     </div>
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', padding: '8px 0', color: 'var(--text-muted)', fontSize: '13px' }}>
-                    {lang === 'vi' ? 'Không có bộ đếm thời gian đang chạy' : 'No running timer'}
+                    {t('header.timer.no_running')}
                   </div>
                 )}
               </div>
@@ -387,7 +493,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
               {/* Today Logs list */}
               <div>
                 <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '8px' }}>
-                  {lang === 'vi' ? 'Lịch sử hôm nay' : "Today's logs"}
+                  {t('header.today_logs')}
                 </div>
                 <div style={{ maxHeight: '180px', overflowY: 'auto', marginBottom: '16px' }}>
                   {todayEntries.filter((entry: any) => !(runningTimer && runningTimer.id === entry.id)).length > 0 ? (
@@ -443,7 +549,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
                       })
                   ) : (
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '4px 0' }}>
-                      {lang === 'vi' ? 'Chưa có log thời gian hôm nay.' : 'No time entries for today.'}
+                      {t('header.no_logs_today')}
                     </div>
                   )}
                 </div>
@@ -452,10 +558,10 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
               {/* Footer Navigation */}
               <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px', display: 'flex', justifyContent: 'space-between' }}>
                 <Button type="link" size="small" onClick={() => { setPopoverOpen(false); navigate('/'); }} style={{ padding: 0 }}>
-                  {lang === 'vi' ? 'Trang chủ' : 'Dashboard'}
+                  {t('nav.dashboard')}
                 </Button>
                 <Button type="link" size="small" onClick={() => { setPopoverOpen(false); navigate('/my-tasks'); }} style={{ padding: 0 }}>
-                  {lang === 'vi' ? 'Công việc của tôi' : 'My Tasks'}
+                  {t('nav.my_tasks')}
                 </Button>
               </div>
             </div>
@@ -525,7 +631,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
             >
               <ClockCircleOutlined />
               <span style={{ fontSize: '12px', fontWeight: 500 }}>
-                {lang === 'vi' ? 'Bắt đầu bấm giờ' : 'Start Timer'}
+                {t('header.start_timer')}
               </span>
             </div>
           )}
@@ -559,7 +665,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
         onCancel={() => setIsProfileOpen(false)}
         footer={null}
         width={420}
-        destroyOnClose
+        destroyOnHidden
         className="profile-modal"
       >
         {user ? (

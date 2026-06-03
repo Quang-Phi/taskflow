@@ -364,7 +364,7 @@
     width: 700px;
     background: $bg-card;
     border-left: 1px solid $border-color;
-    z-index: $z-modal;
+    z-index: 1100;
     display: flex;
     flex-direction: column;
     box-shadow: -8px 0 30px rgba(0, 0, 0, 0.4);
@@ -599,7 +599,7 @@
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: calc(#{$z-modal} - 1);
+    z-index: 1099;
   }
 }
 

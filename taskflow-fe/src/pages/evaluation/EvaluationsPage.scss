@@ -248,19 +248,18 @@
     right: 0;
     bottom: 0;
     width: 760px;
-    background: $bg-card;
+    background: $bg-sidebar;
     border-left: 1px solid $border-color;
-    z-index: $z-modal;
+    z-index: 1100;
     display: flex;
     flex-direction: column;
-    box-shadow: -8px 0 30px rgba(0, 0, 0, 0.4);
+    box-shadow: $shadow-lg;
     animation: slideIn 0.25s ease;
 
     @keyframes slideIn {
       from {
         transform: translateX(100%);
       }
-
       to {
         transform: translateX(0);
       }
@@ -284,12 +283,14 @@
       @include flex-center;
       background: none;
       border: none;
-      color: $text-tertiary;
+      color: $text-secondary;
       cursor: pointer;
       border-radius: $radius-sm;
+      transition: all 0.2s ease;
 
       &:hover {
         background: $bg-card-hover;
+        color: $text-primary;
       }
     }
   }
@@ -323,11 +324,12 @@
   &__task-summary {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 16px;
 
     .box {
-      background: $bg-input;
+      background: $bg-body;
+      border: 1px solid $border-color;
       border-radius: $radius-md;
       padding: 12px;
       text-align: center;
@@ -335,12 +337,13 @@
       .num {
         font-size: $font-size-xl;
         font-weight: 700;
+        color: $text-primary;
       }
 
       .lbl {
         font-size: $font-size-xs;
-        color: $text-tertiary;
-        margin-top: 2px;
+        color: $text-secondary;
+        margin-top: 4px;
       }
     }
   }
@@ -354,7 +357,7 @@
       padding: 8px 10px;
       font-size: $font-size-xs;
       font-weight: 600;
-      color: $text-tertiary;
+      color: $text-secondary;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       border-bottom: 1px solid $border-color;
@@ -368,7 +371,7 @@
 
     .status-chip {
       @include flex-start;
-      gap: 4px;
+      gap: 6px;
       font-size: $font-size-xs;
 
       .dot {
@@ -381,11 +384,11 @@
 
   // Criteria
   &__criteria-item {
-    margin-bottom: 14px;
+    margin-bottom: 16px;
 
     &-header {
       @include flex-between;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
 
       .label {
         font-size: $font-size-sm;
@@ -399,9 +402,27 @@
       }
     }
 
+    .score-input {
+      width: 52px;
+      height: 28px;
+      text-align: center;
+      background: $bg-body !important;
+      border: 1px solid $border-color !important;
+      border-radius: 6px !important;
+      font-weight: 700 !important;
+      font-size: 13px !important;
+      outline: none;
+      transition: all 0.2s ease;
+
+      &:hover, &:focus {
+        border-color: rgba(99, 102, 241, 0.6) !important;
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+      }
+    }
+
     &-bar {
       height: 6px;
-      background: $bg-input;
+      background: $bg-body;
       border-radius: 3px;
       overflow: hidden;
 
@@ -415,10 +436,12 @@
 
   // Total
   &__total-score {
-    @include card-base;
+    background: $bg-body;
+    border: 1px solid $border-color;
     padding: 20px;
     text-align: center;
     margin-bottom: 20px;
+    border-radius: $radius-lg;
 
     .score {
       font-size: 40px;
@@ -443,7 +466,7 @@
   }
 
   &__comment-box {
-    background: $bg-input;
+    background: $bg-body;
     border-radius: $radius-md;
     padding: 14px;
     min-height: 80px;
@@ -484,24 +507,28 @@
     @include flex-between;
     padding: 16px 24px;
     border-top: 1px solid $border-color;
+    background: $bg-sidebar;
     flex-shrink: 0;
 
     .btn {
-      height: 36px;
-      padding: 0 18px;
+      height: 38px;
+      padding: 0 20px;
       border-radius: $radius-md;
       font-size: $font-size-sm;
-      font-weight: 500;
+      font-weight: 600;
       font-family: $font-family;
       cursor: pointer;
+      transition: all 0.2s ease;
 
       &.draft {
-        background: $bg-input;
+        background: $bg-card-hover;
         border: 1px solid $border-color;
         color: $text-secondary;
 
         &:hover {
+          background: $bg-card;
           border-color: $border-light;
+          color: $text-primary;
         }
       }
 
@@ -509,9 +536,16 @@
         background: $primary;
         border: none;
         color: white;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
 
         &:hover {
           background: $primary-dark;
+          box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+          transform: translateY(-1px);
+        }
+
+        &:active {
+          transform: translateY(0);
         }
       }
     }
@@ -524,6 +558,6 @@
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: calc(#{$z-modal} - 1);
+    z-index: 1099;
   }
 }

@@ -1,19 +1,23 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Spin, Empty, message, Popover, Tooltip, Modal, Drawer } from 'antd';
+import { Spin, Empty, message, Popover, Tooltip, Drawer } from 'antd';
 import { 
   LeftOutlined, 
   RightOutlined, 
-  ClockCircleOutlined, 
   PlusOutlined, 
   DeleteOutlined, 
   PlayCircleOutlined, 
   UnorderedListOutlined, 
   TableOutlined,
-  UserOutlined
+  UserOutlined,
+  CloseOutlined
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { useTranslation } from '../../utils/i18n';
 import './TimesheetPage.scss';
+import { TaskDetailPanel } from '../../components/tasks/TaskDetailPanel';
+import ManualTimeLogModal from '../../components/tasks/ManualTimeLogModal';
+import TaskTypeBadge from '../../components/tasks/TaskTypeBadge';
+import { useDeleteConfirm } from '../../components/tasks/DeleteConfirmModal';
 
 interface TimeLog {
   id: number;
@@ -31,6 +35,7 @@ interface TimeLog {
   task?: {
     id: number;
     title: string;
+    type?: string;
     status: string;
     project_id: number;
     assignee_id?: number;
@@ -45,16 +50,54 @@ interface TimeLog {
 interface ProjectTask {
   id: number;
   title: string;
+  type?: string;
   status: string;
   project_id: number;
   project_name?: string;
   project_color?: string;
   assignee_id?: number;
+  project_statuses?: any[];
 }
 
 const TimesheetPage: React.FC = () => {
-  const { lang } = useTranslation();
-  const isVi = lang === 'vi';
+  const { t, lang, locale } = useTranslation();
+
+  const isTaskDone = (task: ProjectTask) => {
+    const projectStatuses = task.project_statuses || [];
+    const statusObj = projectStatuses.find((s: any) => s.id === task.status);
+    if (statusObj) return statusObj.type === 'closed';
+    return task.status === 'done';
+  };
+
+  const getTaskStatusLabel = (task: ProjectTask) => {
+    const projectStatuses = task.project_statuses || [];
+    const statusObj = projectStatuses.find((s: any) => s.id === task.status);
+    if (statusObj) return statusObj.name;
+
+    const fallbackMap: Record<string, string> = {
+      backlog: t('timesheet.status.backlog'),
+      todo: t('timesheet.status.todo'),
+      in_progress: t('timesheet.status.in_progress'),
+      review: t('timesheet.status.review'),
+      done: t('timesheet.status.done')
+    };
+    return fallbackMap[task.status] || task.status;
+  };
+
+  const getTaskStatusColor = (task: ProjectTask) => {
+    const projectStatuses = task.project_statuses || [];
+    const statusObj = projectStatuses.find((s: any) => s.id === task.status);
+    if (statusObj) return statusObj.color;
+
+    const fallbackMap: Record<string, string> = {
+      backlog: '#6b7084',
+      todo: '#9ca0b0',
+      in_progress: '#3b82f6',
+      review: '#a855f7',
+      done: '#22c55e'
+    };
+    return fallbackMap[task.status] || 'var(--text-muted)';
+  };
 
   // State definitions
   const [me, setMe] = useState<any>(null);
@@ -87,17 +130,18 @@ const TimesheetPage: React.FC = () => {
 
   // Manual Time Log Modal State
   const [showLogModal, setShowLogModal] = useState(false);
+  const [activePopoverCell, setActivePopoverCell] = useState<{ taskId: number, dayIndex: number } | null>(null);
   const [logTask, setLogTask] = useState<number | null>(null);
-  const [logDate, setLogDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [logHours, setLogHours] = useState<number>(0);
-  const [logMinutes, setLogMinutes] = useState<number>(0);
-  const [logDescription, setLogDescription] = useState<string>('');
+  const [logDate, setLogDate] = useState<string>('');
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
 
   // Timer state
   const [runningTimer, setRunningTimer] = useState<any>(null);
 
   // Drawer for member detailed logs
   const [selectedMemberForDrawer, setSelectedMemberForDrawer] = useState<any | null>(null);
+
+  const { showDeleteConfirm, DeleteConfirmComponent } = useDeleteConfirm();
 
   // Helper: calculate 7 days of the week starting Sunday
   const weekDays = useMemo(() => {
@@ -119,29 +163,29 @@ const TimesheetPage: React.FC = () => {
     const start = weekDays[0];
     const end = weekDays[6];
     
-    const startMonth = start.toLocaleDateString(isVi ? 'vi-VN' : 'en-US', { month: 'short' });
-    const endMonth = end.toLocaleDateString(isVi ? 'vi-VN' : 'en-US', { month: 'short' });
+    const startMonth = start.toLocaleDateString(locale, { month: 'short' });
+    const endMonth = end.toLocaleDateString(locale, { month: 'short' });
     const startDay = start.getDate();
     const endDay = end.getDate();
     const startYear = start.getFullYear();
     const endYear = end.getFullYear();
 
     if (startYear !== endYear) {
-      return isVi 
+      return lang === 'vi'
         ? `${startDay} ${startMonth}, ${startYear} - ${endDay} ${endMonth}, ${endYear}`
         : `${startMonth} ${startDay}, ${startYear} - ${endMonth} ${endDay}, ${endYear}`;
     }
     
     if (startMonth === endMonth) {
-      return isVi
+      return lang === 'vi'
         ? `${startDay} - ${endDay} ${startMonth}, ${startYear}`
         : `${startMonth} ${startDay} - ${endDay}, ${startYear}`;
     }
 
-    return isVi
+    return lang === 'vi'
       ? `${startDay} ${startMonth} - ${endDay} ${endMonth}, ${startYear}`
       : `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${startYear}`;
-  }, [weekDays, isVi]);
+  }, [weekDays, lang, locale]);
 
   // Load user profile
   useEffect(() => {
@@ -171,9 +215,9 @@ const TimesheetPage: React.FC = () => {
   }, []);
 
   // Fetch logged time entries for the selected week
-  const fetchTimeEntries = useCallback(async () => {
+  const fetchTimeEntries = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const startStr = weekDays[0].toISOString().split('T')[0] + ' 00:00:00';
       const endStr = weekDays[6].toISOString().split('T')[0] + ' 23:59:59';
       
@@ -197,11 +241,11 @@ const TimesheetPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      message.error(isVi ? 'Không thể tải dữ liệu bảng công' : 'Failed to fetch timesheet data');
+      if (!silent) message.error(t('timesheet.toast.fetch_err'));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [weekDays, activeTab, me, selectedMemberFilter, isVi]);
+  }, [weekDays, activeTab, me, selectedMemberFilter, t]);
 
   // Fetch workspace users helper with pagination and search filter
   const fetchWorkspaceUsers = useCallback(async (page: number, replace: boolean = false, searchVal: string = '') => {
@@ -273,11 +317,13 @@ const TimesheetPage: React.FC = () => {
         const mapped: ProjectTask[] = (tasksRes.data || []).map((t: any) => ({
           id: t.id,
           title: t.title,
+          type: t.type,
           status: t.status,
           project_id: t.project_id,
           project_name: t.project?.name,
           project_color: t.project?.color,
           assignee_id: t.assignee_id,
+          project_statuses: t.project?.statuses,
         }));
         setAllTasks(mapped);
       }
@@ -304,7 +350,7 @@ const TimesheetPage: React.FC = () => {
   useEffect(() => {
     const handleTimerUpdate = () => {
       fetchRunningTimer();
-      fetchTimeEntries();
+      fetchTimeEntries(true);
     };
     window.addEventListener('timer-updated', handleTimerUpdate);
     return () => {
@@ -339,6 +385,7 @@ const TimesheetPage: React.FC = () => {
         taskMap.set(log.task_id, {
           id: log.task.id,
           title: log.task.title,
+          type: log.task.type,
           status: log.task.status,
           project_id: log.task.project_id,
           project_name: log.task.project?.name,
@@ -357,6 +404,28 @@ const TimesheetPage: React.FC = () => {
 
     return Array.from(taskMap.values());
   }, [logs, gridTasks]);
+
+  // Compute union of tasks that are selectable in manual time log
+  const selectableTasks = useMemo(() => {
+    const taskMap = new Map<number, ProjectTask>();
+    myAssignedTasks.forEach(task => {
+      if (!isTaskDone(task)) {
+        taskMap.set(task.id, task);
+      }
+    });
+    distinctGridTasks.forEach(task => {
+      if (!isTaskDone(task)) {
+        taskMap.set(task.id, task);
+      }
+    });
+    allTasks.forEach(task => {
+      if (task.id === logTask) {
+        taskMap.set(task.id, task);
+      }
+    });
+    return Array.from(taskMap.values());
+  }, [myAssignedTasks, distinctGridTasks, allTasks, logTask]);
+
 
   // Group logs by taskId and day index (0-6)
   const cellDurations = useMemo(() => {
@@ -455,15 +524,23 @@ const TimesheetPage: React.FC = () => {
     return Object.values(memberLogsMap).sort((a, b) => b.total - a.total);
   }, [memberLogsMap]);
 
-  // Formatter: seconds -> duration string (e.g. 2h 15m)
+  // Formatter: seconds -> duration string (e.g. 2h 15m, translated)
   const formatSeconds = (seconds: number): string => {
     if (seconds <= 0) return '—';
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
     
-    if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
-    if (hours > 0) return `${hours}h`;
-    return `${minutes}m`;
+    const hStr = t('common.time.hours' as any, { count: hours });
+    const mStr = t('common.time.minutes' as any, { count: minutes });
+    const sStr = t('common.time.seconds' as any, { count: secs });
+
+    const parts: string[] = [];
+    if (hours > 0) parts.push(hStr);
+    if (minutes > 0) parts.push(mStr);
+    if (secs > 0 || (hours === 0 && minutes === 0)) parts.push(sStr);
+    
+    return parts.join(' ');
   };
 
   // Play/Pause Timer controller
@@ -472,80 +549,71 @@ const TimesheetPage: React.FC = () => {
       if (runningTimer && Number(runningTimer.task_id) === Number(taskId)) {
         const res = await api.stopTimer(taskId);
         if (res?.success) {
-          message.success(isVi ? 'Đã dừng theo dõi thời gian' : 'Stopped tracking time');
+          message.success(t('timesheet.toast.timer_stop'));
           setRunningTimer(null);
           window.dispatchEvent(new Event('timer-updated'));
-          fetchTimeEntries();
+          fetchTimeEntries(true);
         }
       } else {
         const res = await api.startTimer(taskId);
         if (res?.success) {
-          message.success(isVi ? 'Đã bắt đầu tính giờ công việc' : 'Started task timer');
+          message.success(t('timesheet.toast.timer_start'));
           setRunningTimer(res.data);
           window.dispatchEvent(new Event('timer-updated'));
-          fetchTimeEntries();
+          fetchTimeEntries(true);
         }
       }
     } catch (err) {
       console.error(err);
-      message.error(isVi ? 'Lỗi thao tác tính giờ' : 'Failed to trigger timer');
+      message.error(t('timesheet.toast.timer_err'));
     }
   };
 
   // Open Log Modal with default values
   const openLogModal = (taskId: number, dateStr?: string) => {
+    setActivePopoverCell(null);
+    setShowAddTaskPopover(false);
     setLogTask(taskId);
     if (dateStr) {
-      setLogDate(dateStr);
+      const now = new Date();
+      const hrs = String(now.getHours()).padStart(2, '0');
+      const mins = String(now.getMinutes()).padStart(2, '0');
+      setLogDate(`${dateStr} ${hrs}:${mins}`);
     } else {
-      setLogDate(new Date().toISOString().split('T')[0]);
+      const now = new Date();
+      const yr = now.getFullYear();
+      const mo = String(now.getMonth() + 1).padStart(2, '0');
+      const dy = String(now.getDate()).padStart(2, '0');
+      const hrs = String(now.getHours()).padStart(2, '0');
+      const mins = String(now.getMinutes()).padStart(2, '0');
+      setLogDate(`${yr}-${mo}-${dy} ${hrs}:${mins}`);
     }
-    setLogHours(0);
-    setLogMinutes(0);
-    setLogDescription('');
     setShowLogModal(true);
   };
 
-  // Submit manual log entry
-  const handleLogManualTime = async () => {
-    if (!logTask) {
-      message.error(isVi ? 'Vui lòng chọn công việc' : 'Please select a task');
-      return;
-    }
-    const durationInSeconds = (logHours * 3600) + (logMinutes * 60);
-    if (durationInSeconds <= 0) {
-      message.error(isVi ? 'Thời lượng phải lớn hơn 0 phút' : 'Duration must be greater than 0m');
-      return;
-    }
-    try {
-      const data = await api.addManualTime(logTask, {
-        duration: durationInSeconds,
-        description: logDescription,
-        started_at: logDate ? `${logDate} 09:00:00` : undefined,
-      });
-      if (data?.success) {
-        message.success(isVi ? 'Đã ghi nhận giờ làm thành công' : 'Time logged successfully');
-        setShowLogModal(false);
-        fetchTimeEntries();
-      }
-    } catch (err) {
-      console.error(err);
-      message.error(isVi ? 'Lỗi ghi nhận thời gian' : 'Failed to log time');
-    }
-  };
-
   // Delete Log entry handler
-  const handleDeleteLog = async (id: number) => {
-    try {
-      const res = await api.deleteTimeEntry(id);
-      if (res?.success) {
-        message.success(isVi ? 'Đã xoá bản ghi công' : 'Time entry deleted');
-        fetchTimeEntries();
+  const handleDeleteLog = (id: number, onDeleted?: () => void) => {
+    showDeleteConfirm({
+      title: t('timesheet.confirm.delete_title' as any) || 'Xoá bản ghi công',
+      content: t('timesheet.confirm.delete_content' as any) || 'Bạn có chắc chắn muốn xoá bản ghi thời gian làm việc này không?',
+      okText: t('common.delete' as any) || 'Xóa',
+      cancelText: t('common.cancel' as any) || 'Hủy',
+      onConfirm: async () => {
+        try {
+          const res = await api.deleteTimeEntry(id);
+          if (res?.success) {
+            message.success(t('timesheet.toast.log_deleted'));
+            fetchTimeEntries(true);
+            if (onDeleted) {
+              onDeleted();
+            }
+          }
+        } catch (err) {
+          console.error(err);
+          message.error(t('timesheet.toast.log_delete_err'));
+        }
       }
-    } catch (err) {
-      console.error(err);
-      message.error(isVi ? 'Không thể xoá bản ghi' : 'Failed to delete time entry');
-    }
+    });
   };
 
   // Render detail popover contents for grid cells
@@ -557,7 +625,7 @@ const TimesheetPage: React.FC = () => {
         <div className="popover-header">
           <h4>{task.title}</h4>
           <span className="popover-date">
-            {dayDate.toLocaleDateString(isVi ? 'vi-VN' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+            {dayDate.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' })}
           </span>
         </div>
         
@@ -567,7 +635,7 @@ const TimesheetPage: React.FC = () => {
               <div key={log.id} className="popover-log-item">
                 <div className="log-details">
                   <div className="log-duration">{formatSeconds(log.duration)}</div>
-                  <div className="log-desc">{log.description || (isVi ? 'Không có mô tả' : 'No description')}</div>
+                  <div className="log-desc">{log.description || t('timesheet.log.no_description')}</div>
                   {log.user && activeTab === 'all' && (
                     <div className="log-author">By: {log.user.name}</div>
                   )}
@@ -581,13 +649,18 @@ const TimesheetPage: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="popover-empty">{isVi ? 'Chưa ghi nhận thời gian' : 'No tracked time yet'}</div>
+          <div className="popover-empty">{t('timesheet.popover.no_time')}</div>
         )}
 
-        <button className="popover-add-btn" onClick={() => {
-          openLogModal(task.id, dateStr);
-        }}>
-          <PlusOutlined /> {isVi ? 'Ghi nhận thời gian' : 'Log tracked time'}
+        <button 
+          className="popover-add-btn" 
+          disabled={isTaskDone(task) || Number(task.assignee_id) !== Number(me?.id)} 
+          style={isTaskDone(task) || Number(task.assignee_id) !== Number(me?.id) ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+          onClick={() => {
+            if (!isTaskDone(task) && Number(task.assignee_id) === Number(me?.id)) openLogModal(task.id, dateStr);
+          }}
+        >
+          <PlusOutlined /> {t('timesheet.popover.log_time_btn')}
         </button>
       </div>
     );
@@ -598,8 +671,8 @@ const TimesheetPage: React.FC = () => {
       {/* Page Header */}
       <div className="timesheet-page__header">
         <div className="header-title">
-          <h1>{isVi ? 'Quản lý bảng công' : 'Timesheet Management'}</h1>
-          <p>{isVi ? 'Theo dõi và quản lý thời gian thực hiện công việc hàng tuần' : 'Track and manage your weekly task-based workloads'}</p>
+          <h1>{t('timesheet.title')}</h1>
+          <p>{t('timesheet.sub_title')}</p>
         </div>
         
         {/* Navigation Tabs */}
@@ -611,7 +684,7 @@ const TimesheetPage: React.FC = () => {
               setSelectedMemberFilter('all');
             }}
           >
-            {isVi ? 'Bảng công cá nhân' : 'My timesheet'}
+            {t('timesheet.tab.my')}
           </button>
           
           {(me?.role === 'admin' || me?.role === 'manager') && (
@@ -622,7 +695,7 @@ const TimesheetPage: React.FC = () => {
                 setViewType('grid');
               }}
             >
-              {isVi ? 'Tất cả bảng công' : 'All timesheets'}
+              {t('timesheet.tab.all')}
             </button>
           )}
         </div>
@@ -634,7 +707,7 @@ const TimesheetPage: React.FC = () => {
           {/* Week Selector */}
           <div className="week-selector">
             <button className="nav-arrow-btn" onClick={handlePrevWeek}><LeftOutlined /></button>
-            <button className="today-btn" onClick={handleToday}>{isVi ? 'Tuần này' : 'Today'}</button>
+            <button className="today-btn" onClick={handleToday}>{t('timesheet.btn.today')}</button>
             <button className="nav-arrow-btn" onClick={handleNextWeek}><RightOutlined /></button>
             <span className="week-range-label">{formattedDateRange}</span>
           </div>
@@ -642,17 +715,17 @@ const TimesheetPage: React.FC = () => {
           {/* Member Search input if on All view */}
           {activeTab === 'all' && (
             <div className="member-filter" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span className="filter-label"><UserOutlined /> {isVi ? 'Thành viên:' : 'Member:'}</span>
+              <span className="filter-label"><UserOutlined /> {t('timesheet.filter.member')}</span>
               <input 
                 type="text"
-                placeholder={isVi ? 'Tìm kiếm thành viên...' : 'Search members...'}
+                placeholder={t('timesheet.filter.member_placeholder')}
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
                 className="filter-search-input"
                 style={{
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: '#fff',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-primary)',
                   padding: '5px 10px',
                   borderRadius: '4px',
                   outline: 'none',
@@ -671,30 +744,29 @@ const TimesheetPage: React.FC = () => {
               <button 
                 className={`toggle-btn ${viewType === 'grid' ? 'active' : ''}`}
                 onClick={() => setViewType('grid')}
-                title={isVi ? 'Chế độ lưới' : 'Grid view'}
+                title={t('timesheet.view.grid')}
               >
                 <TableOutlined /> <span>Timesheet</span>
               </button>
               <button 
                 className={`toggle-btn ${viewType === 'list' ? 'active' : ''}`}
                 onClick={() => setViewType('list')}
-                title={isVi ? 'Chế độ danh sách' : 'Detailed list'}
+                title={t('timesheet.view.list')}
               >
-                <UnorderedListOutlined /> <span>{isVi ? 'Bản ghi chi tiết' : 'Time entries'}</span>
+                <UnorderedListOutlined /> <span>{t('timesheet.view.list_label')}</span>
               </button>
             </div>
           )}
 
           <button className="log-time-main-btn" onClick={() => {
-            if (distinctGridTasks.length > 0) {
-              openLogModal(distinctGridTasks[0].id);
-            } else if (myAssignedTasks.length > 0) {
-              openLogModal(myAssignedTasks[0].id);
+            const firstActiveAssignedTask = myAssignedTasks.find(t => !isTaskDone(t));
+            if (firstActiveAssignedTask) {
+              openLogModal(firstActiveAssignedTask.id);
             } else {
-              message.warning(isVi ? 'Không tìm thấy công việc được giao để ghi nhận' : 'No assigned tasks found to log time');
+              message.warning(t('timesheet.toast.no_active_task'));
             }
           }}>
-            <PlusOutlined /> {isVi ? 'Ghi nhận thời gian' : 'Log Time'}
+            <PlusOutlined /> {t('timesheet.btn.log_time')}
           </button>
         </div>
       </div>
@@ -703,7 +775,7 @@ const TimesheetPage: React.FC = () => {
       {loading ? (
         <div className="timesheet-loading">
           <Spin size="large" />
-          <p>{isVi ? 'Đang cập nhật số liệu bảng công...' : 'Syncing timesheet logs...'}</p>
+          <p>{t('timesheet.syncing')}</p>
         </div>
       ) : viewType === 'grid' ? (
         /* Timesheet Grid Rendering */
@@ -714,8 +786,8 @@ const TimesheetPage: React.FC = () => {
                 <tr>
                   <th className="task-header">
                     {activeTab === 'all' 
-                      ? (isVi ? `Thành viên (${displayedMembersList.length})` : `People (${displayedMembersList.length})`)
-                      : (isVi ? 'Công việc / Dự án' : 'Task / Location')}
+                      ? t('timesheet.header.member_col', { count: displayedMembersList.length })
+                      : t('timesheet.header.task_col')}
                   </th>
                   
                   {weekDays.map((day, idx) => {
@@ -723,7 +795,7 @@ const TimesheetPage: React.FC = () => {
                     return (
                       <th key={idx} className={`day-header ${isToday ? 'today' : ''}`}>
                         <div className="day-name">
-                          {day.toLocaleDateString(isVi ? 'vi-VN' : 'en-US', { weekday: 'short' })}
+                          {day.toLocaleDateString(locale, { weekday: 'short' })}
                         </div>
                         <div className="day-date">{day.getDate()}</div>
                         <div className="day-total">{formatSeconds(dailyTotals[idx])}</div>
@@ -732,7 +804,7 @@ const TimesheetPage: React.FC = () => {
                   })}
                   
                   <th className="total-header">
-                    <div className="total-title">{isVi ? 'Tổng số' : 'Total'}</div>
+                    <div className="total-title">{t('timesheet.header.total')}</div>
                     <div className="total-value">{formatSeconds(grandTotal)}</div>
                   </th>
                 </tr>
@@ -742,7 +814,7 @@ const TimesheetPage: React.FC = () => {
                   displayedMembersList.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="grid-empty-cell">
-                        <Empty description={isVi ? 'Không tìm thấy thành viên nào.' : 'No members found.'} />
+                        <Empty description={t('timesheet.empty.members')} />
                       </td>
                     </tr>
                   ) : (
@@ -772,30 +844,10 @@ const TimesheetPage: React.FC = () => {
                                   )}
                                 </div>
                                 <div className="member-names" style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
-                                  <span className="member-name" style={{ fontWeight: 600, color: '#f0f2f5', fontSize: '13.5px' }}>{user.name}</span>
+                                  <span className="member-name" style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13.5px' }}>{user.name}</span>
                                   <span className="member-capacity" style={{ fontSize: '11px', color: '#8c8c8c' }}>40h</span>
                                 </div>
                               </div>
-                              <button 
-                                className="open-member-drawer-btn" 
-                                onClick={() => setSelectedMemberForDrawer({ user, daily, total, logs: memberLogs })}
-                                style={{
-                                  background: 'rgba(255, 255, 255, 0.08)',
-                                  border: 'none',
-                                  color: '#fff',
-                                  padding: '4px 12px',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontSize: '12px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  transition: 'background 0.2s',
-                                  marginLeft: '8px'
-                                }}
-                              >
-                                {isVi ? 'Mở' : 'Open'} &rarr;
-                              </button>
                             </div>
                           </td>
                           
@@ -803,7 +855,15 @@ const TimesheetPage: React.FC = () => {
                             const dayDuration = daily[idx];
                             return (
                               <td key={idx} className="day-cell member-day-cell">
-                                <div className="cell-inner-hover" onClick={() => setSelectedMemberForDrawer({ user, daily, total, logs: memberLogs })}>
+                                <div 
+                                  className="cell-inner-hover" 
+                                  onClick={() => {
+                                    const dayDateStr = day.toLocaleDateString(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                                    const filteredDayLogs = memberLogs.filter(log => new Date(log.started_at).toDateString() === day.toDateString());
+                                    setSelectedMemberForDrawer({ user, daily, total: dayDuration, logs: filteredDayLogs, dateLabel: dayDateStr });
+                                  }}
+                                  style={{ cursor: dayDuration > 0 ? 'pointer' : 'default' }}
+                                >
                                   {dayDuration > 0 ? (
                                     <span className="cell-duration-badge">{formatSeconds(dayDuration)}</span>
                                   ) : (
@@ -815,9 +875,19 @@ const TimesheetPage: React.FC = () => {
                           })}
                           
                           <td className="task-total-cell member-total-cell">
-                            <span className="task-total-badge" style={{ color: '#1890ff', borderBottom: '2px solid #1890ff', paddingBottom: '2px' }}>
-                              {formatSeconds(total)}
-                            </span>
+                            {total > 0 ? (
+                              <span 
+                                className="task-total-badge" 
+                                onClick={() => setSelectedMemberForDrawer({ user, daily, total, logs: memberLogs })}
+                                style={{ color: '#1890ff', borderBottom: '2px solid #1890ff', paddingBottom: '2px', cursor: 'pointer' }}
+                              >
+                                {formatSeconds(total)}
+                              </span>
+                            ) : (
+                              <span className="task-total-badge" style={{ color: 'var(--text-muted)' }}>
+                                —
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -826,7 +896,7 @@ const TimesheetPage: React.FC = () => {
                 ) : distinctGridTasks.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="grid-empty-cell">
-                      <Empty description={isVi ? 'Chưa có công việc nào trong danh sách tuần này. Hãy thêm công việc hoặc ghi nhận giờ làm.' : 'No tasks in weekly timesheet yet. Add a task to start tracking.'} />
+                      <Empty description={t('timesheet.empty.tasks')} />
                     </td>
                   </tr>
                 ) : (
@@ -843,19 +913,29 @@ const TimesheetPage: React.FC = () => {
                       <tr key={task.id} className="grid-task-row">
                         <td className="task-cell">
                           <div className="task-cell-content">
-                            <Tooltip title={isTracking ? (isVi ? 'Dừng tính giờ' : 'Stop Timer') : (isVi ? 'Chạy tính giờ' : 'Start Timer')}>
-                              <button 
-                                className={`timer-btn ${isTracking ? 'running' : ''}`}
-                                onClick={() => handleToggleTimer(task.id)}
-                              >
-                                {isTracking ? <span className="timer-pulse" /> : <PlayCircleOutlined />}
-                              </button>
-                            </Tooltip>
+                            {
+                              (() => {
+                                const isAssignedToMe = Number(task.assignee_id) === Number(me?.id);
+                                return (
+                                  <Tooltip title={isTaskDone(task) ? t('timesheet.tooltip.task_done') : !isAssignedToMe ? t('timesheet.tooltip.not_assigned') : isTracking ? t('timesheet.tooltip.stop_timer') : t('timesheet.tooltip.start_timer')}>
+                                    <button 
+                                      className={`timer-btn ${isTracking ? 'running' : ''}`}
+                                      onClick={() => !isTaskDone(task) && isAssignedToMe && handleToggleTimer(task.id)}
+                                      disabled={isTaskDone(task) || !isAssignedToMe}
+                                      style={isTaskDone(task) || !isAssignedToMe ? { cursor: 'not-allowed', opacity: 0.5 } : {}}
+                                    >
+                                      {isTracking ? <span className="timer-pulse" /> : <PlayCircleOutlined />}
+                                    </button>
+                                  </Tooltip>
+                                );
+                              })()
+                            }
                             
                             <div className="task-info">
-                              <span className="task-title" onClick={() => {
-                                // optional: redirect to task detail or open task panel
+                              <span className="task-title" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={() => {
+                                setSelectedTaskId(task.id);
                               }}>
+                                <TaskTypeBadge type={task.type || 'task'} size="icon" />
                                 {task.title}
                               </span>
                               <div className="task-metadata">
@@ -863,7 +943,16 @@ const TimesheetPage: React.FC = () => {
                                   <span className="dot" style={{ backgroundColor: task.project_color || '#ccc' }} />
                                   {task.project_name || 'No Project'}
                                 </span>
-                                <span className="task-status-tag">{task.status}</span>
+                                <span 
+                                  className="task-status-tag"
+                                  style={{
+                                    color: getTaskStatusColor(task),
+                                    background: `${getTaskStatusColor(task)}15`,
+                                    border: `1px solid ${getTaskStatusColor(task)}30`
+                                  }}
+                                >
+                                  {getTaskStatusLabel(task)}
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -880,6 +969,14 @@ const TimesheetPage: React.FC = () => {
                                 trigger="click"
                                 placement="bottom"
                                 overlayClassName="timesheet-popover"
+                                open={activePopoverCell?.taskId === task.id && activePopoverCell?.dayIndex === idx}
+                                onOpenChange={(visible) => {
+                                  if (visible) {
+                                    setActivePopoverCell({ taskId: task.id, dayIndex: idx });
+                                  } else {
+                                    setActivePopoverCell(null);
+                                  }
+                                }}
                               >
                                 <div className="cell-inner-hover">
                                   {cellData ? (
@@ -925,7 +1022,7 @@ const TimesheetPage: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1890ff' }}>
                   <Spin size="small" />
                   <span style={{ fontSize: '13px', fontWeight: 500 }}>
-                    {isVi ? 'Đang tải thêm thành viên...' : 'Loading more members...'}
+                    {t('timesheet.loading.more_members')}
                   </span>
                 </div>
               )}
@@ -938,11 +1035,11 @@ const TimesheetPage: React.FC = () => {
               <Popover
                 content={
                   <div className="task-selection-popover">
-                    <h4>{isVi ? 'Chọn công việc đưa vào lưới' : 'Select task to add to grid'}</h4>
+                    <h4>{t('timesheet.task_picker.title')}</h4>
                     <div className="popover-search-container">
                       <input 
                         type="text" 
-                        placeholder={isVi ? 'Tìm kiếm công việc...' : 'Search task title...'} 
+                        placeholder={t('timesheet.task_picker.placeholder')} 
                         className="popover-search-input"
                         onChange={(e) => {
                           // local query search filter if wanted
@@ -951,7 +1048,7 @@ const TimesheetPage: React.FC = () => {
                     </div>
                     <div className="popover-task-list">
                       {myAssignedTasks.filter(tItem => !distinctGridTasks.some(gt => gt.id === tItem.id)).length === 0 ? (
-                        <p className="no-tasks-text">{isVi ? 'Tất cả công việc được giao đã có trên lưới' : 'All assigned tasks are already in timesheet grid'}</p>
+                        <p className="no-tasks-text">{t('timesheet.task_picker.all_added')}</p>
                       ) : (
                         myAssignedTasks
                           .filter(tItem => !distinctGridTasks.some(gt => gt.id === tItem.id))
@@ -979,7 +1076,7 @@ const TimesheetPage: React.FC = () => {
                 overlayClassName="add-task-popover-container"
               >
                 <button className="add-grid-task-btn">
-                  <PlusOutlined /> {isVi ? 'Thêm công việc' : 'Add task'}
+                  <PlusOutlined /> {t('timesheet.btn.add_task')}
                 </button>
               </Popover>
             </div>
@@ -990,18 +1087,18 @@ const TimesheetPage: React.FC = () => {
         <div className="timesheet-list-container">
           {logs.length === 0 ? (
             <div className="list-empty-wrapper">
-              <Empty description={isVi ? 'Không tìm thấy nhật ký ghi nhận thời gian nào cho bộ lọc đã chọn.' : 'No detailed log entries found in this timeframe.'} />
+              <Empty description={t('timesheet.empty.logs')} />
             </div>
           ) : (
             <div className="list-table-wrapper">
               <table className="time-entries-list-table">
                 <thead>
                   <tr>
-                    <th>{isVi ? 'Nhân viên' : 'Member'}</th>
-                    <th>{isVi ? 'Công việc' : 'Task'}</th>
-                    <th>{isVi ? 'Ghi chú / Mô tả' : 'Description'}</th>
-                    <th>{isVi ? 'Thời gian' : 'Time'}</th>
-                    <th>{isVi ? 'Thời lượng' : 'Duration'}</th>
+                    <th>{t('timesheet.log_table.member')}</th>
+                    <th>{t('timesheet.log_table.task')}</th>
+                    <th>{t('timesheet.log_table.description')}</th>
+                    <th>{t('timesheet.log_table.time')}</th>
+                    <th>{t('timesheet.log_table.duration')}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -1022,7 +1119,14 @@ const TimesheetPage: React.FC = () => {
                       </td>
                       <td>
                         <div className="task-info-cell">
-                          <span className="task-title">{log.task?.title}</span>
+                          <span className="task-title" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={() => {
+                            if (log.task_id) {
+                              setSelectedTaskId(log.task_id);
+                            }
+                          }}>
+                            <TaskTypeBadge type={log.task?.type || 'task'} size="icon" />
+                            {log.task?.title}
+                          </span>
                           <span className="project-badge-mini" style={{ color: log.task?.project?.color }}>
                             {log.task?.project?.name}
                           </span>
@@ -1035,7 +1139,7 @@ const TimesheetPage: React.FC = () => {
                       </td>
                       <td>
                         <span className="log-time-text">
-                          {new Date(log.started_at).toLocaleDateString(isVi ? 'vi-VN' : 'en-US', {
+                          {new Date(log.started_at).toLocaleDateString(locale, {
                             month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                           })}
                         </span>
@@ -1048,7 +1152,7 @@ const TimesheetPage: React.FC = () => {
                           <button 
                             className="delete-list-row-btn"
                             onClick={() => handleDeleteLog(log.id)}
-                            title={isVi ? 'Xoá bản ghi' : 'Delete log'}
+                            title={t('timesheet.log_table.delete')}
                           >
                             <DeleteOutlined />
                           </button>
@@ -1064,104 +1168,25 @@ const TimesheetPage: React.FC = () => {
       )}
 
       {/* Manual Time Logging Dialog */}
-      <Modal
-        title={
-          <div className="log-modal-header">
-            <ClockCircleOutlined />
-            <span>{isVi ? 'Ghi nhận giờ làm việc thủ công' : 'Manual Time Log'}</span>
-          </div>
-        }
-        open={showLogModal}
-        onOk={handleLogManualTime}
-        onCancel={() => setShowLogModal(false)}
-        okText={isVi ? 'Ghi nhận' : 'Submit Log'}
-        cancelText={isVi ? 'Huỷ bỏ' : 'Cancel'}
-        className="timesheet-manual-log-modal"
-      >
-        <div className="manual-log-form">
-          <div className="form-item">
-            <label>{isVi ? 'Chọn công việc:' : 'Select Task:'}</label>
-            <select 
-              value={logTask || ''} 
-              onChange={(e) => setLogTask(Number(e.target.value))}
-              className="modal-form-select"
-            >
-              {myAssignedTasks.map(task => (
-                <option key={task.id} value={task.id}>
-                  {task.title} ({task.project_name || 'No Project'})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-item row-group">
-            <div className="sub-item">
-              <label>{isVi ? 'Ngày thực hiện:' : 'Date:'}</label>
-              <input 
-                type="date" 
-                value={logDate} 
-                onChange={(e) => setLogDate(e.target.value)}
-                className="modal-form-input"
-              />
-            </div>
-          </div>
-
-          <div className="form-item duration-group">
-            <label>{isVi ? 'Thời gian thực hiện (Giờ / Phút):' : 'Logged Duration (Hours / Minutes):'}</label>
-            <div className="duration-inputs">
-              <div className="input-group">
-                <input 
-                  type="number" 
-                  min={0} 
-                  max={24}
-                  value={logHours} 
-                  onChange={(e) => setLogHours(Math.max(0, parseInt(e.target.value) || 0))}
-                  placeholder="0"
-                />
-                <span>{isVi ? 'giờ' : 'hrs'}</span>
-              </div>
-              <div className="input-group">
-                <input 
-                  type="number" 
-                  min={0} 
-                  max={59}
-                  value={logMinutes} 
-                  onChange={(e) => setLogMinutes(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
-                  placeholder="0"
-                />
-                <span>{isVi ? 'phút' : 'mins'}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="form-item">
-            <label>{isVi ? 'Mô tả / Ghi chú:' : 'Description / Notes:'}</label>
-            <textarea 
-              placeholder={isVi ? 'Nhập nội dung công việc đã thực hiện...' : 'Describe what you worked on...'} 
-              value={logDescription}
-              onChange={(e) => setLogDescription(e.target.value)}
-              className="modal-form-textarea"
-              rows={3}
-            />
-          </div>
-        </div>
-      </Modal>
+      <ManualTimeLogModal
+        isOpen={showLogModal}
+        onClose={() => setShowLogModal(false)}
+        onSuccess={() => fetchTimeEntries(true)}
+        tasks={selectableTasks}
+        defaultTaskId={logTask}
+        defaultDate={logDate}
+      />
 
       {/* Detailed Drawer for Workspace Member */}
       <Drawer
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div className="avatar-placeholder" style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              background: '#1890ff',
-              color: 'white',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '12px'
+            <div style={{
+              width: '28px', height: '28px', borderRadius: '50%',
+              background: 'var(--primary)', color: 'white',
+              fontWeight: 600, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', fontSize: '12px', flexShrink: 0,
+              overflow: 'hidden',
             }}>
               {selectedMemberForDrawer?.user?.photo ? (
                 <img src={selectedMemberForDrawer.user.photo} alt={selectedMemberForDrawer.user.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
@@ -1169,98 +1194,120 @@ const TimesheetPage: React.FC = () => {
                 selectedMemberForDrawer?.user?.name?.charAt(0).toUpperCase()
               )}
             </div>
-            <span>
-              {isVi 
-                ? `Nhật ký chi tiết - ${selectedMemberForDrawer?.user?.name}` 
-                : `Detailed logs - ${selectedMemberForDrawer?.user?.name}`}
+            <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+              {`${t('timesheet.drawer.detailed_logs')} - ${selectedMemberForDrawer?.user?.name}`}
             </span>
           </div>
         }
         placement="right"
         width={650}
+        closable={false}
+        extra={
+          <button 
+            onClick={() => setSelectedMemberForDrawer(null)}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: 'var(--text-secondary)', 
+              cursor: 'pointer', 
+              fontSize: '16px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              padding: '6px', 
+              borderRadius: '4px',
+              transition: 'all 0.15s'
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--bg-card-hover)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'none'; }}
+          >
+            <CloseOutlined />
+          </button>
+        }
         onClose={() => setSelectedMemberForDrawer(null)}
         open={!!selectedMemberForDrawer}
-        bodyStyle={{ padding: '20px', background: '#141414', color: '#fff' }}
-        headerStyle={{ background: '#1f1f1f', borderBottom: '1px solid #303030' }}
+        styles={{
+          body: { padding: '20px', background: 'var(--bg-card)', color: 'var(--text-primary)' },
+          header: { background: 'var(--bg-card)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-primary)' },
+        }}
       >
         {selectedMemberForDrawer && (
           <div className="member-details-drawer">
-            <div style={{ marginBottom: '16px', fontSize: '14px', color: '#a6a6a6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>{formattedDateRange}</span>
-              <span style={{ fontWeight: 600, color: '#1890ff', fontSize: '15px' }}>
-                {isVi ? 'Tổng số giờ:' : 'Total duration:'} {formatSeconds(selectedMemberForDrawer.total)}
+            <div style={{ marginBottom: '16px', fontSize: '14px', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{selectedMemberForDrawer.dateLabel || formattedDateRange}</span>
+              <span style={{ fontWeight: 600, color: 'var(--primary)', fontSize: '15px' }}>
+                {t('timesheet.drawer.total')} {formatSeconds(selectedMemberForDrawer.total)}
               </span>
             </div>
 
             {selectedMemberForDrawer.logs.length === 0 ? (
-              <Empty description={isVi ? 'Không có bản ghi thời gian nào cho tuần này' : 'No time entries recorded for this week'} />
+              <Empty description={t('timesheet.empty.member_week')} />
             ) : (
               <div className="drawer-table-wrapper" style={{ overflowX: 'auto' }}>
                 <table className="time-entries-list-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid #303030' }}>
-                      <th style={{ padding: '10px', textAlign: 'left', color: '#8c8c8c', fontSize: '12px' }}>{isVi ? 'Công việc' : 'Task'}</th>
-                      <th style={{ padding: '10px', textAlign: 'left', color: '#8c8c8c', fontSize: '12px' }}>{isVi ? 'Mô tả' : 'Description'}</th>
-                      <th style={{ padding: '10px', textAlign: 'left', color: '#8c8c8c', fontSize: '12px' }}>{isVi ? 'Thời gian' : 'Time'}</th>
-                      <th style={{ padding: '10px', textAlign: 'left', color: '#8c8c8c', fontSize: '12px' }}>{isVi ? 'Thời lượng' : 'Duration'}</th>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                      <th style={{ padding: '10px', textAlign: 'left', color: 'var(--text-muted)', fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{t('timesheet.log_table.task')}</th>
+                      <th style={{ padding: '10px', textAlign: 'left', color: 'var(--text-muted)', fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{t('timesheet.log_table.description')}</th>
+                      <th style={{ padding: '10px', textAlign: 'left', color: 'var(--text-muted)', fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{t('timesheet.log_table.time')}</th>
+                      <th style={{ padding: '10px', textAlign: 'left', color: 'var(--text-muted)', fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{t('timesheet.log_table.duration')}</th>
                       {me?.role === 'admin' && <th style={{ padding: '10px' }}></th>}
                     </tr>
                   </thead>
                   <tbody>
                     {selectedMemberForDrawer.logs.map((log: TimeLog) => (
-                      <tr key={log.id} style={{ borderBottom: '1px solid #262626' }}>
+                      <tr key={log.id} style={{ borderBottom: '1px solid var(--divider)' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card-hover)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
                         <td style={{ padding: '12px 10px' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontWeight: 600, color: '#f0f2f5' }}>{log.task?.title}</span>
-                            <span style={{ fontSize: '11px', color: log.task?.project?.color || '#8c8c8c' }}>
-                              {log.task?.project?.name || 'No Project'}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <TaskTypeBadge type={log.task?.type || 'task'} size="icon" />
+                              {log.task?.title}
+                            </span>
+                            <span style={{ fontSize: '11px', color: log.task?.project?.color || 'var(--text-muted)' }}>
+                              {log.task?.project?.name || '—'}
                             </span>
                           </div>
                         </td>
-                        <td style={{ padding: '12px 10px', color: '#d9d9d9', fontStyle: 'italic', fontSize: '13px' }}>
+                        <td style={{ padding: '12px 10px', color: 'var(--text-secondary)', fontStyle: 'italic', fontSize: '13px' }}>
                           {log.description || '—'}
                         </td>
-                        <td style={{ padding: '12px 10px', color: '#8c8c8c', fontSize: '12px' }}>
-                          {new Date(log.started_at).toLocaleDateString(isVi ? 'vi-VN' : 'en-US', {
+                        <td style={{ padding: '12px 10px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                          {new Date(log.started_at).toLocaleDateString(locale, {
                             month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                           })}
                         </td>
                         <td style={{ padding: '12px 10px' }}>
-                          <span style={{ 
-                            background: 'rgba(24, 144, 255, 0.1)', 
-                            border: '1px solid rgba(24, 144, 255, 0.2)', 
-                            color: '#1890ff', 
-                            padding: '2px 8px', 
+                          <span style={{
+                            background: 'rgba(99,102,241,0.10)',
+                            border: '1px solid rgba(99,102,241,0.20)',
+                            color: 'var(--primary)',
+                            padding: '2px 8px',
                             borderRadius: '4px',
                             fontWeight: 600,
-                            fontSize: '12px'
+                            fontSize: '12px',
                           }}>
                             {formatSeconds(log.duration)}
                           </span>
                         </td>
                         {me?.role === 'admin' && (
                           <td style={{ padding: '12px 10px', textAlign: 'right' }}>
-                            <button 
-                              onClick={async () => {
-                                await handleDeleteLog(log.id);
-                                // Refresh drawer logs inside drawer
-                                setSelectedMemberForDrawer((prev: any) => {
-                                  if (!prev) return null;
-                                  const remainingLogs = prev.logs.filter((l: any) => l.id !== log.id);
-                                  const newTotal = remainingLogs.reduce((sum: number, l: any) => sum + l.duration, 0);
-                                  return {
-                                    ...prev,
-                                    logs: remainingLogs,
-                                    total: newTotal
-                                  };
+                            <button
+                              onClick={() => {
+                                handleDeleteLog(log.id, () => {
+                                  setSelectedMemberForDrawer((prev: any) => {
+                                    if (!prev) return null;
+                                    const remainingLogs = prev.logs.filter((l: any) => l.id !== log.id);
+                                    const newTotal = remainingLogs.reduce((sum: number, l: any) => sum + l.duration, 0);
+                                    return { ...prev, logs: remainingLogs, total: newTotal };
+                                  });
                                 });
                               }}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: '#8c8c8c',
-                                cursor: 'pointer'
-                              }}
+                              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', borderRadius: '4px', padding: '4px 6px', transition: 'all 0.15s' }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#ef4444'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.1)'; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
                             >
                               <DeleteOutlined />
                             </button>
@@ -1275,6 +1322,16 @@ const TimesheetPage: React.FC = () => {
           </div>
         )}
       </Drawer>
+      {selectedTaskId && (
+        <TaskDetailPanel
+          taskId={selectedTaskId}
+          onClose={() => setSelectedTaskId(null)}
+          onUpdate={() => {
+            fetchTimeEntries();
+          }}
+        />
+      )}
+      <DeleteConfirmComponent />
     </div>
   );
 };

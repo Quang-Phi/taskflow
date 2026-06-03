@@ -1,8 +1,8 @@
 
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Dropdown, Tooltip, message, Modal, Select, Button, Popconfirm, Spin, Timeline, Popover, Calendar, Input } from 'antd';
+import { Dropdown, Tooltip, message, Modal, Select, Button, Popconfirm, Spin, Timeline, Popover, Calendar, Input, Tabs, Radio } from 'antd';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import {
   PlusOutlined,
@@ -31,14 +31,27 @@ import {
   MoreOutlined,
   ArrowRightOutlined,
   DashboardOutlined,
-  LockOutlined
+  LockOutlined,
+  FilterOutlined,
+  RightOutlined,
+  GroupOutlined,
+  UnorderedListOutlined,
+  AppstoreOutlined,
+  BranchesOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { getEcho } from '../../services/echo';
 import { useTranslation } from '../../utils/i18n';
 import './ProjectDetailPage.scss';
+import '../tasks/MyTasksPage.scss';
 import { TaskDetailPanel } from '../../components/tasks/TaskDetailPanel';
 import { TaskCalendar } from '../../components/tasks/TaskCalendar';
+import TaskTypeBadge from '../../components/tasks/TaskTypeBadge';
+import { useDeleteConfirm } from '../../components/tasks/DeleteConfirmModal';
+import EditProjectModal, { EditProjectFormData } from '../../components/projects/EditProjectModal';
+import { renderProjectIcon } from '../../components/projects/ProjectIconPicker';
+import { WorkflowEditor } from '../../components/workflow/WorkflowEditor';
 
 // ===== TYPES =====
 interface Task {
@@ -60,6 +73,8 @@ interface Task {
   subtasks?: Task[];
   parent_task_id?: string | number;
   time_entries?: any[];
+  type?: string;
+  labels?: any[];
 }
 
 // Priority config matching ClickUp style
@@ -79,6 +94,369 @@ const FlagIcon: React.FC<{ color: string; size?: number }> = ({ color, size = 14
     <line x1="4" y1="22" x2="4" y2="15" />
   </svg>
 );
+
+// ===== DEBOUNCED SEARCH INPUT COMPONENT =====
+interface DebouncedSearchInputProps {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder: string;
+  style?: React.CSSProperties;
+  className?: string;
+  variant?: 'outlined' | 'borderless' | 'filled';
+}
+
+const DebouncedSearchInput: React.FC<DebouncedSearchInputProps> = ({
+  value,
+  onChange,
+  placeholder,
+  style,
+  className,
+  variant
+}) => {
+  const [localValue, setLocalValue] = useState(value);
+
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localValue !== value) {
+        onChange(localValue);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [localValue, onChange, value]);
+
+  return (
+    <Input
+      prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
+      placeholder={placeholder}
+      variant={variant}
+      allowClear
+      value={localValue}
+      onChange={e => setLocalValue(e.target.value || '')}
+      style={style}
+      className={className}
+    />
+  );
+};
+
+// ===== PROJECT FILTER POPOVER COMPONENT =====
+interface ProjectFilterPopoverProps {
+  projectMembers: any[];
+  columns: any[];
+  t: any;
+  // Parent state values
+  filterMyTasks: boolean;
+  filterUnassigned: boolean;
+  filterAssignees: number[];
+  filterStatuses: string[];
+  filterPriorities: string[];
+  filterTypes: string[];
+  // Parent update functions
+  setFilterMyTasks: (val: boolean) => void;
+  setFilterUnassigned: (val: boolean) => void;
+  setFilterAssignees: (val: number[]) => void;
+  setFilterStatuses: (val: string[]) => void;
+  setFilterPriorities: (val: string[]) => void;
+  setFilterTypes: (val: string[]) => void;
+  handleClearFilters: () => void;
+}
+
+const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
+  projectMembers,
+  columns,
+  t,
+  filterMyTasks,
+  filterUnassigned,
+  filterAssignees,
+  filterStatuses,
+  filterPriorities,
+  filterTypes,
+  setFilterMyTasks,
+  setFilterUnassigned,
+  setFilterAssignees,
+  setFilterStatuses,
+  setFilterPriorities,
+  setFilterTypes,
+  handleClearFilters,
+}) => {
+  const [open, setOpen] = useState(false);
+  const [filterCategory, setFilterCategory] = useState<string>('assignee');
+
+  // Local state for filters
+  const [localMyTasks, setLocalMyTasks] = useState(filterMyTasks);
+  const [localUnassigned, setLocalUnassigned] = useState(filterUnassigned);
+  const [localAssignees, setLocalAssignees] = useState(filterAssignees);
+  const [localStatuses, setLocalStatuses] = useState(filterStatuses);
+  const [localPriorities, setLocalPriorities] = useState(filterPriorities);
+  const [localTypes, setLocalTypes] = useState(filterTypes);
+
+  // Sync external changes (e.g. clear filters)
+  useEffect(() => {
+    setLocalMyTasks(filterMyTasks);
+    setLocalUnassigned(filterUnassigned);
+    setLocalAssignees(filterAssignees);
+    setLocalStatuses(filterStatuses);
+    setLocalPriorities(filterPriorities);
+    setLocalTypes(filterTypes);
+  }, [filterMyTasks, filterUnassigned, filterAssignees, filterStatuses, filterPriorities, filterTypes]);
+
+  // Propagate to parent helper
+  const propagateFilters = useCallback((filters: {
+    myTasks: boolean;
+    unassigned: boolean;
+    assignees: number[];
+    statuses: string[];
+    priorities: string[];
+    types: string[];
+  }) => {
+    setFilterMyTasks(filters.myTasks);
+    setFilterUnassigned(filters.unassigned);
+    setFilterAssignees(filters.assignees);
+    setFilterStatuses(filters.statuses);
+    setFilterPriorities(filters.priorities);
+    setFilterTypes(filters.types);
+  }, [setFilterMyTasks, setFilterUnassigned, setFilterAssignees, setFilterStatuses, setFilterPriorities, setFilterTypes]);
+
+  // Debounced apply
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      propagateFilters({
+        myTasks: localMyTasks,
+        unassigned: localUnassigned,
+        assignees: localAssignees,
+        statuses: localStatuses,
+        priorities: localPriorities,
+        types: localTypes
+      });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [localMyTasks, localUnassigned, localAssignees, localStatuses, localPriorities, localTypes, propagateFilters]);
+
+  // Force propagation on close
+  const handleOpenChange = (newOpen: boolean) => {
+    setOpen(newOpen);
+    if (!newOpen) {
+      propagateFilters({
+        myTasks: localMyTasks,
+        unassigned: localUnassigned,
+        assignees: localAssignees,
+        statuses: localStatuses,
+        priorities: localPriorities,
+        types: localTypes
+      });
+    }
+  };
+
+  const handleLocalClear = () => {
+    setLocalMyTasks(false);
+    setLocalUnassigned(false);
+    setLocalAssignees([]);
+    setLocalStatuses([]);
+    setLocalPriorities([]);
+    setLocalTypes([]);
+    handleClearFilters();
+  };
+
+  const activeCount =
+    (localMyTasks ? 1 : 0) +
+    (localAssignees.length > 0 ? 1 : 0) +
+    (localUnassigned ? 1 : 0) +
+    (localStatuses.length > 0 ? 1 : 0) +
+    (localPriorities.length > 0 ? 1 : 0) +
+    (localTypes.length > 0 ? 1 : 0);
+  const hasFilter = activeCount > 0;
+
+  const filterCategories = [
+    { key: 'assignee', label: t('tasks.panel.assignee'), badge: localAssignees.length > 0 || localUnassigned || localMyTasks },
+    { key: 'status', label: t('tasks.group.status'), badge: localStatuses.length > 0 },
+    { key: 'priority', label: t('tasks.filter.priority'), badge: localPriorities.length > 0 },
+    { key: 'type', label: t('task.type.label'), badge: localTypes.length > 0 },
+  ] as const;
+
+  const typeOptions = [
+    { value: 'task', label: t('task.type.task'), icon: <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="1.5" width="13" height="13" rx="2.5" fill="#6366f1" opacity="0.15" stroke="#6366f1" strokeWidth="1.3" /><path d="M4.5 8L7 10.5L11.5 5.5" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg> },
+    { value: 'bug', label: t('task.type.bug'), icon: <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="9" r="4.5" fill="#ef4444" /><path d="M6 4.5C6 3.4 6.9 2.5 8 2.5s2 .9 2 2" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" fill="none" /><path d="M5 6.5L3 5M11 6.5L13 5" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><path d="M4 9H2M12 9h2" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><path d="M5 11.5L3 13M11 11.5L13 13" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /></svg> },
+  ] as const;
+
+  const priorityOptions = [
+    { value: 'urgent', label: t('tasks.priority.urgent'), color: '#ef4444' },
+    { value: 'high', label: t('tasks.priority.high'), color: '#f97316' },
+    { value: 'medium', label: t('tasks.priority.medium'), color: '#f59e0b' },
+    { value: 'low', label: t('tasks.priority.low'), color: '#3b82f6' },
+  ] as const;
+
+  const CheckRow = ({ checked, onClick, icon, label, dotColor }: {
+    checked: boolean; onClick: () => void; icon?: React.ReactNode;
+    label: string; dotColor?: string;
+  }) => (
+    <div onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: '10px',
+      padding: '8px 10px', borderRadius: '7px', cursor: 'pointer',
+      background: checked ? 'rgba(99,102,241,0.08)' : 'transparent',
+      transition: 'background 0.12s',
+    }} className="status-item-hover">
+      <span style={{
+        width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0,
+        border: checked ? '2px solid var(--primary)' : '2px solid var(--border-color)',
+        background: checked ? 'var(--primary)' : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'all 0.12s',
+      }}>
+        {checked && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+      </span>
+      {dotColor && <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: dotColor, flexShrink: 0 }} />}
+      {icon}
+      <span style={{ flex: 1, fontSize: '13px', fontWeight: checked ? 600 : 400, color: 'var(--text-primary)' }}>{label}</span>
+    </div>
+  );
+
+  const filterPanel = (
+    <div style={{ width: 440, display: 'flex', flexDirection: 'column', borderRadius: '10px', overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+      <div style={{ display: 'flex', minHeight: 260 }}>
+        <div style={{ width: 150, borderRight: '1px solid var(--border-color)', padding: '10px 0', display: 'flex', flexDirection: 'column', gap: '2px', flexShrink: 0 }}>
+          {filterCategories.map(cat => {
+            const isActive = cat.key === filterCategory;
+            return (
+              <div key={cat.key} onClick={() => setFilterCategory(cat.key)} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 16px', cursor: 'pointer', fontSize: '13px',
+                fontWeight: isActive ? 600 : 400,
+                background: isActive ? 'rgba(99,102,241,0.10)' : 'transparent',
+                color: isActive ? 'var(--primary)' : 'var(--text-primary)',
+                borderLeft: isActive ? '3px solid var(--primary)' : '3px solid transparent',
+                transition: 'all 0.12s',
+              }}>
+                <span>{cat.label}</span>
+                {cat.badge && (
+                  <span style={{ background: 'var(--primary)', color: '#fff', borderRadius: '10px', fontSize: '10px', fontWeight: 700, padding: '1px 6px', minWidth: '18px', textAlign: 'center' }}>✓</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ flex: 1, padding: '10px', display: 'flex', flexDirection: 'column', gap: '2px', overflowY: 'auto', maxHeight: 320 }}>
+          {filterCategory === 'assignee' && (
+            <>
+              <CheckRow
+                checked={localMyTasks}
+                onClick={() => setLocalMyTasks(prev => !prev)}
+                icon={<UserOutlined style={{ fontSize: '14px', color: 'var(--text-muted)' }} />}
+                label={t('tasks.filter.my_tasks')}
+              />
+              <CheckRow
+                checked={localUnassigned}
+                onClick={() => setLocalUnassigned(prev => !prev)}
+                icon={<UserOutlined style={{ fontSize: '14px', color: 'var(--text-muted)' }} />}
+                label={t('tasks.panel.unassigned')}
+              />
+              <div style={{ height: '1px', background: 'var(--border-color)', margin: '6px 0' }} />
+              {projectMembers.map((m: any) => (
+                <CheckRow
+                  key={m.id}
+                  checked={localAssignees.includes(m.id)}
+                  onClick={() => setLocalAssignees(prev =>
+                    prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]
+                  )}
+                  icon={
+                    m.photo ? (
+                      <img src={m.photo} alt={m.name} style={{ width: '18px', height: '18px', borderRadius: '50%' }} />
+                    ) : (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: '#6366f1', color: '#fff', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>
+                        {m.name.charAt(0).toUpperCase()}
+                      </div>
+                    )
+                  }
+                  label={m.name}
+                />
+              ))}
+            </>
+          )}
+
+          {filterCategory === 'status' && columns.map((col: any) => (
+            <CheckRow
+              key={col.key}
+              checked={localStatuses.includes(col.key)}
+              onClick={() => setLocalStatuses(prev =>
+                prev.includes(col.key) ? prev.filter(k => k !== col.key) : [...prev, col.key]
+              )}
+              dotColor={col.color}
+              label={col.label}
+            />
+          ))}
+
+          {filterCategory === 'priority' && priorityOptions.map(opt => (
+            <CheckRow
+              key={opt.value}
+              checked={localPriorities.includes(opt.value)}
+              onClick={() => setLocalPriorities(prev =>
+                prev.includes(opt.value) ? prev.filter(p => p !== opt.value) : [...prev, opt.value]
+              )}
+              dotColor={opt.color}
+              label={opt.label}
+            />
+          ))}
+
+          {filterCategory === 'type' && typeOptions.map(opt => (
+            <CheckRow
+              key={opt.value}
+              checked={localTypes.includes(opt.value)}
+              onClick={() => setLocalTypes(prev =>
+                prev.includes(opt.value) ? prev.filter(t => t !== opt.value) : [...prev, opt.value]
+              )}
+              icon={opt.icon}
+              label={opt.label}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 16px', borderTop: '1px solid var(--border-color)',
+        background: 'var(--bg-secondary)',
+      }}>
+        <button
+          onClick={handleLocalClear}
+          style={{ background: 'transparent', border: 'none', color: hasFilter ? '#ef4444' : 'var(--text-muted)', cursor: hasFilter ? 'pointer' : 'default', fontSize: '12px', fontWeight: 500, padding: 0 }}
+        >
+          {t('common.clear_filter')}
+        </button>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          {activeCount > 0 ? t('task.filter.active_count', { count: activeCount }) : t('task.filter.all_types')}
+        </span>
+      </div>
+    </div>
+  );
+
+  return (
+    <Popover
+      trigger="click"
+      placement="bottomLeft"
+      overlayStyle={{ padding: 0 }}
+      overlayInnerStyle={{ padding: 0, borderRadius: '10px', overflow: 'hidden' }}
+      content={filterPanel}
+      open={open}
+      onOpenChange={handleOpenChange}
+    >
+      <button style={{
+        display: 'flex', alignItems: 'center', gap: '6px',
+        padding: '6px 13px', borderRadius: '8px', cursor: 'pointer',
+        border: hasFilter ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+        background: hasFilter ? 'var(--primary-bg)' : 'var(--bg-card)',
+        color: hasFilter ? 'var(--primary)' : 'var(--text-secondary)',
+        fontSize: '13px', fontWeight: 500, outline: 'none', transition: 'all 0.15s',
+      }}>
+        <FilterOutlined style={{ fontSize: '13px' }} />
+        <span>{t('common.filter')}</span>
+        {hasFilter && <span style={{ background: 'var(--primary)', color: '#fff', borderRadius: '50%', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700 }}>{activeCount}</span>}
+      </button>
+    </Popover>
+  );
+};
 
 // ===== PRIORITY PICKER COMPONENT =====
 const PriorityPicker: React.FC<{
@@ -109,7 +487,7 @@ const PriorityPicker: React.FC<{
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <FlagIcon color={p.color} size={15} />
-            <span style={{ fontSize: '13px', fontWeight: 600, color: p.id === value ? 'var(--primary)' : 'var(--text-primary)' }}>{t(`tasks.priority.${p.id}` as any)}</span>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: p.id === value ? 'var(--primary)' : 'var(--text-primary)' }}>{t(`tasks.priority.${p.id}`)}</span>
           </div>
           {p.id === value && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '11px' }} />}
         </div>
@@ -144,7 +522,7 @@ const PriorityPicker: React.FC<{
         className="status-item-hover"
       >
         <FlagIcon color={current.color} size={14} />
-        <span style={{ fontSize: '12px', fontWeight: 600, color: current.color }}>{t(`tasks.priority.${current.id}` as any)}</span>
+        <span style={{ fontSize: '12px', fontWeight: 600, color: current.color }}>{t(`tasks.priority.${current.id}`)}</span>
         <DownOutlined style={{ fontSize: '8px', color: 'var(--text-muted)' }} />
       </button>
     </Popover>
@@ -358,11 +736,13 @@ const ClickUpStatusPicker: React.FC<{
   projectStatuses: any[];
   onChange: (val: string) => void;
   disabled?: boolean;
+  allowedStatusIds?: string[];
 }> = ({
   currentStatusId,
   projectStatuses,
   onChange,
-  disabled
+  disabled,
+  allowedStatusIds
 }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [open, setOpen] = useState(false);
@@ -373,8 +753,13 @@ const ClickUpStatusPicker: React.FC<{
 
     const handleNextStep = () => {
       if (disabled) return;
+      // In restricted mode, check if next status is allowed
+      const nextStatus = projectStatuses[currentIndex + 1];
       if (currentIndex >= 0 && currentIndex < projectStatuses.length - 1) {
-        onChange(projectStatuses[currentIndex + 1].id);
+        if (allowedStatusIds && !allowedStatusIds.includes(nextStatus.id)) {
+          return; // Blocked by workflow
+        }
+        onChange(nextStatus.id);
       }
     };
 
@@ -388,7 +773,8 @@ const ClickUpStatusPicker: React.FC<{
       <div style={{ width: '240px', padding: '4px' }}>
         <Input
           prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
-          placeholder={t('tasks.panel.status_search_placeholder' as any) || 'Tìm kiếm trạng thái...'}
+          placeholder={t('tasks.panel.status_search_placeholder')}
+
           variant="filled"
           size="small"
           value={searchTerm}
@@ -407,6 +793,7 @@ const ClickUpStatusPicker: React.FC<{
                 </div>
                 {list.map((st: any) => {
                   const isSelected = st.id === currentStatusId;
+                  const isBlocked = allowedStatusIds && !isSelected && !allowedStatusIds.includes(st.id);
                   let bullet = null;
                   if (st.type === 'closed') {
                     bullet = <CheckCircleOutlined style={{ color: st.color, fontSize: '14px' }} />;
@@ -420,6 +807,7 @@ const ClickUpStatusPicker: React.FC<{
                     <div
                       key={st.id}
                       onClick={() => {
+                        if (isBlocked) return;
                         onChange(st.id);
                         setOpen(false);
                       }}
@@ -429,9 +817,10 @@ const ClickUpStatusPicker: React.FC<{
                         justifyContent: 'space-between',
                         padding: '6px 8px',
                         borderRadius: '6px',
-                        cursor: 'pointer',
+                        cursor: isBlocked ? 'not-allowed' : 'pointer',
                         background: isSelected ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
-                        transition: 'background 0.2s',
+                        opacity: isBlocked ? 0.35 : 1,
+                        transition: 'background 0.2s, opacity 0.2s',
                       }}
                       className="status-item-hover"
                     >
@@ -442,6 +831,7 @@ const ClickUpStatusPicker: React.FC<{
                         </span>
                       </div>
                       {isSelected && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '12px' }} />}
+                      {isBlocked && <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>🔒</span>}
                     </div>
                   );
                 })}
@@ -457,7 +847,8 @@ const ClickUpStatusPicker: React.FC<{
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '1px', background: 'var(--border-color)', borderRadius: '6px', overflow: 'hidden', width: 'fit-content', border: '1px solid var(--border-color)' }}>
         {!isLastStatus && (
-          <Tooltip title={t('tasks.panel.next_status_tooltip' as any) || 'Chuyển sang trạng thái tiếp theo'}>
+          <Tooltip title={t('tasks.panel.next_status_tooltip')}>
+
             <button
               onClick={handleNextStep}
               disabled={disabled}
@@ -519,42 +910,79 @@ const ProjectDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { t, lang } = useTranslation();
+  const { t, lang, locale } = useTranslation();
+  const { showDeleteConfirm, DeleteConfirmComponent } = useDeleteConfirm();
 
   const [project, setProject] = useState<any>(null);
   const [showManageStatusesModal, setShowManageStatusesModal] = useState(false);
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [orphanedStatusesToMap, setOrphanedStatusesToMap] = useState<any[]>([]);
   const [statusMappings, setStatusMappings] = useState<Record<string, string>>({});
-  const [draggedStatusId, setDraggedStatusId] = useState<string | null>(null);
+  const draggedStatusIdRef = useRef<string | null>(null);
 
-  const columns = (project?.statuses || [
-    { id: 'todo', name: t('tasks.status.todo'), color: '#9ca0b0', type: 'not_started', position: 0 },
-    { id: 'in_progress', name: t('tasks.status.in_progress'), color: '#3b82f6', type: 'active', position: 1 },
-    { id: 'review', name: t('tasks.status.in_review'), color: '#a855f7', type: 'active', position: 2 },
-    { id: 'done', name: t('tasks.status.done'), color: '#22c55e', type: 'closed', position: 3 },
-  ]).map((s: any) => ({
-    key: s.id,
-    label: s.name,
-    color: s.color,
-    type: s.type
-  }));
+  const columns = useMemo(() => {
+    return (project?.statuses || [
+      { id: 'todo', name: t('tasks.status.todo'), color: '#9ca0b0', type: 'not_started', position: 0 },
+      { id: 'in_progress', name: t('tasks.status.in_progress'), color: '#3b82f6', type: 'active', position: 1 },
+      { id: 'review', name: t('tasks.status.in_review'), color: '#a855f7', type: 'active', position: 2 },
+      { id: 'done', name: t('tasks.status.done'), color: '#22c55e', type: 'closed', position: 3 },
+    ]).map((s: any) => ({
+      key: s.id,
+      label: s.name,
+      color: s.color,
+      type: s.type
+    }));
+  }, [project?.statuses, t]);
 
   const priorityLabels: Record<string, string> = {
-    urgent: t('tasks.priority.urgent') || 'Khẩn cấp',
-    high: t('tasks.priority.high') || 'Cao',
-    medium: t('tasks.priority.medium') || 'Trung bình',
-    low: t('tasks.priority.low') || 'Thấp',
-    none: t('tasks.priority.none') || 'Không ưu tiên',
+    urgent: t('tasks.priority.urgent'),
+    high: t('tasks.priority.high'),
+    medium: t('tasks.priority.medium'),
+    low: t('tasks.priority.low'),
+    none: t('tasks.priority.none'),
   };
+
   const [tasks, setTasks] = useState<Task[]>([]);
+
+  // Index tasks by parent ID to optimize recursive lookup speeds from O(N) to O(1)
+  const tasksByParentId = useMemo(() => {
+    const map: Record<string | number, Task[]> = {};
+    tasks.forEach(t => {
+      if (t.parent_task_id !== undefined && t.parent_task_id !== null) {
+        const pId = String(t.parent_task_id);
+        if (!map[pId]) map[pId] = [];
+        map[pId].push(t);
+      }
+    });
+    return map;
+  }, [tasks]);
+
   const [filterMyTasks, setFilterMyTasks] = useState<boolean>(false);
   const [filterSearch, setFilterSearch] = useState<string>('');
+  const searchQuery = useMemo(() => filterSearch?.toLowerCase().trim() || '', [filterSearch]);
   const [filterAssigneeId, setFilterAssigneeId] = useState<number | undefined>(undefined);
+  const [filterAssignees, setFilterAssignees] = useState<number[]>([]);
+  const [filterUnassigned, setFilterUnassigned] = useState<boolean>(false);
+  const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
+  const [filterTypes, setFilterTypes] = useState<string[]>([]);
   const [expandedTasks, setExpandedTasks] = useState<Record<number, boolean>>({});
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('board');
+  const [activeTab, setActiveTab] = useState('tasks');
+  const [viewMode, setViewMode] = useState<'list' | 'board' | 'calendar'>('board');
+  const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'due_date'>('status');
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+    todo: true,
+    in_progress: true,
+    review: true,
+    done: true,
+    urgent: true,
+    high: true,
+    medium: true,
+    low: true,
+    none: true,
+  });
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [inlineCreate, setInlineCreate] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -563,7 +991,7 @@ const ProjectDetailPage: React.FC = () => {
   const [newTaskAssignee, setNewTaskAssignee] = useState<number | null>(null);
   const [newTaskStartDate, setNewTaskStartDate] = useState('');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
-  const [draggedTask, setDraggedTask] = useState<string | number | null>(null);
+  const draggedTaskRef = useRef<string | number | null>(null);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [selectedNewMembers, setSelectedNewMembers] = useState<number[]>([]);
 
@@ -616,6 +1044,43 @@ const ProjectDetailPage: React.FC = () => {
   const [customColorStatusId, setCustomColorStatusId] = useState<string | null>(null);
   const [customColorValue, setCustomColorValue] = useState('#ffffff');
 
+  // Workflow states
+  const [workflowConfig, setWorkflowConfig] = useState<any>({ mode: 'unrestricted', transitions: [], global_transitions: [] });
+  const [manageStatusTab, setManageStatusTab] = useState<'statuses' | 'workflow'>('statuses');
+  const [showWorkflowEditor, setShowWorkflowEditor] = useState(false);
+  const [workflowTransitions, setWorkflowTransitions] = useState<any[]>([]);
+  const [workflowGlobalTransitions, setWorkflowGlobalTransitions] = useState<any[]>([]);
+  const [workflowMode, setWorkflowMode] = useState<'unrestricted' | 'restricted'>('unrestricted');
+
+  // Helper: get allowed target status IDs from a given status for current user
+  const getAllowedTargetStatuses = (fromStatusId: string): string[] => {
+    const transitions = workflowConfig.transitions || [];
+    const globalTransitions = workflowConfig.global_transitions || [];
+    if (!workflowConfig || workflowConfig.mode === 'unrestricted' || (transitions.length === 0 && globalTransitions.length === 0)) {
+      return columns.map((c: any) => c.key).filter((k: string) => k !== fromStatusId);
+    }
+    const userProjectRole = project?.members?.find((m: any) => m.id === me?.id)?.pivot?.role || 'member';
+    const isAdmin = me?.role === 'admin';
+    const allowed: string[] = [];
+    // Check regular transitions
+    (workflowConfig.transitions || []).forEach((t: any) => {
+      if (t.from === fromStatusId) {
+        if (isAdmin || !t.allowed_roles || t.allowed_roles.length === 0 || t.allowed_roles.includes(userProjectRole)) {
+          allowed.push(t.to);
+        }
+      }
+    });
+    // Check global transitions
+    (workflowConfig.global_transitions || []).forEach((gt: any) => {
+      if (isAdmin || !gt.allowed_roles || gt.allowed_roles.length === 0 || gt.allowed_roles.includes(userProjectRole)) {
+        if (!allowed.includes(gt.to) && gt.to !== fromStatusId) {
+          allowed.push(gt.to);
+        }
+      }
+    });
+    return allowed;
+  };
+
   useEffect(() => {
     if (project?.statuses) {
       setActiveStatuses(JSON.parse(JSON.stringify(project.statuses)));
@@ -641,6 +1106,31 @@ const ProjectDetailPage: React.FC = () => {
     }
   }, [showManageStatusesModal]);
 
+  // Fetch workflow config when project loads or modal opens
+  const fetchWorkflow = async () => {
+    if (!id) return;
+    try {
+      const res = await api.getWorkflow(id);
+      if (res.success && res.data) {
+        const wf = (res.data.workflow && typeof res.data.workflow === 'object' && 'mode' in res.data.workflow)
+          ? res.data.workflow
+          : (res.data && 'mode' in res.data ? res.data : { mode: 'unrestricted', transitions: [], global_transitions: [] });
+        setWorkflowConfig(wf);
+        setWorkflowMode(wf.mode || 'unrestricted');
+        setWorkflowTransitions(wf.transitions || []);
+        setWorkflowGlobalTransitions(wf.global_transitions || []);
+      }
+    } catch (err) {
+      console.error('Failed to load workflow', err);
+    }
+  };
+
+  useEffect(() => {
+    if (project?.id) {
+      fetchWorkflow();
+    }
+  }, [project?.id]);
+
   const handleApplyTemplate = (templateId: string | number) => {
     const template = statusTemplates.find(t => t.id === templateId);
     if (template && template.statuses) {
@@ -653,7 +1143,7 @@ const ProjectDetailPage: React.FC = () => {
     const newId = `${type}_${Date.now()}`;
     const newSt = {
       id: newId,
-      name: t('projects.status.new_status' as any) || (lang === 'vi' ? 'Trạng thái mới' : 'New Status'),
+      name: t('projects.status.new_status'),
       color: defaultColor,
       type: type,
       position: activeStatuses.length
@@ -672,7 +1162,7 @@ const ProjectDetailPage: React.FC = () => {
     if (!sToDelete) return;
     const sameTypeCount = activeStatuses.filter(s => s.type === sToDelete.type).length;
     if (sameTypeCount <= 1) {
-      message.warning(t('projects.status.min_status_warning' as any) || (lang === 'vi' ? 'Phải có ít nhất 1 trạng thái cho mỗi nhóm!' : 'Must keep at least 1 status per group!'));
+      message.warning(t('projects.status.min_status_warning'));
       return;
     }
     setActiveStatuses(prev => prev.filter(s => s.id !== id));
@@ -699,7 +1189,7 @@ const ProjectDetailPage: React.FC = () => {
 
   const handleSaveStatuses = async (mappings?: Record<string, string>) => {
     if (activeStatuses.length === 0) {
-      message.error(t('projects.status.empty_list_error' as any) || 'Danh sách trạng thái không được để trống!');
+      message.error(t('projects.status.empty_list_error'));
       return;
     }
     const payload = activeStatuses.map((s, idx) => ({
@@ -719,7 +1209,7 @@ const ProjectDetailPage: React.FC = () => {
           setSaveAsNewTemplate(false);
           setNewTemplateName('');
         }
-        message.success(t('projects.status.update_success' as any) || (lang === 'vi' ? 'Cập nhật trạng thái dự án thành công!' : 'Project statuses updated successfully!'));
+        message.success(t('projects.status.update_success'));
         setShowManageStatusesModal(false);
         setShowMappingModal(false);
         setStatusMappings({});
@@ -736,11 +1226,12 @@ const ProjectDetailPage: React.FC = () => {
         setStatusMappings(defaultMap);
         setShowMappingModal(true);
       } else {
-        message.error(res.message || t('projects.status.save_error' as any) || 'Không thể lưu trạng thái');
+        message.error(res.message || t('projects.status.save_error'));
       }
     } catch (err: any) {
       console.error(err);
-      message.error(err.response?.data?.message || t('projects.status.save_error' as any) || 'Không thể lưu trạng thái');
+      message.error(err.response?.data?.message || t('projects.status.save_error'));
+
     } finally {
       setLoading(false);
     }
@@ -768,7 +1259,7 @@ const ProjectDetailPage: React.FC = () => {
   };
 
   const getReactionLabel = (type: string) => {
-    return t(`tasks.reaction.${type}` as any) || type;
+    return t(`tasks.reaction.${type}`) || type;
   };
 
   const handleReactComment = async (commentId: number, reactionType: string) => {
@@ -951,10 +1442,12 @@ const ProjectDetailPage: React.FC = () => {
 
   // For project editing modal (if query has ?edit=true)
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
-  const [editProjectForm, setEditProjectForm] = useState({
+  const [editProjectForm, setEditProjectForm] = useState<EditProjectFormData>({
+    id: '',
     name: '',
     description: '',
     color: '',
+    icon: null,
     status: '',
     startDate: '',
     endDate: '',
@@ -971,9 +1464,11 @@ const ProjectDetailPage: React.FC = () => {
         setProject(res.data);
         setTasks(res.data.tasks || []);
         setEditProjectForm({
+          id: res.data.id,
           name: res.data.name,
           description: res.data.description || '',
           color: res.data.color,
+          icon: res.data.icon || null,
           status: res.data.status,
           startDate: res.data.start_date ? res.data.start_date.substring(0, 10) : '',
           endDate: res.data.end_date ? res.data.end_date.substring(0, 10) : '',
@@ -989,7 +1484,7 @@ const ProjectDetailPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      message.error(t('project_detail.toast.load_err' as any));
+      message.error(t('project_detail.toast.load_err'));
     } finally {
       setLoading(false);
     }
@@ -1158,6 +1653,22 @@ const ProjectDetailPage: React.FC = () => {
     };
   }, [id]);
 
+  useLayoutEffect(() => {
+    // Restore display styles of original cards that React reused/reconciled
+    const hiddenCards = document.querySelectorAll('.drag-original-hidden');
+    hiddenCards.forEach(el => {
+      (el as HTMLElement).style.display = '';
+      el.classList.remove('drag-original-hidden');
+    });
+
+    // Remove temporary clone placeholders
+    const clones = document.querySelectorAll('.drag-clone-placeholder');
+    clones.forEach(el => el.remove());
+
+    // Clear all drag highlighting classes from columns/groups
+    cleanupDragClasses();
+  }, [tasks]);
+
   const getFinalStatusId = (statusesList: any[]): string => {
     const doneStatus = statusesList.find(s => s.type === 'closed' || s.type === 'done' || s.id === 'done');
     if (doneStatus) return doneStatus.id;
@@ -1194,11 +1705,41 @@ const ProjectDetailPage: React.FC = () => {
       if (t.assignee_id !== filterAssigneeId) return false;
     }
 
+    if (filterAssignees.length > 0 || filterUnassigned) {
+      const matchesUnassigned = filterUnassigned && !t.assignee_id;
+      const matchesAssigneeList = t.assignee_id && filterAssignees.includes(Number(t.assignee_id));
+      if (!matchesUnassigned && !matchesAssigneeList) return false;
+    }
+
+    if (filterStatuses.length > 0) {
+      if (!t.status || !filterStatuses.includes(t.status)) return false;
+    }
+
+    if (filterPriorities.length > 0) {
+      if (!t.priority || !filterPriorities.includes(t.priority)) return false;
+    }
+
+    if (filterTypes.length > 0) {
+      const tType = t.type || 'task';
+      if (!filterTypes.includes(tType)) return false;
+    }
+
     return true;
   };
 
+  const handleClearFilters = () => {
+    setFilterSearch('');
+    setFilterMyTasks(false);
+    setFilterAssigneeId(undefined);
+    setFilterAssignees([]);
+    setFilterUnassigned(false);
+    setFilterStatuses([]);
+    setFilterPriorities([]);
+    setFilterTypes([]);
+  };
+
   const hasMatchingSubtasks = (parentId: number): boolean => {
-    const children = tasks.filter(t => Number(t.parent_task_id) === Number(parentId));
+    const children = tasksByParentId[parentId] || [];
     for (const child of children) {
       if (taskMatchesFilters(child)) return true;
       if (hasMatchingSubtasks(Number(child.id))) return true;
@@ -1208,7 +1749,7 @@ const ProjectDetailPage: React.FC = () => {
 
   const getTasksByStatus = (status: string) => {
     return tasks.filter((t) => {
-      if (t.status !== status || t.parent_task_id) return false;
+      if (String(t.status) !== String(status) || t.parent_task_id) return false;
 
       // Show parent if it matches filters or has a subtask that matches filters
       if (taskMatchesFilters(t)) return true;
@@ -1217,10 +1758,261 @@ const ProjectDetailPage: React.FC = () => {
       return false;
     });
   };
+  const boardTasksByStatus = useMemo(() => {
+    const map: Record<string, Task[]> = {};
+    columns.forEach((col: any) => {
+      map[col.key] = tasks.filter((t) => {
+        if (String(t.status) !== String(col.key) || t.parent_task_id) return false;
+
+        // Show parent if it matches filters or has a subtask that matches filters
+        if (taskMatchesFilters(t)) return true;
+        if (hasMatchingSubtasks(Number(t.id))) return true;
+
+        return false;
+      });
+    });
+    return map;
+  }, [tasks, filterSearch, filterMyTasks, filterAssigneeId, filterAssignees, filterUnassigned, filterStatuses, filterPriorities, filterTypes, me, columns]);
+
+  const listTasksGrouped = useMemo(() => {
+    const filteredTasks = tasks.filter(taskMatchesFilters);
+    const groups: Record<string, Task[]> = {};
+    if (groupBy === 'priority') {
+      ['urgent', 'high', 'medium', 'low'].forEach((p) => {
+        groups[p] = filteredTasks.filter((t) => t.priority === p);
+      });
+      const other = filteredTasks.filter((t) => !['urgent', 'high', 'medium', 'low'].includes(t.priority));
+      if (other.length > 0) groups['none'] = other;
+    } else if (groupBy === 'status') {
+      const statusListKeys = columns.map((c: any) => c.key);
+      statusListKeys.forEach((s: string) => {
+        groups[s] = filteredTasks.filter((t) => t.status === s);
+      });
+      const other = filteredTasks.filter((t) => !statusListKeys.includes(t.status));
+      if (other.length > 0) groups['none'] = other;
+    } else if (groupBy === 'due_date') {
+      filteredTasks.forEach((task) => {
+        const dStr = task.due_date ? task.due_date.substring(0, 10) : t('tasks.no_due_date');
+        if (!groups[dStr]) groups[dStr] = [];
+        groups[dStr].push(task);
+      });
+    }
+    return groups;
+  }, [tasks, filterSearch, filterMyTasks, filterAssigneeId, filterAssignees, filterUnassigned, filterStatuses, filterPriorities, filterTypes, me, groupBy, columns, t]);
+
+  const isTaskDone = (task: Task) => {
+    const statusObj = project?.statuses?.find((s: any) => s.id === task.status);
+    if (statusObj) return statusObj.type === 'closed';
+    return task.status === 'done';
+  };
+
+  const getFallbackStatusObj = (task: Task) => {
+    const statusObj = project?.statuses?.find((s: any) => s.id === task.status);
+    if (statusObj) return statusObj;
+    const defaults: Record<string, { id: string; name: string; color: string; type: string }> = {
+      todo: { id: 'todo', name: t('tasks.status.todo'), color: '#9ca0b0', type: 'not_started' },
+      in_progress: { id: 'in_progress', name: t('tasks.status.in_progress'), color: '#3b82f6', type: 'active' },
+      review: { id: 'review', name: t('tasks.status.in_review'), color: '#a855f7', type: 'active' },
+      done: { id: 'done', name: t('tasks.status.done'), color: '#22c55e', type: 'closed' },
+    };
+
+    return defaults[task.status] || { id: task.status, name: String(task.status).toUpperCase().replace('_', ' '), color: '#9ca0b0', type: 'active' };
+  };
+
+  const getInitials = (nameStr: string) => {
+    if (!nameStr) return 'U';
+    const parts = nameStr.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return dateStr;
+    return date.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+  };
+
+  const formatDateTimeShort = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const timePart = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const datePart = d.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+    return `${timePart} ${datePart}`;
+  };
+
+  const isToday = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const normalized = dateStr.substring(0, 10);
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return normalized === todayStr;
+  };
+
+  const checkIsOverdue = (dateStr?: string, status?: string, task?: Task) => {
+    if (!dateStr) return false;
+    if (task) {
+      if (isTaskDone(task)) return false;
+    } else if (status === 'done') {
+      return false;
+    }
+    const normalized = dateStr.substring(0, 10);
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return normalized < todayStr;
+  };
+
+  const toggleStatus = async (id: number | string, currentStatus: string, task?: Task) => {
+    const projectStatuses = project?.statuses || [];
+    let nextStatus = '';
+    if (projectStatuses.length > 0) {
+      const idx = projectStatuses.findIndex((s: any) => s.id === currentStatus);
+      if (idx !== -1) {
+        const nextObj = projectStatuses[(idx + 1) % projectStatuses.length];
+        nextStatus = nextObj.id;
+      } else {
+        nextStatus = projectStatuses[0].id;
+      }
+    } else {
+      const order = ['todo', 'in_progress', 'review', 'done'];
+      const idx = order.indexOf(currentStatus as any);
+      nextStatus = idx !== -1 ? order[(idx + 1) % order.length] : 'todo';
+    }
+
+    try {
+      const res = await api.updateTaskStatus(id, { status: nextStatus as any });
+      if (res.success) {
+        message.success(t('project_detail.toast.status_updated'));
+        setTasks(prev => prev.map(t => t.id === id ? { ...t, status: nextStatus } : t));
+        if (selectedTask && selectedTask.id === id) {
+          setEditStatus(nextStatus);
+        }
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.toast.status_err'));
+    }
+  };
+
+  const handleMarkDone = async (id: number | string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+
+    try {
+      const res = await api.updateTaskStatus(id, { status: 'done' });
+      if (res.success) {
+        message.success(t('project_detail.toast.status_updated'));
+        setTasks(prev => prev.map(t => t.id === id ? { ...t, status: 'done' } : t));
+        if (selectedTask && selectedTask.id === id) {
+          setEditStatus('done');
+        }
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.toast.status_err'));
+    }
+  };
+
+  const handleToggleWatchTask = async (id: number | string) => {
+    try {
+      const res = await api.toggleWatchTask(id);
+      if (res.success) {
+        setTasks(prev => prev.map(t => t.id === id ? { ...t, watcher_ids: res.watcher_ids } : t));
+        if (selectedTask && selectedTask.id === id) {
+          setSelectedTask(prev => prev ? { ...prev, watcher_ids: res.watcher_ids } : null);
+        }
+        message.success(res.watched ? t('tasks.detail_toast.watching') : t('tasks.detail_toast.unwatching'));
+        fetchProjectData(true);
+      }
+    } catch (err) {
+      console.error('Failed to toggle watch status', err);
+      message.error(t('tasks.detail_toast.watcher_err'));
+    }
+  };
+
+  const cleanupDragClasses = () => {
+    console.log('[DragDnD] cleanupDragClasses executing...');
+    const draggedCards = document.querySelectorAll('.project-detail__task-card.dragging, .my-tasks__task-row.dragging');
+    console.log('[DragDnD] Found dragged cards:', draggedCards.length);
+    draggedCards.forEach(el => el.classList.remove('dragging'));
+
+    const colElements = document.querySelectorAll('.project-detail__column');
+    console.log('[DragDnD] Found columns to clean:', colElements.length);
+    colElements.forEach(el => {
+      const dataStatus = el.getAttribute('data-status');
+      const hasDragActive = el.classList.contains('drag-active');
+      const hasDropAllowed = el.classList.contains('drop-allowed');
+      if (hasDragActive || hasDropAllowed) {
+        console.log(`[DragDnD] Cleaning column [${dataStatus}]: had drag-active = ${hasDragActive}, drop-allowed = ${hasDropAllowed}`);
+      }
+      el.classList.remove('drag-active', 'column-self', 'drop-allowed', 'drop-disallowed');
+    });
+
+    const groupElements = document.querySelectorAll('.my-tasks__group');
+    groupElements.forEach(el => {
+      el.classList.remove('drag-active', 'group-self', 'drop-allowed', 'drop-disallowed');
+    });
+  };
 
   const handleDragStart = (e: React.DragEvent, taskId: string | number) => {
-    setDraggedTask(taskId);
+    draggedTaskRef.current = taskId;
     e.dataTransfer.effectAllowed = 'move';
+
+    // Add dragging class to the dragged element after the drag image is captured
+    const cardEl = e.currentTarget as HTMLElement;
+    setTimeout(() => {
+      cardEl.classList.add('dragging');
+    }, 0);
+
+    const taskToMove = tasks.find(t => t.id === taskId);
+    if (taskToMove) {
+      const transitions = workflowConfig?.transitions || [];
+      const globalTransitions = workflowConfig?.global_transitions || [];
+      const hasTransitionsConfigured = transitions.length > 0 || globalTransitions.length > 0;
+      const isRestricted = workflowConfig?.mode === 'restricted' && hasTransitionsConfigured;
+      const allowed = isRestricted ? getAllowedTargetStatuses(taskToMove.status) : null;
+
+      // Highlight columns
+      const colElements = document.querySelectorAll('.project-detail__column');
+      colElements.forEach(el => {
+        const colKey = el.getAttribute('data-status');
+        if (!colKey) return;
+        el.classList.add('drag-active');
+        if (colKey === taskToMove.status) {
+          el.classList.add('column-self');
+        } else {
+          const isAllowed = !allowed || allowed.includes(colKey);
+          if (isAllowed) {
+            el.classList.add('drop-allowed');
+          } else {
+            el.classList.add('drop-disallowed');
+          }
+        }
+      });
+
+      // Highlight list view groups
+      const groupElements = document.querySelectorAll('.my-tasks__group');
+      groupElements.forEach(el => {
+        const groupKey = el.getAttribute('data-status');
+        if (!groupKey) return;
+        el.classList.add('drag-active');
+        if (groupKey === taskToMove.status) {
+          el.classList.add('group-self');
+        } else {
+          const isAllowed = !allowed || allowed.includes(groupKey);
+          if (isAllowed) {
+            el.classList.add('drop-allowed');
+          } else {
+            el.classList.add('drop-disallowed');
+          }
+        }
+      });
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    draggedTaskRef.current = null;
+    cleanupDragClasses();
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1230,39 +2022,191 @@ const ProjectDetailPage: React.FC = () => {
 
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault();
-    if (!draggedTask) return;
-
-    const taskToMove = tasks.find(t => t.id === draggedTask);
-    if (!taskToMove) return;
-
-    if (!canEditTask(taskToMove)) {
-      message.error(t('project_detail.toast.no_edit_permission' as any) || 'Bạn không có quyền chỉnh sửa công việc này!');
-      setDraggedTask(null);
+    const taskId = draggedTaskRef.current;
+    console.log('[DragDnD] handleDrop called. taskId:', taskId, 'newStatus:', newStatus);
+    if (!taskId) {
+      console.warn('[DragDnD] handleDrop: taskId is null/undefined, aborting');
       return;
     }
 
-    // Optimistic Update
-    const prevTasks = [...tasks];
-    setTasks((prev) =>
-      prev.map((t) => (t.id === draggedTask ? { ...t, status: newStatus as Task['status'] } : t))
-    );
-
-    try {
-      const res = await api.updateTaskStatus(draggedTask, { status: newStatus as any });
-      if (res.success) {
-        message.success(t('project_detail.toast.status_updated' as any));
-        fetchProjectData(true);
-      } else {
-        setTasks(prevTasks);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setTasks(prevTasks);
-      const errMsg = err.response?.data?.message || t('tasks.toast.status_err' as any);
-      message.error(errMsg);
-    } finally {
-      setDraggedTask(null);
+    const taskToMove = tasks.find(t => String(t.id) === String(taskId));
+    console.log('[DragDnD] taskToMove:', taskToMove);
+    if (!taskToMove) {
+      console.warn('[DragDnD] handleDrop: taskToMove is null/undefined, aborting');
+      return;
     }
+
+    if (String(taskToMove.status) === String(newStatus)) {
+      console.log('[DragDnD] Task status matches newStatus, cleaning and aborting');
+      cleanupDragClasses();
+      draggedTaskRef.current = null;
+      return;
+    }
+
+    if (!canEditTask(taskToMove)) {
+      message.error(t('project_detail.toast.no_edit_permission'));
+      cleanupDragClasses();
+      draggedTaskRef.current = null;
+      return;
+    }
+
+    // Workflow validation: check if transition is allowed
+    const transitions = workflowConfig.transitions || [];
+    const globalTransitions = workflowConfig.global_transitions || [];
+    const hasTransitionsConfigured = transitions.length > 0 || globalTransitions.length > 0;
+
+    if (workflowConfig?.mode === 'restricted' && hasTransitionsConfigured && taskToMove.status !== newStatus) {
+      const allowed = getAllowedTargetStatuses(taskToMove.status);
+      if (!allowed.includes(newStatus)) {
+        // Build clear warning message for local block
+        const hasTransition = transitions.some((t: any) => t.from === taskToMove.status && t.to === newStatus) ||
+          globalTransitions.some((gt: any) => gt.to === newStatus);
+
+        const statusNames = (project?.statuses || []).reduce((acc: any, s: any) => {
+          acc[s.id] = s.name;
+          return acc;
+        }, {} as any);
+        const fromName = statusNames[taskToMove.status] || taskToMove.status;
+        const toName = statusNames[newStatus] || newStatus;
+
+        if (!hasTransition) {
+          message.warning(t('workflow.transition_not_defined', {
+            from: fromName,
+            to: toName,
+            defaultValue: `Quy trình dự án không cho phép chuyển từ trạng thái '${fromName}' sang '${toName}'.`
+          }));
+        } else {
+          message.warning(t('workflow.role_not_allowed', {
+            defaultValue: 'Bạn không có vai trò phù hợp để thực hiện chuyển đổi trạng thái này.'
+          }));
+        }
+        cleanupDragClasses();
+        draggedTaskRef.current = null;
+        return;
+      }
+    }
+
+    // Clone card and hide original to avoid React "removeChild" crashes
+    const cardEl = document.querySelector(`.project-detail__task-card[data-task-id="${taskId}"], .my-tasks__task-row[data-task-id="${taskId}"]`) as HTMLElement;
+    if (cardEl) {
+      const clone = cardEl.cloneNode(true) as HTMLElement;
+      clone.classList.add('drag-clone-placeholder');
+
+      // Hide original card and mark it with a class for later visibility restoration
+      cardEl.style.display = 'none';
+      cardEl.classList.add('drag-original-hidden');
+
+      const draggedIndex = tasks.findIndex(t => String(t.id) === String(taskId));
+
+      if (viewMode === 'board') {
+        const targetColBody = document.querySelector(`.project-detail__column--${newStatus} .project-detail__column-body`) as HTMLElement;
+        if (targetColBody) {
+          // Find all existing cards in this column
+          const cards = Array.from(targetColBody.querySelectorAll('.project-detail__task-card')) as HTMLElement[];
+          const existingCards = cards.filter(el => !el.classList.contains('drag-clone-placeholder'));
+
+          let insertBeforeEl: HTMLElement | null = null;
+          for (const card of existingCards) {
+            const cardTaskId = card.getAttribute('data-task-id');
+            if (cardTaskId) {
+              const cardIndex = tasks.findIndex(t => String(t.id) === String(cardTaskId));
+              if (cardIndex > draggedIndex) {
+                insertBeforeEl = card;
+                break;
+              }
+            }
+          }
+
+          if (insertBeforeEl) {
+            targetColBody.insertBefore(clone, insertBeforeEl);
+          } else {
+            const controlEl = targetColBody.querySelector(':scope > :not(.project-detail__task-card):not(.drag-clone-placeholder)');
+            if (controlEl) {
+              targetColBody.insertBefore(clone, controlEl);
+            } else {
+              targetColBody.appendChild(clone);
+            }
+          }
+        }
+      } else {
+        const targetGroupBody = document.querySelector(`.my-tasks__group[data-status="${newStatus}"] .my-tasks__group-body`) as HTMLElement;
+        if (targetGroupBody) {
+          // Find all existing cards in this group
+          const cards = Array.from(targetGroupBody.querySelectorAll('.my-tasks__task-row')) as HTMLElement[];
+          const existingCards = cards.filter(el => !el.classList.contains('drag-clone-placeholder'));
+
+          let insertBeforeEl: HTMLElement | null = null;
+          for (const card of existingCards) {
+            const cardTaskId = card.getAttribute('data-task-id');
+            if (cardTaskId) {
+              const cardIndex = tasks.findIndex(t => String(t.id) === String(cardTaskId));
+              if (cardIndex > draggedIndex) {
+                insertBeforeEl = card;
+                break;
+              }
+            }
+          }
+
+          if (insertBeforeEl) {
+            targetGroupBody.insertBefore(clone, insertBeforeEl);
+          } else {
+            const controlEl = targetGroupBody.querySelector(':scope > :not(.my-tasks__task-row):not(.drag-clone-placeholder)');
+            if (controlEl) {
+              targetGroupBody.insertBefore(clone, controlEl);
+            } else {
+              targetGroupBody.appendChild(clone);
+            }
+          }
+        }
+      }
+    }
+
+    cleanupDragClasses();
+    draggedTaskRef.current = null;
+
+    // Defer state update using setTimeout to let the browser paint the clone immediately!
+    setTimeout(async () => {
+      console.log('[DragDnD] Defer execution starts inside setTimeout');
+      cleanupDragClasses();
+      // Optimistic Update
+      const prevTasks = [...tasks];
+      console.log('[DragDnD] Triggering optimistic update setTasks for taskId:', taskId);
+      setTasks((prev) => {
+        const next = prev.map((t) => {
+          if (String(t.id) === String(taskId)) {
+            console.log('[DragDnD] Optimistic match! Task ID:', t.id, 'status changed from:', t.status, 'to:', newStatus);
+            return { ...t, status: newStatus as Task['status'] };
+          }
+          return t;
+        });
+        return next;
+      });
+
+      try {
+        console.log('[DragDnD] Calling api.updateTaskStatus for taskId:', taskId, 'to newStatus:', newStatus);
+        const res = await api.updateTaskStatus(taskId, { status: newStatus as any });
+        console.log('[DragDnD] API response:', res);
+        if (res.success) {
+          message.success(t('project_detail.toast.status_updated'));
+          const updatedTaskFromServer = res.data;
+          if (updatedTaskFromServer) {
+            console.log('[DragDnD] Updating tasks with server response:', updatedTaskFromServer);
+            setTasks(prev => prev.map(t => String(t.id) === String(updatedTaskFromServer.id) ? updatedTaskFromServer : t));
+          } else {
+            console.log('[DragDnD] res.data is null/undefined. No task update from server response.');
+          }
+        } else {
+          console.warn('[DragDnD] API success is false, reverting tasks');
+          setTasks(prevTasks);
+        }
+      } catch (err: any) {
+        console.error('[DragDnD] API error, reverting tasks:', err);
+        setTasks(prevTasks);
+        const errMsg = err.response?.data?.message ||
+          (err.response?.data?.workflow_error ? t('workflow.transition_blocked') : t('tasks.toast.status_err'));
+        message.error(errMsg);
+      }
+    }, 50);
   };
 
   const handleInlineCreate = async (status: string) => {
@@ -1279,7 +2223,7 @@ const ProjectDetailPage: React.FC = () => {
       if (newTaskDueDate) payload.due_date = newTaskDueDate;
       const res = await api.createTask(payload);
       if (res.success) {
-        message.success(t('project_detail.toast.task_created' as any));
+        message.success(t('project_detail.toast.task_created'));
         setNewTaskTitle('');
         setNewTaskStatus('');
         setNewTaskPriority('medium');
@@ -1296,53 +2240,21 @@ const ProjectDetailPage: React.FC = () => {
     }
   };
 
-  const handleUpdateProject = async () => {
-    if (!editProjectForm.name.trim() || !id) {
-      message.error(t('project_detail.toast.required_name' as any));
-      return;
-    }
-
-    if (editProjectForm.startDate && editProjectForm.endDate) {
-      if (new Date(editProjectForm.endDate) < new Date(editProjectForm.startDate)) {
-        message.error(t('project_detail.toast.date_err' as any));
-        return;
-      }
-    }
-
-    try {
-      const res = await api.updateProject(id, {
-        name: editProjectForm.name,
-        description: editProjectForm.description,
-        color: editProjectForm.color,
-        status: editProjectForm.status,
-        start_date: editProjectForm.startDate || null,
-        end_date: editProjectForm.endDate || null,
-      });
-      if (res.success) {
-        message.success(t('project_detail.toast.update_success' as any));
-        setShowEditProjectModal(false);
-        fetchProjectData();
-        window.dispatchEvent(new Event('projects-changed'));
-      }
-    } catch (err) {
-      console.error(err);
-      message.error(t('project_detail.toast.update_err' as any));
-    }
-  };
+  // handleUpdateProject removed, handled by EditProjectModal
 
   const handleAddMember = async () => {
     if (selectedNewMembers.length === 0 || !id) return;
     try {
       const res = await api.addProjectMember(id, { user_ids: selectedNewMembers.map(Number), role: 'member' });
       if (res.success) {
-        message.success(t('project_detail.toast.member_added' as any));
+        message.success(t('project_detail.toast.member_added'));
         setShowAddMemberModal(false);
         setSelectedNewMembers([]);
         fetchProjectData();
       }
     } catch (err: any) {
       console.error(err);
-      const errMsg = err.response?.data?.message || t('projects.members.add_failed' as any);
+      const errMsg = err.response?.data?.message || t('projects.members.add_failed');
       message.error(errMsg);
     }
   };
@@ -1352,12 +2264,12 @@ const ProjectDetailPage: React.FC = () => {
     try {
       const res = await api.removeProjectMember(id, userId);
       if (res.success) {
-        message.success(t('project_detail.toast.member_removed' as any));
+        message.success(t('project_detail.toast.member_removed'));
         fetchProjectData();
       }
     } catch (err: any) {
       console.error(err);
-      const errMsg = err.response?.data?.message || t('projects.members.delete_failed' as any);
+      const errMsg = err.response?.data?.message || t('projects.members.delete_failed');
       message.error(errMsg);
     }
   };
@@ -1404,12 +2316,12 @@ const ProjectDetailPage: React.FC = () => {
 
   const handleAddManualTime = async () => {
     if (!logTimeTask) {
-      message.error(lang === 'vi' ? 'Vui lòng chọn công việc' : 'Please select a task');
+      message.error(t('manual_log.err.select_task'));
       return;
     }
     const durationInSeconds = (logTimeHours * 3600) + (logTimeMinutes * 60);
     if (durationInSeconds <= 0) {
-      message.error(lang === 'vi' ? 'Vui lòng nhập thời gian hợp lệ' : 'Please enter a valid duration');
+      message.error(t('tasks.panel.invalid_time'));
       return;
     }
     try {
@@ -1419,7 +2331,7 @@ const ProjectDetailPage: React.FC = () => {
         started_at: logTimeDate ? `${logTimeDate} 09:00:00` : undefined
       });
       if (data?.success) {
-        message.success(lang === 'vi' ? 'Ghi nhận thời gian thành công' : 'Time entry logged successfully');
+        message.success(t('manual_log.success'));
         setShowLogTimeModal(false);
         setLogTimeTask(null);
         setLogTimeHours(0);
@@ -1427,11 +2339,11 @@ const ProjectDetailPage: React.FC = () => {
         setLogTimeDescription('');
         fetchProjectData(true);
       } else {
-        message.error(data?.message || 'Error logging time');
+        message.error(data?.message || t('manual_log.err.generic'));
       }
     } catch (err) {
       console.error(err);
-      message.error('Failed to log time');
+      message.error(t('manual_log.err.generic'));
     }
   };
 
@@ -1439,12 +2351,12 @@ const ProjectDetailPage: React.FC = () => {
     try {
       const data = await api.deleteTimeEntry(entryId);
       if (data?.success) {
-        message.success(lang === 'vi' ? 'Xoá bản ghi thành công' : 'Deleted time log successfully');
+        message.success(t('timesheet.toast.log_deleted'));
         fetchProjectData(true);
       }
     } catch (err) {
       console.error(err);
-      message.error('Failed to delete time log');
+      message.error(t('timesheet.toast.log_delete_err'));
     }
   };
 
@@ -1455,7 +2367,7 @@ const ProjectDetailPage: React.FC = () => {
     const parts = [];
     if (h > 0) parts.push(`${h}h`);
     if (m > 0) parts.push(`${m}m`);
-    if (h === 0 && m === 0) parts.push(`${s}s`);
+    if (s > 0 || (h === 0 && m === 0)) parts.push(`${s}s`);
     return parts.join(' ');
   };
 
@@ -1501,12 +2413,12 @@ const ProjectDetailPage: React.FC = () => {
         project_id: selectedTask.project_id,
         title: subtaskTitle.trim(),
         parent_task_id: selectedTask.id,
-        status: 'todo',
+        status: project?.statuses?.[0]?.id || 'todo',
         priority: subtaskPriority,
         assignee_id: subtaskAssigneeId,
       });
       if (res.success) {
-        message.success(t('tasks.detail_toast.subtask_added' as any) || 'Đã thêm công việc con');
+        message.success(t('tasks.detail_toast.subtask_added'));
         setSubtaskTitle('');
         setSubtaskAssigneeId(undefined);
         setSubtaskPriority('medium');
@@ -1524,7 +2436,7 @@ const ProjectDetailPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      message.error(t('tasks.detail_toast.subtask_add_err' as any) || 'Không thể thêm công việc con');
+      message.error(t('tasks.detail_toast.subtask_add_err'));
     }
   };
 
@@ -1534,7 +2446,7 @@ const ProjectDetailPage: React.FC = () => {
     try {
       const res = await api.updateTask(st.id, { status: newStatus });
       if (res.success) {
-        message.success(t('tasks.detail_toast.status_updated' as any) || 'Đã cập nhật trạng thái');
+        message.success(t('tasks.detail_toast.status_updated'));
 
         // Refresh parent task details
         const taskRes = await api.getTask(selectedTask.id);
@@ -1549,7 +2461,7 @@ const ProjectDetailPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      message.error(t('tasks.detail_toast.status_update_err' as any) || 'Không thể cập nhật trạng thái');
+      message.error(t('tasks.detail_toast.status_update_err'));
     }
   };
 
@@ -1562,12 +2474,12 @@ const ProjectDetailPage: React.FC = () => {
           ...prev,
           watcher_ids: res.watcher_ids
         } : null);
-        message.success(res.watched ? (t('tasks.detail_toast.watching' as any) || 'Đang theo dõi công việc') : (t('tasks.detail_toast.unwatching' as any) || 'Đã bỏ theo dõi công việc'));
+        message.success(res.watched ? t('tasks.detail_toast.watching') : t('tasks.detail_toast.unwatching'));
         fetchProjectData();
       }
     } catch (err) {
       console.error('Failed to toggle watch status', err);
-      message.error(t('tasks.detail_toast.watch_update_err' as any) || 'Không thể cập nhật trạng thái theo dõi');
+      message.error(t('tasks.detail_toast.watch_update_err'));
     }
   };
 
@@ -1591,10 +2503,10 @@ const ProjectDetailPage: React.FC = () => {
     const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
     const minutes = totalMinutes % 60;
     const parts: string[] = [];
-    if (days > 0) parts.push(t('common.time.days' as any, { count: days }));
-    if (hours > 0) parts.push(t('common.time.hours' as any, { count: hours }));
-    if (minutes > 0 && days === 0) parts.push(t('common.time.minutes' as any, { count: minutes }));
-    return parts.length > 0 ? parts.join(' ') : t('common.time.less_than_minute' as any);
+    if (days > 0) parts.push(t('common.time.days', { count: days }));
+    if (hours > 0) parts.push(t('common.time.hours', { count: hours }));
+    if (minutes > 0 && days === 0) parts.push(t('common.time.minutes', { count: minutes }));
+    return parts.length > 0 ? parts.join(' ') : t('common.time.less_than_minute');
   };
 
   const autoSaveTaskField = async (fieldName: string, value: any) => {
@@ -1641,7 +2553,7 @@ const ProjectDetailPage: React.FC = () => {
       }
     } catch (err: any) {
       console.error(err);
-      const errMsg = err.response?.data?.message || 'Không thể tự động lưu.';
+      const errMsg = err.response?.data?.message || t('tasks.detail_toast.auto_save_err');
       message.error(errMsg);
     }
   };
@@ -1702,7 +2614,7 @@ const ProjectDetailPage: React.FC = () => {
     try {
       const res = await api.createTaskComment(selectedTask!.id, newCommentText, newCommentFile || undefined);
       if (res.success) {
-        message.success(t('project_detail.toast.comment_sent' as any));
+        message.success(t('project_detail.toast.comment_sent'));
         setNewCommentText('');
         setNewCommentFile(null);
         setCommentFilePreview(null);
@@ -1716,7 +2628,7 @@ const ProjectDetailPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      message.error(t('project_detail.toast.comment_err' as any));
+      message.error(t('project_detail.toast.comment_err'));
     }
   };
 
@@ -1725,7 +2637,7 @@ const ProjectDetailPage: React.FC = () => {
     try {
       const res = await api.createTaskComment(selectedTask.id, replyText, replyFile || undefined, parentCommentId);
       if (res.success) {
-        message.success(t('project_detail.toast.comment_sent' as any));
+        message.success(t('project_detail.toast.comment_sent'));
         setReplyText('');
         setReplyFile(null);
         setReplyFilePreview(null);
@@ -1744,7 +2656,7 @@ const ProjectDetailPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      message.error(t('project_detail.toast.comment_err' as any));
+      message.error(t('project_detail.toast.comment_err'));
     }
   };
 
@@ -1788,23 +2700,23 @@ const ProjectDetailPage: React.FC = () => {
   };
 
   const handleDeleteTask = async (taskId: string | number) => {
-    Modal.confirm({
-      title: t('project_detail.confirm.delete_task' as any),
-      content: t('project_detail.confirm.delete_task_content' as any),
-      okText: t('project_detail.confirm.delete_btn' as any),
-      okType: 'danger',
-      cancelText: t('tasks.modal.cancel' as any),
-      onOk: async () => {
+    showDeleteConfirm({
+      title: t('project_detail.confirm.delete_task'),
+      content: t('project_detail.confirm.delete_task_content'),
+      okText: t('project_detail.confirm.delete_btn'),
+      cancelText: t('tasks.modal.cancel'),
+      onConfirm: async () => {
         try {
           const res = await api.deleteTask(taskId);
           if (res.success) {
-            message.success(t('project_detail.toast.task_deleted' as any));
+            message.success(t('project_detail.toast.task_deleted'));
             setSelectedTask(null);
             fetchProjectData();
           }
         } catch (err) {
           console.error(err);
-          message.error(t('project_detail.toast.task_delete_err' as any));
+          message.error(t('project_detail.toast.task_delete_err'));
+          throw err;
         }
       }
     });
@@ -1828,13 +2740,6 @@ const ProjectDetailPage: React.FC = () => {
     </svg>
   );
 
-  const getInitials = (name: string) => {
-    const parts = name.trim().split(' ');
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    }
-    return name.substring(0, 2).toUpperCase();
-  };
 
 
 
@@ -1853,7 +2758,7 @@ const ProjectDetailPage: React.FC = () => {
     memberTimeMap[uid].duration += (entry.duration || 0);
   });
 
-  let mostActiveMember = 'N/A';
+  let mostActiveMember = '—';
   let maxMemberTime = 0;
   Object.values(memberTimeMap).forEach(m => {
     if (m.duration > maxMemberTime) {
@@ -1872,7 +2777,7 @@ const ProjectDetailPage: React.FC = () => {
     taskTimeMap[tid].duration += (entry.duration || 0);
   });
 
-  let mostLoggedTask = 'N/A';
+  let mostLoggedTask = '—';
   let maxTaskTime = 0;
   Object.values(taskTimeMap).forEach(t => {
     if (t.duration > maxTaskTime) {
@@ -1892,15 +2797,14 @@ const ProjectDetailPage: React.FC = () => {
   })).sort((a, b) => b.value - a.value).slice(0, 7);
 
   const tabs = [
-    { key: 'board', label: t('project_detail.tab.board' as any), badge: columns.reduce((sum: number, col: any) => sum + getTasksByStatus(col.key).length, 0) },
-    { key: 'calendar', label: t('project_detail.tab.calendar' as any) || (lang === 'vi' ? 'Lịch biểu' : 'Calendar'), badge: tasks.filter(t => t.due_date).length },
-    { key: 'timesheet', label: t('project_detail.tab.timesheet' as any) || (lang === 'vi' ? 'Bảng công' : 'Timesheet'), badge: projectTimeEntries.length },
-    { key: 'members', label: t('project_detail.tab.members' as any), badge: project?.members?.length || 0 },
+    { key: 'tasks', label: t('project_detail.tab.tasks'), badge: tasks.filter(t => !t.parent_task_id).length },
+    { key: 'timesheet', label: t('project_detail.tab.timesheet'), badge: projectTimeEntries.length },
+    { key: 'members', label: t('project_detail.tab.members'), badge: project?.members?.length || 0 },
   ];
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '400px' }}>
-        <Spin size="large" tip={t('projects.toast.loading_details' as any) || 'Đang tải chi tiết dự án...'} />
+        <Spin size="large" description={t('projects.toast.loading_details')} />
       </div>
     );
   }
@@ -1908,8 +2812,8 @@ const ProjectDetailPage: React.FC = () => {
   if (!project) {
     return (
       <div style={{ padding: '24px', textAlign: 'center' }}>
-        <h3>{t('projects.toast.project_not_found' as any) || 'Không tìm thấy dự án'}</h3>
-        <Button onClick={() => navigate('/projects')}>{t('projects.toast.back_to_list' as any) || 'Quay lại danh sách'}</Button>
+        <h3>{t('projects.toast.project_not_found')}</h3>
+        <Button onClick={() => navigate('/projects')}>{t('projects.toast.back_to_list')}</Button>
       </div>
     );
   }
@@ -1919,10 +2823,15 @@ const ProjectDetailPage: React.FC = () => {
     return (
       <div
         key={s.id}
+        className="status-manage__row"
         draggable
         onDragStart={(e) => {
-          setDraggedStatusId(s.id);
+          draggedStatusIdRef.current = s.id;
           e.dataTransfer.effectAllowed = 'move';
+          const rowEl = e.currentTarget as HTMLElement;
+          setTimeout(() => {
+            rowEl.classList.add('dragging');
+          }, 0);
         }}
         onDragOver={(e) => {
           e.preventDefault();
@@ -1930,8 +2839,9 @@ const ProjectDetailPage: React.FC = () => {
         }}
         onDrop={(e) => {
           e.preventDefault();
-          if (!draggedStatusId || draggedStatusId === s.id) return;
-          const fromIdx = activeStatuses.findIndex(st => st.id === draggedStatusId);
+          const draggedId = draggedStatusIdRef.current;
+          if (!draggedId || draggedId === s.id) return;
+          const fromIdx = activeStatuses.findIndex(st => st.id === draggedId);
           const toIdx = activeStatuses.findIndex(st => st.id === s.id);
           if (fromIdx === -1 || toIdx === -1) return;
           const newList = [...activeStatuses];
@@ -1939,20 +2849,12 @@ const ProjectDetailPage: React.FC = () => {
           newList.splice(toIdx, 0, moved);
           newList.forEach((st, i) => { st.position = i; });
           setActiveStatuses(newList);
-          setDraggedStatusId(null);
+          draggedStatusIdRef.current = null;
+          document.querySelectorAll('.status-manage__row').forEach(el => el.classList.remove('dragging'));
         }}
-        onDragEnd={() => setDraggedStatusId(null)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          background: draggedStatusId === s.id ? 'rgba(99, 102, 241, 0.06)' : 'var(--bg-card)',
-          border: draggedStatusId === s.id ? '1px dashed var(--primary)' : '1px solid var(--border-color)',
-          borderRadius: '6px',
-          padding: '6px 8px',
-          transition: 'all 0.2s',
-          cursor: 'grab',
-          opacity: draggedStatusId === s.id ? 0.6 : 1,
+        onDragEnd={(e) => {
+          draggedStatusIdRef.current = null;
+          document.querySelectorAll('.status-manage__row').forEach(el => el.classList.remove('dragging'));
         }}
       >
         {/* Drag handle */}
@@ -2099,8 +3001,18 @@ const ProjectDetailPage: React.FC = () => {
           <button style={{ background: 'none', border: 'none', color: '#9ca0b0', cursor: 'pointer', fontSize: 16 }} onClick={() => navigate('/projects')}>
             <ArrowLeftOutlined />
           </button>
-          <div className="project-icon" style={{ background: `${project.color}20`, color: project.color }}>
-            {project.name.charAt(0)}
+          <div className="project-icon" style={{
+            background: project.icon && project.icon.startsWith('data:image/') ? 'transparent' : `${project.color}20`,
+            color: project.color,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '40px',
+            height: '40px',
+            borderRadius: '8px',
+            overflow: 'hidden'
+          }}>
+            {renderProjectIcon(project.icon, project.color, project.name, 40)}
           </div>
           <div className="project-info">
             <h1>{project.name}</h1>
@@ -2109,8 +3021,11 @@ const ProjectDetailPage: React.FC = () => {
         </div>
         {canEditProject() && (
           <div className="project-detail__header-right" style={{ display: 'flex', gap: '8px' }}>
-            <Button onClick={() => setShowManageStatusesModal(true)}>{t('projects.status.manage_btn' as any) || 'Quản lý trạng thái'}</Button>
-            <Button type="primary" onClick={() => setShowEditProjectModal(true)}>{t('project_detail.edit_btn' as any)}</Button>
+            <Button onClick={() => setShowManageStatusesModal(true)}>{t('projects.status.manage_btn')}</Button>
+            <Button onClick={() => setShowWorkflowEditor(true)} icon={<BranchesOutlined />}>
+              {t('workflow.edit_title')}
+            </Button>
+            <Button type="primary" onClick={() => setShowEditProjectModal(true)}>{t('project_detail.edit_btn')}</Button>
           </div>
         )}
       </div>
@@ -2126,27 +3041,13 @@ const ProjectDetailPage: React.FC = () => {
       </div>
 
       {/* Render tabs content */}
-      {activeTab === 'board' && (
+      {activeTab === 'tasks' && (
         <>
           {/* Board Toolbar */}
           <div className="project-detail__toolbar">
             <div className="project-detail__toolbar-left">
               <span style={{ color: '#9ca0b0', fontSize: '13px' }}>{project.description || t('projects.no_desc')}</span>
             </div>
-            {/* <div className="project-detail__toolbar-right">
-              <button className="project-detail__add-task-btn" onClick={() => {
-                const firstCol = columns[0]?.key || 'todo';
-                setInlineCreate(firstCol);
-                setNewTaskTitle('');
-                setNewTaskStatus(firstCol);
-                setNewTaskPriority('medium');
-                setNewTaskAssignee(null);
-                setNewTaskStartDate('');
-                setNewTaskDueDate('');
-              }}>
-                <PlusOutlined /> {t('project_detail.add_task' as any)}
-              </button>
-            </div> */}
           </div>
 
           {/* Filters & Search Toolbar */}
@@ -2164,453 +3065,154 @@ const ProjectDetailPage: React.FC = () => {
               flexWrap: 'wrap'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '240px' }}>
-              <Input
-                prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
-                placeholder={t('projects.search_tasks_placeholder' as any) || 'Tìm kiếm công việc theo tên hoặc ID...'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '240px', flexWrap: 'wrap' }}>
+              <DebouncedSearchInput
+                placeholder={t('projects.search_tasks_placeholder')}
                 variant="filled"
-                allowClear
                 value={filterSearch}
-                onChange={e => setFilterSearch(e.target.value)}
+                onChange={setFilterSearch}
                 style={{ maxWidth: '320px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--border-color)' }}
                 className='search-task-board-input'
               />
 
-              {/* <div 
-                onClick={() => setFilterMyTasks(prev => !prev)}
-                style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '6px', 
-                  padding: '6px 12px', 
-                  borderRadius: '6px', 
-                  cursor: 'pointer', 
-                  background: filterMyTasks ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.03)', 
-                  border: filterMyTasks ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                  color: filterMyTasks ? 'var(--primary)' : 'var(--text-secondary)',
-                  fontWeight: 600,
-                  fontSize: '13px',
-                  userSelect: 'none',
-                  transition: 'all 0.2s'
-                }}
-              >
-                <UserOutlined />
-                <span>Chỉ công việc của tôi</span>
-              </div> */}
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('projects.filters.assignee' as any) || 'Người thực hiện:'}</span>
-              <Select
-                placeholder={t('projects.filters.all_members' as any) || 'Tất cả thành viên'}
-                allowClear
-                value={filterAssigneeId}
-                onChange={val => setFilterAssigneeId(val)}
-                style={{ width: '180px' }}
-                dropdownStyle={{ background: 'var(--bg-card)' }}
-                options={(project?.members || []).map((m: any) => ({
-                  value: m.id,
-                  label: (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {m.photo ? (
-                        <img src={m.photo} alt={m.name} style={{ width: '18px', height: '18px', borderRadius: '50%' }} />
-                      ) : (
-                        <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: '#6366f1', color: '#fff', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>
-                          {m.name.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <span>{m.name}</span>
-                    </div>
-                  )
-                }))}
+              {/* Lọc Popover */}
+              <ProjectFilterPopover
+                projectMembers={projectMembers}
+                columns={columns}
+                t={t}
+                filterMyTasks={filterMyTasks}
+                filterUnassigned={filterUnassigned}
+                filterAssignees={filterAssignees}
+                filterStatuses={filterStatuses}
+                filterPriorities={filterPriorities}
+                filterTypes={filterTypes}
+                setFilterMyTasks={setFilterMyTasks}
+                setFilterUnassigned={setFilterUnassigned}
+                setFilterAssignees={setFilterAssignees}
+                setFilterStatuses={setFilterStatuses}
+                setFilterPriorities={setFilterPriorities}
+                setFilterTypes={setFilterTypes}
+                handleClearFilters={handleClearFilters}
               />
 
-              {(filterSearch || filterMyTasks || filterAssigneeId !== undefined) && (
-                <Button
-                  type="text"
-                  onClick={() => {
-                    setFilterSearch('');
-                    setFilterMyTasks(false);
-                    setFilterAssigneeId(undefined);
-                  }}
-                  style={{ color: '#ef4444', fontSize: '13px', fontWeight: 500 }}
+              {/* Group By selector (List view only) */}
+              {viewMode === 'list' && (() => {
+                const groupOptions = [
+                  { value: 'status', label: t('tasks.group.status') },
+                  { value: 'priority', label: t('tasks.group.priority') },
+                  { value: 'due_date', label: t('tasks.group.due_date') },
+                ] as const;
+
+                const groupPanel = (
+                  <div style={{ width: 200, borderRadius: '10px', overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+                    <div style={{ padding: '10px 0' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 16px 10px' }}>
+                        {t('tasks.group.label')}
+                      </div>
+                      {groupOptions.map(g => (
+                        <div
+                          key={g.value}
+                          onClick={() => setGroupBy(g.value)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '10px',
+                            padding: '8px 16px', cursor: 'pointer',
+                            background: groupBy === g.value ? 'rgba(99,102,241,0.08)' : 'transparent',
+                            transition: 'background 0.12s',
+                          }}
+                          className="status-item-hover"
+                        >
+                          <span style={{
+                            width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0,
+                            border: groupBy === g.value ? '2px solid var(--primary)' : '2px solid var(--border-color)',
+                            background: groupBy === g.value ? 'var(--primary)' : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'all 0.12s',
+                          }}>
+                            {groupBy === g.value && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                          </span>
+                          <span style={{ fontSize: '13px', fontWeight: groupBy === g.value ? 600 : 400, color: 'var(--text-primary)' }}>{g.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+
+                return (
+                  <Popover
+                    trigger="click"
+                    placement="bottomLeft"
+                    overlayStyle={{ padding: 0 }}
+                    overlayInnerStyle={{ padding: 0, borderRadius: '10px', overflow: 'hidden' }}
+                    content={groupPanel}
+                  >
+                    <button style={{
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                      padding: '6px 13px', borderRadius: '8px', cursor: 'pointer',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-card)', color: 'var(--text-secondary)',
+                      fontSize: '13px', fontWeight: 500, outline: 'none', transition: 'all 0.15s',
+                    }}>
+                      <GroupOutlined style={{ fontSize: '13px' }} />
+                      {t('tasks.group.label')}
+                    </button>
+                  </Popover>
+                );
+              })()}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
+                <button
+                  className={`panel-btn ${viewMode === 'list' ? 'active' : ''}`}
+                  style={{ background: viewMode === 'list' ? 'var(--primary-bg)' : 'transparent', color: viewMode === 'list' ? 'var(--primary)' : 'var(--text-secondary)', border: 'none', padding: '8px 12px', cursor: 'pointer' }}
+                  onClick={() => setViewMode('list')}
+                  title={t('projects.view.list')}
                 >
-                  {t('projects.filters.clear_filters' as any) || 'Xóa bộ lọc'}
-                </Button>
-              )}
+                  <UnorderedListOutlined />
+                </button>
+                <button
+                  className={`panel-btn ${viewMode === 'board' ? 'active' : ''}`}
+                  style={{ background: viewMode === 'board' ? 'var(--primary-bg)' : 'transparent', color: viewMode === 'board' ? 'var(--primary)' : 'var(--text-secondary)', border: 'none', padding: '8px 12px', cursor: 'pointer' }}
+                  onClick={() => setViewMode('board')}
+                  title={t('project_detail.tab.board')}
+                >
+                  <AppstoreOutlined />
+                </button>
+                <button
+                  className={`panel-btn ${viewMode === 'calendar' ? 'active' : ''}`}
+                  style={{ background: viewMode === 'calendar' ? 'var(--primary-bg)' : 'transparent', color: viewMode === 'calendar' ? 'var(--primary)' : 'var(--text-secondary)', border: 'none', padding: '8px 12px', cursor: 'pointer' }}
+                  onClick={() => setViewMode('calendar')}
+                  title={t('project_detail.tab.calendar')}
+                >
+                  <CalendarOutlined />
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Kanban Board */}
-          <div className="project-detail__board">
-            {columns.map((col: any) => {
-              const colTasks = getTasksByStatus(col.key);
-              return (
-                <div key={col.key} className={`project-detail__column project-detail__column--${col.key}`}
-                  onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, col.key)}>
-                  <div className="project-detail__column-header" style={{
-                    background: (() => {
-                      const hex = col.color || '#9ca0b0';
-                      const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-                      return `rgba(${r},${g},${b},0.12)`;
-                    })()
-                  }}>
-                    <div className="project-detail__column-header-left">
-                      <span className="status-dot" style={{ background: col.color }} />
-                      <span className="status-label">{col.label}</span>
-                      <span className="count">{colTasks.length}</span>
-                    </div>
-                    <button className="add-btn" onClick={() => {
-                      setInlineCreate(col.key);
-                      setNewTaskTitle('');
-                      setNewTaskStatus(col.key);
-                      setNewTaskPriority('medium');
-                      setNewTaskAssignee(null);
-                      setNewTaskStartDate('');
-                      setNewTaskDueDate('');
+          {/* View Mode: Board (Kanban) */}
+          {viewMode === 'board' && (
+            <div className="project-detail__board">
+              {columns.map((col: any) => {
+                const colTasks: Task[] = boardTasksByStatus[col.key] || [];
+                return (
+                  <div key={col.key} className={`project-detail__column project-detail__column--${col.key}`}
+                    data-status={col.key}
+                    onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, col.key)}
+                  >
+                    <div className="project-detail__column-header" style={{
+                      background: (() => {
+                        const hex = col.color || '#9ca0b0';
+                        const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+                        return `rgba(${r},${g},${b},0.12)`;
+                      })()
                     }}>
-                      <PlusOutlined />
-                    </button>
-                  </div>
-
-                  <div className="project-detail__column-body">
-                    {/* Task Cards */}
-                    {colTasks.map((task) => (
-                      <div key={task.id} className={`project-detail__task-card ${draggedTask === task.id ? 'dragging' : ''}`}
-                        draggable onDragStart={(e) => handleDragStart(e, task.id)} onDragEnd={() => setDraggedTask(null)}
-                        onClick={() => handleSelectTask(task)}>
-                        <div className="project-detail__task-card-top">
-                          <span className="project-detail__task-card-id">#{task.id}</span>
-                          <FlagIcon color={priorityColors[task.priority] || '#f59e0b'} size={14} />
-                        </div>
-                        <div className="project-detail__task-card-title">{task.title}</div>
-                        <div className="project-detail__task-card-bottom">
-                          <div className="project-detail__task-card-meta">
-                            <span className="project-detail__task-card-date">{formatDateTime(task.due_date)}</span>
-                          </div>
-                          {task.assignee && (
-                            <div className="project-detail__task-card-assignee" style={{ background: project.color }}>
-                              {task.assignee.photo ? <img src={task.assignee.photo} alt={task.assignee.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : getInitials(task.assignee.name)}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Nested Subtasks */}
-                        {(() => {
-                          const renderSubtasksTree = (parentTaskId: number, depth = 0): React.ReactNode => {
-                            let children = tasks.filter(t => Number(t.parent_task_id) === Number(parentTaskId));
-
-                            const isFilterActive = !!(filterSearch || filterMyTasks || filterAssigneeId !== undefined);
-                            if (isFilterActive) {
-                              children = children.filter(child => taskMatchesFilters(child) || hasMatchingSubtasks(Number(child.id)));
-                            }
-
-                            if (children.length === 0) return null;
-
-                            return (
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  gap: '6px',
-                                  marginTop: depth === 0 ? '8px' : '4px',
-                                  marginLeft: depth > 0 ? '12px' : '0px',
-                                  borderLeft: depth > 0 ? '1px dashed var(--border-color)' : 'none',
-                                  paddingLeft: depth > 0 ? '8px' : '0px'
-                                }}
-                              >
-                                {children.map((st) => {
-                                  const finalStatusId = getFinalStatusId(project?.statuses || []);
-                                  const firstStatusId = getFirstStatusId(project?.statuses || []);
-                                  const isStDone = st.status === finalStatusId;
-                                  const subtaskEditable = canEditTask(st);
-                                  return (
-                                    <React.Fragment key={st.id}>
-                                      <div
-                                        key={st.id}
-                                        onClick={() => handleSelectTask(st)}
-                                        style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'space-between',
-                                          background: 'var(--bg-body)',
-                                          border: '1px solid var(--border-color)',
-                                          borderRadius: '4px',
-                                          padding: '4px 8px',
-                                          cursor: 'pointer',
-                                          fontSize: '11px',
-                                          gap: '8px',
-                                        }}
-                                        className="project-detail__subtask-card"
-                                      >
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
-                                          <input
-                                            type="checkbox"
-                                            checked={isStDone}
-                                            disabled={!subtaskEditable}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onChange={async (e) => {
-                                              e.stopPropagation();
-                                              if (!subtaskEditable) return;
-                                              const newStatus = isStDone ? firstStatusId : finalStatusId;
-                                              try {
-                                                const res = await api.updateTask(st.id, { status: newStatus });
-                                                if (res.success) {
-                                                  fetchProjectData(true);
-                                                }
-                                              } catch {
-                                                message.error(t('tasks.detail_toast.status_update_err' as any) || 'Không thể cập nhật trạng thái công việc con');
-                                              }
-                                            }}
-                                            style={{ width: '12px', height: '12px', cursor: subtaskEditable ? 'pointer' : 'not-allowed', accentColor: '#10b981', flexShrink: 0 }}
-                                          />
-                                          <span
-                                            style={{
-                                              color: isStDone ? 'var(--text-muted)' : 'var(--text-primary)',
-                                              textDecoration: isStDone ? 'line-through' : 'none',
-                                              fontWeight: 500,
-                                              overflow: 'hidden',
-                                              textOverflow: 'ellipsis',
-                                              whiteSpace: 'nowrap',
-                                            }}
-                                          >
-                                            {st.title}
-                                          </span>
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                                          {st.assignee && (
-                                            <Tooltip title={st.assignee.name}>
-                                              <div style={{ background: '#6366f1', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: '#fff', fontSize: '7px', fontWeight: 600, overflow: 'hidden' }}>
-                                                {st.assignee.photo ? <img src={st.assignee.photo} alt={st.assignee.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(st.assignee.name)}
-                                              </div>
-                                            </Tooltip>
-                                          )}
-                                          <FlagIcon color={priorityColors[st.priority] || '#f59e0b'} size={10} />
-                                        </div>
-                                      </div>
-                                      {/* Recursive render child subtasks */}
-                                      {renderSubtasksTree(Number(st.id), depth + 1)}
-                                    </React.Fragment>
-                                  );
-                                })}
-                              </div>
-                            );
-                          };
-
-                          // Get all direct subtasks first
-                          const directSubtasks = tasks.filter(t => Number(t.parent_task_id) === Number(task.id));
-                          if (directSubtasks.length === 0) return null;
-
-                          // Compute total/completed subtasks count recursively (to show progress on the parent task card)
-                          const getRecursiveSubtasks = (parentId: number): Task[] => {
-                            const children = tasks.filter(t => Number(t.parent_task_id) === Number(parentId));
-                            let all: Task[] = [...children];
-                            for (const child of children) {
-                              all = [...all, ...getRecursiveSubtasks(Number(child.id))];
-                            }
-                            return all;
-                          };
-
-                          const allSubtasksRecursive = getRecursiveSubtasks(Number(task.id));
-                          const totalCount = allSubtasksRecursive.length;
-                          const finalStatusId = getFinalStatusId(project?.statuses || []);
-                          const doneCount = allSubtasksRecursive.filter(st => st.status === finalStatusId).length;
-
-                          const isExpanded = !!expandedTasks[Number(task.id)];
-
-                          return (
-                            <div
-                              style={{
-                                marginTop: '10px',
-                                paddingTop: '8px',
-                                borderTop: '1px solid var(--border-color)',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '6px',
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div
-                                onClick={() => {
-                                  setExpandedTasks(prev => ({
-                                    ...prev,
-                                    [Number(task.id)]: !prev[Number(task.id)]
-                                  }));
-                                }}
-                                style={{
-                                  fontSize: '10px',
-                                  color: 'var(--text-muted)',
-                                  fontWeight: 600,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '2px',
-                                  marginBottom: '2px',
-                                  cursor: 'pointer',
-                                  userSelect: 'none'
-                                }}
-                              >
-                                <SubtaskIcon />
-                                <span>{t('project_detail.subtask_title_with_count' as any, { done: doneCount, total: totalCount })}</span>
-                              </div>
-                              {isExpanded && renderSubtasksTree(Number(task.id))}
-                            </div>
-                          );
-                        })()}
+                      <div className="project-detail__column-header-left">
+                        <span className="status-dot" style={{ background: col.color }} />
+                        <span className="status-label">{col.label}</span>
+                        <span className="count">{colTasks.length}</span>
                       </div>
-                    ))}
-
-                    {/* ClickUp-style Inline Create Bar */}
-                    {inlineCreate === col.key && (() => {
-                      const currentStatus = columns.find((c: any) => c.key === (newTaskStatus || col.key));
-                      const currentPri = PRIORITIES.find(p => p.id === newTaskPriority) || PRIORITIES[2];
-                      const currentAssignee = projectMembers.find((m: any) => m.id === newTaskAssignee);
-
-                      return (
-                        <div style={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          overflow: 'hidden',
-                          boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-                          marginBottom: '8px'
-                        }}>
-                          {/* Top row: status checkbox + title input */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', borderBottom: '1px solid var(--border-color)' }}>
-                            {/* Status indicator - locked to current column */}
-                            <Tooltip title={currentStatus?.label || col.label}>
-                              <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: `2px solid ${currentStatus?.color || col.color || '#9ca0b0'}`, background: 'transparent', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {currentStatus?.type === 'closed' && <CheckOutlined style={{ fontSize: '9px', color: currentStatus.color }} />}
-                              </div>
-                            </Tooltip>
-
-                            {/* Title input */}
-                            <input
-                              autoFocus
-                              placeholder={t('project_detail.task_name_placeholder' as any)}
-                              value={newTaskTitle}
-                              onChange={(e) => setNewTaskTitle(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === 'Enter') handleInlineCreate(col.key); if (e.key === 'Escape') setInlineCreate(null); }}
-                              onFocus={(e) => {
-                                const container = e.target.closest('.project-detail__column-body');
-                                if (container) {
-                                  setTimeout(() => {
-                                    container.scrollTo({
-                                      top: container.scrollHeight,
-                                      behavior: 'smooth'
-                                    });
-                                  }, 80);
-                                }
-                              }}
-                              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, padding: 0 }}
-                            />
-                          </div>
-
-                          {/* Bottom toolbar */}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(120,120,120,0.03)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              {/* Assignee picker - avatar only */}
-                              <Popover
-                                trigger="click"
-                                placement="bottomLeft"
-                                content={
-                                  <div style={{ width: '200px', padding: '4px', maxHeight: '200px', overflowY: 'auto' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>{t('tasks.panel.assign_to')}</div>
-                                    <div onClick={() => setNewTaskAssignee(null)} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: !newTaskAssignee ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
-                                      <UserOutlined style={{ fontSize: '12px', color: 'var(--text-muted)' }} />
-                                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tasks.panel.unassigned')}</span>
-                                    </div>
-                                    {projectMembers.map((m: any) => (
-                                      <div key={m.id} onClick={() => setNewTaskAssignee(m.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: newTaskAssignee === m.id ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                          <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '8px', fontWeight: 700, overflow: 'hidden' }}>
-                                            {m.photo ? <img src={m.photo} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(m.name)}
-                                          </div>
-                                          <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{m.name}</span>
-                                        </div>
-                                        {newTaskAssignee === m.id && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '10px' }} />}
-                                      </div>
-                                    ))}
-                                  </div>
-                                }
-                              >
-                                <Tooltip title={currentAssignee ? currentAssignee.name : t('tasks.panel.assign_to')}>
-                                  <div style={{ width: '22px', height: '22px', borderRadius: '50%', border: currentAssignee ? 'none' : '1px dashed var(--border-color)', background: currentAssignee ? '#6366f1' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: currentAssignee ? '#fff' : 'var(--text-muted)', fontSize: currentAssignee ? '7px' : '10px', fontWeight: 700, overflow: 'hidden', flexShrink: 0 }} className="status-item-hover">
-                                    {currentAssignee ? (currentAssignee.photo ? <img src={currentAssignee.photo} alt={currentAssignee.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(currentAssignee.name)) : <UserOutlined />}
-                                  </div>
-                                </Tooltip>
-                              </Popover>
-
-                              {/* Date/Time picker */}
-                              <Popover
-                                trigger="click"
-                                placement="bottomLeft"
-                                content={
-                                  <div style={{ width: '260px', padding: '8px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '0 4px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '8px' }}>{t('tasks.panel.time_range')}</div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.start_date_label')}</span>
-                                        <input type="datetime-local" value={newTaskStartDate} onChange={(e) => setNewTaskStartDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
-                                      </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.due_date_label')}</span>
-                                        <input type="datetime-local" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
-                                      </div>
-                                    </div>
-                                  </div>
-                                }
-                              >
-                                <Tooltip title={t('tasks.panel.select_time')}>
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: '22px', height: '22px', borderRadius: '4px', color: (newTaskStartDate || newTaskDueDate) ? 'var(--primary)' : 'var(--text-muted)', fontSize: '12px', flexShrink: 0 }} className="status-item-hover">
-                                    <CalendarOutlined />
-                                  </div>
-                                </Tooltip>
-                              </Popover>
-
-                              {/* Priority flag */}
-                              <Popover
-                                trigger="click"
-                                placement="bottomLeft"
-                                content={
-                                  <div style={{ width: '180px', padding: '4px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>{t('tasks.panel.priority')}</div>
-                                    {PRIORITIES.map(p => (
-                                      <div key={p.id} onClick={() => setNewTaskPriority(p.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: newTaskPriority === p.id ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                          <FlagIcon color={p.color} size={13} />
-                                          <span style={{ fontSize: '12px', fontWeight: 600, color: p.color }}>{t(`tasks.priority.${p.id}` as any)}</span>
-                                        </div>
-                                        {newTaskPriority === p.id && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '10px' }} />}
-                                      </div>
-                                    ))}
-                                  </div>
-                                }
-                              >
-                                <Tooltip title={t('tasks.panel.set_priority')}>
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: '24px', height: '24px', borderRadius: '4px' }} className="status-item-hover">
-                                    <FlagIcon color={currentPri.color} size={14} />
-                                  </div>
-                                </Tooltip>
-                              </Popover>
-                            </div>
-
-                            {/* Right: Cancel + Save */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <button onClick={() => setInlineCreate(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', padding: '4px 8px' }}>
-                                {t('project_detail.cancel_btn' as any)}
-                              </button>
-                              <button onClick={() => handleInlineCreate(col.key)} style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                {t('tasks.panel.save_short')} ↵
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Add card button - every column */}
-                    {inlineCreate !== col.key && (
-                      <div className="project-detail__add-card" onClick={() => {
+                      <button className="add-btn" onClick={() => {
                         setInlineCreate(col.key);
                         setNewTaskTitle('');
                         setNewTaskStatus(col.key);
@@ -2619,60 +3221,1003 @@ const ProjectDetailPage: React.FC = () => {
                         setNewTaskStartDate('');
                         setNewTaskDueDate('');
                       }}>
-                        <PlusOutlined /> {t('project_detail.add_task' as any)}
-                      </div>
-                    )}
+                        <PlusOutlined />
+                      </button>
+                    </div>
 
-                    {/* Spacer to allow scrolling fully past the inline creation form */}
+                    <div className="project-detail__column-body">
+                      {/* Task Cards */}
+                      {colTasks.map((task: Task) => (
+                        <div key={task.id} className="project-detail__task-card" data-task-id={task.id}
+                          draggable onDragStart={(e) => handleDragStart(e, task.id)} onDragEnd={handleDragEnd}
+                          onClick={() => handleSelectTask(task)}>
+                          <div className="project-detail__task-card-top">
+                            <span className="project-detail__task-card-id">#{task.id}</span>
+                            <FlagIcon color={priorityColors[task.priority] || '#f59e0b'} size={14} />
+                          </div>
+                          <div className="project-detail__task-card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                            {task.title}
+                          </div>
+                          <div className="project-detail__task-card-bottom">
+                            <div className="project-detail__task-card-meta">
+                              <span className="project-detail__task-card-date">
+                                {task.due_date ? formatDateTime(task.due_date) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>{t('tasks.no_deadline')}</span>}
+                              </span>
+                            </div>
+                            {task.assignee ? (
+                              <div className="project-detail__task-card-assignee" style={{ background: project.color }}>
+                                {task.assignee.photo ? <img src={task.assignee.photo} alt={task.assignee.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : getInitials(task.assignee.name)}
+                              </div>
+                            ) : (
+                              <div className="project-detail__task-card-assignee" style={{ border: '1px dashed var(--text-muted, #9ca0b0)', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <UserOutlined style={{ color: 'var(--text-muted, #9ca0b0)', fontSize: '10px' }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Nested Subtasks */}
+                          {(() => {
+                            const renderSubtasksTree = (parentTaskId: number, depth = 0): React.ReactNode => {
+                              let children = tasks.filter(t => Number(t.parent_task_id) === Number(parentTaskId));
+
+                              const isFilterActive = !!(filterSearch || filterMyTasks || filterAssigneeId !== undefined);
+                              if (isFilterActive) {
+                                children = children.filter(child => taskMatchesFilters(child) || hasMatchingSubtasks(Number(child.id)));
+                              }
+
+                              if (children.length === 0) return null;
+
+                              return (
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '6px',
+                                    marginTop: depth === 0 ? '8px' : '4px',
+                                    marginLeft: depth > 0 ? '12px' : '0px',
+                                    borderLeft: depth > 0 ? '1px dashed var(--border-color)' : 'none',
+                                    paddingLeft: depth > 0 ? '8px' : '0px'
+                                  }}
+                                >
+                                  {children.map((st) => {
+                                    const finalStatusId = getFinalStatusId(project?.statuses || []);
+                                    const firstStatusId = getFirstStatusId(project?.statuses || []);
+                                    const isStDone = st.status === finalStatusId;
+                                    const subtaskEditable = canEditTask(st);
+                                    return (
+                                      <React.Fragment key={st.id}>
+                                        <div
+                                          key={st.id}
+                                          onClick={() => handleSelectTask(st)}
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            background: 'var(--bg-body)',
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: '4px',
+                                            padding: '4px 8px',
+                                            cursor: 'pointer',
+                                            fontSize: '11px',
+                                            gap: '8px',
+                                          }}
+                                          className="project-detail__subtask-card"
+                                        >
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                                            <input
+                                              type="checkbox"
+                                              checked={isStDone}
+                                              disabled={!subtaskEditable}
+                                              onClick={(e) => e.stopPropagation()}
+                                              onChange={async (e) => {
+                                                e.stopPropagation();
+                                                if (!subtaskEditable) return;
+                                                const newStatus = isStDone ? firstStatusId : finalStatusId;
+                                                try {
+                                                  const res = await api.updateTask(st.id, { status: newStatus });
+                                                  if (res.success) {
+                                                    fetchProjectData(true);
+                                                  }
+                                                } catch {
+                                                  message.error(t('tasks.detail_toast.status_update_err'));
+                                                }
+                                              }}
+                                              style={{ width: '12px', height: '12px', cursor: subtaskEditable ? 'pointer' : 'not-allowed', accentColor: '#10b981', flexShrink: 0 }}
+                                            />
+                                            <span
+                                              style={{
+                                                color: isStDone ? 'var(--text-muted)' : 'var(--text-primary)',
+                                                textDecoration: isStDone ? 'line-through' : 'none',
+                                                fontWeight: 500,
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                whiteSpace: 'nowrap',
+                                              }}
+                                            >
+                                              {st.title}
+                                            </span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                            {st.assignee && (
+                                              <Tooltip title={st.assignee.name}>
+                                                <div style={{ background: '#6366f1', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: '#fff', fontSize: '7px', fontWeight: 600, overflow: 'hidden' }}>
+                                                  {st.assignee.photo ? <img src={st.assignee.photo} alt={st.assignee.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(st.assignee.name)}
+                                                </div>
+                                              </Tooltip>
+                                            )}
+                                            <FlagIcon color={priorityColors[st.priority] || '#f59e0b'} size={10} />
+                                          </div>
+                                        </div>
+                                        {/* Recursive render child subtasks */}
+                                        {renderSubtasksTree(Number(st.id), depth + 1)}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            };
+
+                            // Get all direct subtasks first
+                            const directSubtasks = tasks.filter(t => Number(t.parent_task_id) === Number(task.id));
+                            if (directSubtasks.length === 0) return null;
+
+                            // Compute total/completed subtasks count recursively (to show progress on the parent task card)
+                            const getRecursiveSubtasks = (parentId: number): Task[] => {
+                              const children = tasks.filter(t => Number(t.parent_task_id) === Number(parentId));
+                              let all: Task[] = [...children];
+                              for (const child of children) {
+                                all = [...all, ...getRecursiveSubtasks(Number(child.id))];
+                              }
+                              return all;
+                            };
+
+                            const allSubtasksRecursive = getRecursiveSubtasks(Number(task.id));
+                            const totalCount = allSubtasksRecursive.length;
+                            const finalStatusId = getFinalStatusId(project?.statuses || []);
+                            const doneCount = allSubtasksRecursive.filter(st => st.status === finalStatusId).length;
+
+                            const isExpanded = !!expandedTasks[Number(task.id)];
+
+                            return (
+                              <div
+                                style={{
+                                  marginTop: '10px',
+                                  paddingTop: '8px',
+                                  borderTop: '1px solid var(--border-color)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '6px',
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div
+                                  onClick={() => {
+                                    setExpandedTasks(prev => ({
+                                      ...prev,
+                                      [Number(task.id)]: !prev[Number(task.id)]
+                                    }));
+                                  }}
+                                  style={{
+                                    fontSize: '10px',
+                                    color: 'var(--text-muted)',
+                                    fontWeight: 600,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '2px',
+                                    marginBottom: '2px',
+                                    cursor: 'pointer',
+                                    userSelect: 'none'
+                                  }}
+                                >
+                                  <SubtaskIcon />
+                                  <span>{t('project_detail.subtask_title_with_count', { done: doneCount, total: totalCount })}</span>
+                                </div>
+                                {isExpanded && renderSubtasksTree(Number(task.id))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ))}
+
+                      {/* ClickUp-style Inline Create Bar */}
+                      {inlineCreate === col.key && (() => {
+                        const currentStatus = columns.find((c: any) => c.key === (newTaskStatus || col.key));
+                        const currentPri = PRIORITIES.find(p => p.id === newTaskPriority) || PRIORITIES[2];
+                        const currentAssignee = projectMembers.find((m: any) => m.id === newTaskAssignee);
+
+                        return (
+                          <div style={{
+                            background: 'var(--bg-card)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+                            marginBottom: '8px'
+                          }}>
+                            {/* Top row: status checkbox + title input */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', borderBottom: '1px solid var(--border-color)' }}>
+                              {/* Status indicator - locked to current column */}
+                              <Tooltip title={currentStatus?.label || col.label}>
+                                <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: `2px solid ${currentStatus?.color || col.color || '#9ca0b0'}`, background: 'transparent', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {currentStatus?.type === 'closed' && <CheckOutlined style={{ fontSize: '9px', color: currentStatus.color }} />}
+                                </div>
+                              </Tooltip>
+
+                              {/* Title input */}
+                              <input
+                                autoFocus
+                                placeholder={t('project_detail.task_name_placeholder')}
+                                value={newTaskTitle}
+                                onChange={(e) => setNewTaskTitle(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleInlineCreate(col.key); if (e.key === 'Escape') setInlineCreate(null); }}
+                                onFocus={(e) => {
+                                  const container = e.target.closest('.project-detail__column-body');
+                                  if (container) {
+                                    setTimeout(() => {
+                                      container.scrollTo({
+                                        top: container.scrollHeight,
+                                        behavior: 'smooth'
+                                      });
+                                    }, 80);
+                                  }
+                                }}
+                                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, padding: 0 }}
+                              />
+                            </div>
+
+                            {/* Bottom toolbar */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(120,120,120,0.03)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {/* Assignee picker - avatar only */}
+                                <Popover
+                                  trigger="click"
+                                  placement="bottomLeft"
+                                  content={
+                                    <div style={{ width: '200px', padding: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+                                      <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>{t('tasks.panel.assign_to')}</div>
+                                      <div onClick={() => setNewTaskAssignee(null)} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: !newTaskAssignee ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
+                                        <UserOutlined style={{ fontSize: '12px', color: 'var(--text-muted)' }} />
+                                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tasks.panel.unassigned')}</span>
+                                      </div>
+                                      {projectMembers.map((m: any) => (
+                                        <div key={m.id} onClick={() => setNewTaskAssignee(m.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: newTaskAssignee === m.id ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '8px', fontWeight: 700, overflow: 'hidden' }}>
+                                              {m.photo ? <img src={m.photo} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(m.name)}
+                                            </div>
+                                            <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{m.name}</span>
+                                          </div>
+                                          {newTaskAssignee === m.id && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '10px' }} />}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  }
+                                >
+                                  <Tooltip title={currentAssignee ? currentAssignee.name : t('tasks.panel.assign_to')}>
+                                    <div style={{ width: '22px', height: '22px', borderRadius: '50%', border: currentAssignee ? 'none' : '1px dashed var(--border-color)', background: currentAssignee ? '#6366f1' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: currentAssignee ? '#fff' : 'var(--text-muted)', fontSize: currentAssignee ? '7px' : '10px', fontWeight: 700, overflow: 'hidden', flexShrink: 0 }} className="status-item-hover">
+                                      {currentAssignee ? (currentAssignee.photo ? <img src={currentAssignee.photo} alt={currentAssignee.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(currentAssignee.name)) : <UserOutlined />}
+                                    </div>
+                                  </Tooltip>
+                                </Popover>
+
+                                {/* Date/Time picker */}
+                                <Popover
+                                  trigger="click"
+                                  placement="bottomLeft"
+                                  content={
+                                    <div style={{ width: '260px', padding: '8px' }}>
+                                      <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '0 4px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '8px' }}>{t('tasks.panel.time_range')}</div>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.start_date_label')}</span>
+                                          <input type="datetime-local" value={newTaskStartDate} onChange={(e) => setNewTaskStartDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.due_date_label')}</span>
+                                          <input type="datetime-local" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  }
+                                >
+                                  <Tooltip title={t('tasks.panel.select_time')}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: '22px', height: '22px', borderRadius: '4px', color: (newTaskStartDate || newTaskDueDate) ? 'var(--primary)' : 'var(--text-muted)', fontSize: '12px', flexShrink: 0 }} className="status-item-hover">
+                                      <CalendarOutlined />
+                                    </div>
+                                  </Tooltip>
+                                </Popover>
+
+                                {/* Priority flag */}
+                                <Popover
+                                  trigger="click"
+                                  placement="bottomLeft"
+                                  content={
+                                    <div style={{ width: '180px', padding: '4px' }}>
+                                      <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>{t('tasks.panel.priority')}</div>
+                                      {PRIORITIES.map(p => (
+                                        <div key={p.id} onClick={() => setNewTaskPriority(p.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: newTaskPriority === p.id ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <FlagIcon color={p.color} size={13} />
+                                            <span style={{ fontSize: '12px', fontWeight: 600, color: p.color }}>{t(`tasks.priority.${p.id}`)}</span>
+                                          </div>
+                                          {newTaskPriority === p.id && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '10px' }} />}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  }
+                                >
+                                  <Tooltip title={t('tasks.panel.set_priority')}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: '24px', height: '24px', borderRadius: '4px' }} className="status-item-hover">
+                                      <FlagIcon color={currentPri.color} size={14} />
+                                    </div>
+                                  </Tooltip>
+                                </Popover>
+                              </div>
+
+                              {/* Right: Cancel + Save */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <button onClick={() => setInlineCreate(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', padding: '4px 8px' }}>
+                                  {t('project_detail.cancel_btn')}
+                                </button>
+                                <button onClick={() => handleInlineCreate(col.key)} style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  {t('tasks.panel.save_short')} ↵
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Add card button - every column */}
+                      {inlineCreate !== col.key && (
+                        <div className="project-detail__add-card" onClick={() => {
+                          setInlineCreate(col.key);
+                          setNewTaskTitle('');
+                          setNewTaskStatus(col.key);
+                          setNewTaskPriority('medium');
+                          setNewTaskAssignee(null);
+                          setNewTaskStartDate('');
+                          setNewTaskDueDate('');
+                        }}>
+                          <PlusOutlined /> {t('project_detail.add_task')}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
+                );
+              })}
+            </div>
+          )}
 
-      {activeTab === 'calendar' && (
-        <div style={{ background: 'var(--bg-card)', borderRadius: '8px', padding: '24px', border: '1px solid var(--border-color)', marginTop: '16px' }} className="project-detail__calendar-container">
-          <TaskCalendar tasks={tasks.filter(taskMatchesFilters)} onSelectTask={handleSelectTask} columns={columns} />
-        </div>
+          {/* View Mode: List */}
+          {viewMode === 'list' && (() => {
+            const filteredTasks = tasks.filter(taskMatchesFilters);
+
+            const grouped: Record<string, Task[]> = listTasksGrouped;
+
+            const getGroupLabel = (key: string) => {
+              if (groupBy === 'priority') return priorityLabels[key] || key;
+              if (groupBy === 'status') {
+                const col = columns.find((c: any) => c.key === key);
+                return col ? col.label : key;
+              }
+              if (groupBy === 'due_date' && key !== t('tasks.no_due_date')) return formatDate(key);
+              return key;
+            };
+
+            const getGroupDot = (key: string) => {
+              if (groupBy === 'priority') return priorityColors[key] || '#6b7084';
+              if (groupBy === 'status') {
+                const col = columns.find((c: any) => c.key === key);
+                return col ? col.color : '#6b7084';
+              }
+              return '#6b7084';
+            };
+
+            const sortedGroups = Object.entries(grouped)
+              .filter(([, gTasks]) => gTasks.length > 0)
+              .sort(([keyA], [keyB]) => {
+                if (groupBy === 'due_date') {
+                  const noDateKey = t('tasks.no_due_date');
+                  if (keyA === noDateKey) return 1;
+                  if (keyB === noDateKey) return -1;
+                  return new Date(keyA).getTime() - new Date(keyB).getTime();
+                }
+                if (groupBy === 'priority') {
+                  const priorityOrder = ['urgent', 'high', 'medium', 'low', 'none'];
+                  return priorityOrder.indexOf(keyA) - priorityOrder.indexOf(keyB);
+                }
+                return 0;
+              });
+
+            return (
+              <div className="my-tasks project-detail__tasks-list-view">
+                <div className="my-tasks__container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {sortedGroups.map(([key, groupTasks]) => (
+                    <div
+                      key={key}
+                      className="my-tasks__group"
+                      data-status={groupBy === 'status' ? key : undefined}
+                      onDragOver={groupBy === 'status' ? handleDragOver : undefined}
+                      onDrop={groupBy === 'status' ? (e) => handleDrop(e, key) : undefined}
+                    >
+                      <div className="my-tasks__group-header" onClick={() => setExpandedGroups(p => ({ ...p, [key]: p[key] === false }))}>
+                        <RightOutlined className={`chevron ${expandedGroups[key] !== false ? 'expanded' : ''}`} />
+                        <span className="priority-dot" style={{ background: getGroupDot(key) }} />
+                        <span className="group-label">{getGroupLabel(key)}</span>
+                        <span className="group-count">{groupTasks.length}</span>
+                      </div>
+                      {expandedGroups[key] !== false && (
+                        <div className="my-tasks__group-body">
+                          {groupTasks.map((task: Task) => {
+                            const overdue = checkIsOverdue(task.due_date, task.status, task);
+                            const today = isToday(task.due_date);
+                            const statusObj = getFallbackStatusObj(task);
+                            const isClosed = isTaskDone(task);
+                            const projectStatuses = project?.statuses || [];
+                            const taskEditable = canEditTask(task);
+
+                            return (
+                              <div
+                                key={task.id}
+                                className="my-tasks__task-row"
+                                data-task-id={task.id}
+                                onClick={() => handleSelectTask(task)}
+                                draggable={taskEditable}
+                                onDragStart={(e) => handleDragStart(e, task.id)}
+                                onDragEnd={handleDragEnd}
+                              >
+                                <div
+                                  className={`my-tasks__task-checkbox ${isClosed ? 'done' : ''}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!taskEditable) {
+                                      message.error(t('project_detail.toast.no_edit_permission'));
+                                      return;
+                                    }
+                                    toggleStatus(task.id, task.status, task);
+                                  }}
+                                  style={{
+                                    borderColor: statusObj.color,
+                                    backgroundColor: isClosed ? statusObj.color : 'transparent',
+                                    color: isClosed ? 'white' : 'transparent',
+                                    cursor: taskEditable ? 'pointer' : 'not-allowed',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: 0
+                                  }}
+                                >
+                                  {isClosed ? (
+                                    <CheckOutlined style={{ fontSize: '10px' }} />
+                                  ) : (
+                                    (() => {
+                                      const statusesList = projectStatuses.length > 0 ? projectStatuses : [
+                                        { id: 'todo', type: 'not_started' },
+                                        { id: 'in_progress', type: 'active' },
+                                        { id: 'review', type: 'active' },
+                                        { id: 'done', type: 'closed' }
+                                      ];
+                                      const currentIdx = statusesList.findIndex((s: any) => s.id === statusObj.id);
+                                      const percentage = statusesList.length > 0 ? ((currentIdx + 1) / statusesList.length) * 100 : 25;
+                                      return (
+                                        <div style={{
+                                          width: '10px',
+                                          height: '10px',
+                                          borderRadius: '50%',
+                                          background: `conic-gradient(${statusObj.color} 0% ${percentage}%, transparent ${percentage}% 100%)`
+                                        }} />
+                                      );
+                                    })()
+                                  )}
+                                </div>
+                                <div className="my-tasks__task-info">
+                                  <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                                    {task.title}
+                                  </div>
+                                  <div className="subtitle">
+                                    <span className="task-id">#{task.id}</span>
+                                    <span className="project-tag" style={{ '--dot-color': priorityColors[task.priority] || '#6b7084' } as React.CSSProperties}>
+                                      {priorityLabels[task.priority] || t('tasks.priority.none')}
+                                    </span>
+                                    {task.parent_task_id && (
+                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
+                                        <SubtaskIcon />
+                                        {t('tasks.subtask_of')} #{task.parent_task_id}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="my-tasks__task-labels">
+                                  {task.labels?.map((l: any, i: number) => (
+                                    <span key={i} className="label" style={{ background: l.bg, color: l.color }}>
+                                      {l.name}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div className="my-tasks__task-status">
+                                  <span
+                                    style={{
+                                      background: `${statusObj.color}1c`,
+                                      color: statusObj.color,
+                                      border: `1px solid ${statusObj.color}2b`
+                                    }}
+                                  >
+                                    {statusObj.name}
+                                  </span>
+                                </div>
+                                <div className={`my-tasks__task-date ${overdue ? 'overdue' : ''} ${today ? 'today' : ''}`}>
+                                  {task.start_date || task.due_date ? (
+                                    task.start_date && task.due_date ? (
+                                      `${formatDateTimeShort(task.start_date)} - ${formatDateTimeShort(task.due_date)}`
+                                    ) : task.start_date ? (
+                                      `${t('tasks.start_date')} ${formatDateTimeShort(task.start_date)}`
+                                    ) : (
+                                      `${t('tasks.panel.deadline')} ${formatDateTimeShort(task.due_date)}`
+                                    )
+                                  ) : (
+                                    <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>{t('tasks.no_deadline')}</span>
+                                  )}
+                                </div>
+                                {task.assignee ? (
+                                  <div className="my-tasks__task-assignee" style={{ background: 'var(--primary)' }}>
+                                    {task.assignee.photo ? (
+                                      <img src={task.assignee.photo} alt={task.assignee.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                    ) : (
+                                      getInitials(task.assignee.name)
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="my-tasks__task-assignee" style={{ border: '1px dashed var(--text-muted, #9ca0b0)', background: 'transparent' }}>
+                                    <UserOutlined style={{ color: 'var(--text-muted, #9ca0b0)', fontSize: '10px' }} />
+                                  </div>
+                                )}
+                                <div className="my-tasks__task-actions" onClick={(e) => e.stopPropagation()}>
+                                  {(() => {
+                                    const editPerm = canEditTask(task);
+                                    const deletePerm = canDeleteTask(task);
+                                    const menuItems: any[] = [];
+
+                                    menuItems.push({
+                                      key: 'details',
+                                      label: (
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          <InfoCircleOutlined style={{ fontSize: '13px' }} />
+                                          {t('tasks.panel.view_details')}
+                                        </span>
+                                      ),
+                                      onClick: () => setSelectedTask(task)
+                                    });
+
+                                    const isWatching = me?.id && task.watcher_ids?.includes(me.id);
+                                    if (Number(task.assignee_id) !== Number(me?.id)) {
+                                      menuItems.push({
+                                        key: 'toggle_watch',
+                                        label: (
+                                          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            {isWatching ? (
+                                              <EyeInvisibleOutlined style={{ fontSize: '13px' }} />
+                                            ) : (
+                                              <EyeOutlined style={{ fontSize: '13px' }} />
+                                            )}
+                                            {isWatching
+                                              ? t('tasks.panel.unwatch')
+                                              : t('tasks.panel.watch')}
+                                          </span>
+                                        ),
+                                        onClick: () => handleToggleWatchTask(task.id)
+                                      });
+                                    }
+
+                                    if (editPerm) {
+                                      if (!isClosed) {
+                                        menuItems.push({
+                                          key: 'done',
+                                          label: (
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                              <CheckCircleOutlined style={{ fontSize: '13px' }} />
+                                              {t('tasks.action.mark_done')}
+                                            </span>
+                                          ),
+                                          onClick: () => handleMarkDone(task.id)
+                                        });
+                                        menuItems.push({
+                                          key: 'logtime',
+                                          label: (
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                              <ClockCircleOutlined style={{ fontSize: '13px' }} />
+                                              {t('tasks.panel.log_time')}
+                                            </span>
+                                          ),
+                                          onClick: () => {
+                                            setLogTimeTask(Number(task.id));
+                                            setShowLogTimeModal(true);
+                                          }
+                                        });
+                                      }
+                                    }
+                                    if (deletePerm) {
+                                      if (menuItems.length > 0) {
+                                        menuItems.push({ type: 'divider' });
+                                      }
+                                      menuItems.push({
+                                        key: 'delete',
+                                        label: (
+                                          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <DeleteOutlined style={{ fontSize: '13px' }} />
+                                            {t('tasks.action.delete')}
+                                          </span>
+                                        ),
+                                        danger: true,
+                                        onClick: () => handleDeleteTask(task.id)
+                                      });
+                                    }
+                                    if (menuItems.length === 0) return null;
+                                    return (
+                                      <Dropdown
+                                        menu={{ items: menuItems }}
+                                        trigger={['click']}
+                                      >
+                                        <button onClick={(e) => e.stopPropagation()}><MoreOutlined /></button>
+                                      </Dropdown>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {/* ClickUp-style Inline Create Bar for List View */}
+                          {inlineCreate === key && (() => {
+                            const currentStatus = columns.find((c: any) => c.key === (newTaskStatus || (groupBy === 'status' ? key : 'todo')));
+                            const currentPri = PRIORITIES.find(p => p.id === (newTaskPriority || (groupBy === 'priority' ? key : 'medium'))) || PRIORITIES[2];
+                            const currentAssignee = projectMembers.find((m: any) => m.id === newTaskAssignee);
+
+                            return (
+                              <div style={{
+                                background: 'var(--bg-card)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '8px',
+                                overflow: 'hidden',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+                                marginBottom: '8px',
+                                marginTop: '4px'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', borderBottom: '1px solid var(--border-color)' }}>
+                                  <Tooltip title={currentStatus?.label || t('tasks.status.todo')}>
+                                    <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: `2px solid ${currentStatus?.color || '#9ca0b0'}`, background: 'transparent', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                      {currentStatus?.type === 'closed' && <CheckOutlined style={{ fontSize: '9px', color: currentStatus.color }} />}
+                                    </div>
+                                  </Tooltip>
+
+                                  <input
+                                    autoFocus
+                                    placeholder={t('project_detail.task_name_placeholder')}
+                                    value={newTaskTitle}
+                                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleInlineCreate(groupBy === 'status' ? key : 'todo');
+                                      }
+                                      if (e.key === 'Escape') {
+                                        setInlineCreate(null);
+                                      }
+                                    }}
+                                    style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, padding: 0 }}
+                                  />
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(120,120,120,0.03)' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <Popover
+                                      trigger="click"
+                                      placement="bottomLeft"
+                                      content={
+                                        <div style={{ width: '200px', padding: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+                                          <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>{t('tasks.panel.assign_to')}</div>
+                                          <div onClick={() => setNewTaskAssignee(null)} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: !newTaskAssignee ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
+                                            <UserOutlined style={{ fontSize: '12px', color: 'var(--text-muted)' }} />
+                                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tasks.panel.unassigned')}</span>
+                                          </div>
+                                          {projectMembers.map((m: any) => (
+                                            <div key={m.id} onClick={() => setNewTaskAssignee(m.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: newTaskAssignee === m.id ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '8px', fontWeight: 700, overflow: 'hidden' }}>
+                                                  {m.photo ? <img src={m.photo} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(m.name)}
+                                                </div>
+                                                <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{m.name}</span>
+                                              </div>
+                                              {newTaskAssignee === m.id && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '10px' }} />}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      }
+                                    >
+                                      <Tooltip title={currentAssignee ? currentAssignee.name : t('tasks.panel.assign_to')}>
+                                        <div style={{ width: '22px', height: '22px', borderRadius: '50%', border: currentAssignee ? 'none' : '1px dashed var(--border-color)', background: currentAssignee ? '#6366f1' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: currentAssignee ? '#fff' : 'var(--text-muted)', fontSize: currentAssignee ? '7px' : '10px', fontWeight: 700, overflow: 'hidden', flexShrink: 0 }} className="status-item-hover">
+                                          {currentAssignee ? (currentAssignee.photo ? <img src={currentAssignee.photo} alt={currentAssignee.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(currentAssignee.name)) : <UserOutlined />}
+                                        </div>
+                                      </Tooltip>
+                                    </Popover>
+
+                                    <Popover
+                                      trigger="click"
+                                      placement="bottomLeft"
+                                      content={
+                                        <div style={{ width: '260px', padding: '8px' }}>
+                                          <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '0 4px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '8px' }}>{t('tasks.panel.time_range')}</div>
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                              <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.start_date_label')}</span>
+                                              <input type="datetime-local" value={newTaskStartDate} onChange={(e) => setNewTaskStartDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                              <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.due_date_label')}</span>
+                                              <input type="datetime-local" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+                                            </div>
+                                          </div>
+                                        </div>
+                                      }
+                                    >
+                                      <Tooltip title={t('tasks.panel.select_time')}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: '22px', height: '22px', borderRadius: '4px', color: (newTaskStartDate || newTaskDueDate) ? 'var(--primary)' : 'var(--text-muted)', fontSize: '12px', flexShrink: 0 }} className="status-item-hover">
+                                          <CalendarOutlined />
+                                        </div>
+                                      </Tooltip>
+                                    </Popover>
+
+                                    <Popover
+                                      trigger="click"
+                                      placement="bottomLeft"
+                                      content={
+                                        <div style={{ width: '180px', padding: '4px' }}>
+                                          <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '4px 8px 6px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>{t('tasks.panel.priority')}</div>
+                                          {PRIORITIES.map(p => (
+                                            <div key={p.id} onClick={() => setNewTaskPriority(p.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: newTaskPriority === p.id ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <FlagIcon color={p.color} size={13} />
+                                                <span style={{ fontSize: '12px', fontWeight: 600, color: p.color }}>{t(`tasks.priority.${p.id}`)}</span>
+                                              </div>
+                                              {newTaskPriority === p.id && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '10px' }} />}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      }
+                                    >
+                                      <Tooltip title={t('tasks.panel.set_priority')}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: '24px', height: '24px', borderRadius: '4px' }} className="status-item-hover">
+                                          <FlagIcon color={currentPri.color} size={14} />
+                                        </div>
+                                      </Tooltip>
+                                    </Popover>
+                                  </div>
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <button onClick={() => setInlineCreate(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', padding: '4px 8px' }}>
+                                      {t('project_detail.cancel_btn')}
+                                    </button>
+                                    <button
+                                      onClick={() => handleInlineCreate(groupBy === 'status' ? key : 'todo')}
+                                      style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                    >
+                                      {t('tasks.panel.save_short')} ↵
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Add card button - bottom of group */}
+                          {inlineCreate !== key && (
+                            <div
+                              onClick={() => {
+                                setInlineCreate(key);
+                                setNewTaskTitle('');
+                                setNewTaskStatus(groupBy === 'status' ? key : 'todo');
+                                setNewTaskPriority(groupBy === 'priority' ? key : 'medium');
+                                setNewTaskAssignee(null);
+                                setNewTaskStartDate('');
+                                setNewTaskDueDate(groupBy === 'due_date' && key !== t('tasks.no_due_date') ? `${key}T18:00` : '');
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '8px 12px',
+                                border: '1px dashed var(--border-color)',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                color: 'var(--text-muted)',
+                                fontSize: '13px',
+                                transition: 'all 0.2s',
+                                marginTop: '4px'
+                              }}
+                              className="status-item-hover"
+                            >
+                              <PlusOutlined style={{ fontSize: '12px' }} />
+                              <span>{t('project_detail.add_task')}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {filteredTasks.length === 0 && (
+                    <div className="my-tasks__empty" style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <h3 style={{ color: 'var(--text-muted)' }}>{t('tasks.empty.title')}</h3>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{t('tasks.empty.desc')}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* View Mode: Calendar */}
+          {viewMode === 'calendar' && (
+            <div style={{ background: 'var(--bg-card)', borderRadius: '8px', padding: '24px', border: '1px solid var(--border-color)', marginTop: '16px' }} className="project-detail__calendar-container">
+              <TaskCalendar tasks={tasks.filter(taskMatchesFilters)} onSelectTask={handleSelectTask} columns={columns} projectId={project?.id} />
+            </div>
+          )}
+        </>
       )}
 
       {activeTab === 'members' && (
         <div style={{ background: 'var(--bg-card)', borderRadius: '8px', padding: '24px', border: '1px solid var(--border-color)', marginTop: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-            <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '18px' }}>{t('project_detail.members_title' as any)}</h3>
+            <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '18px' }}>{t('project_detail.members_title')}</h3>
             {canEditProject() && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setShowAddMemberModal(true)}>{t('project_detail.add_member' as any)}</Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setShowAddMemberModal(true)}>{t('project_detail.add_member')}</Button>
             )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {project.members?.map((m: any) => (
-              <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-body)', padding: '12px 16px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div className="member-avatar" style={{ background: project.color, width: '40px', height: '40px', display: 'flex', justifyContent: 'center', alignItems: 'center', borderRadius: '50%', color: '#fff', fontWeight: 600 }}>
-                    {m.photo ? <img src={m.photo} alt={m.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : getInitials(m.name)}
-                  </div>
-                  <div>
-                    <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{m.name}</div>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{m.email}</div>
-                  </div>
-                </div>
-                <div>
-                  <span style={{ marginRight: '16px', color: '#6366f1', textTransform: 'capitalize', fontSize: '13px' }}>{m.pivot?.role || 'member'}</span>
-                  {Number(m.id) !== Number(project.created_by) ? (
-                    canEditProject() ? (
-                      <Popconfirm title={t('project_detail.confirm_remove_member' as any)} onConfirm={() => handleRemoveMember(m.id)}>
-                        <Button type="text" danger icon={<DeleteOutlined />} />
-                      </Popconfirm>
-                    ) : null
-                  ) : (
-                    <span style={{ color: '#555', fontSize: '12px' }}>{t('project_detail.owner' as any)}</span>
-                  )}
-                </div>
-              </div>
-            ))}
+          <div style={{ overflowX: 'auto', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+            <table className="timesheet-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                  <th style={{ padding: '12px 16px', fontWeight: 500 }}>Avatar</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.name')}</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 500 }}>Email</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.role_in_project')}</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.active_tasks')}</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.date_joined')}</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 500, textAlign: 'right' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {project.members?.map((m: any) => {
+                  const tasksCount = tasks.filter(t => Number(t.assignee_id) === Number(m.id)).length;
+                  const isOwner = Number(m.id) === Number(project.created_by);
+
+                  const formatJoinedDate = (dateStr?: string) => {
+                    if (!dateStr) return '-';
+                    const d = new Date(dateStr);
+                    if (isNaN(d.getTime())) return dateStr;
+                    const pad = (n: number) => String(n).padStart(2, '0');
+                    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+                  };
+
+                  return (
+                    <tr key={m.id} style={{ borderBottom: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-primary)' }} className="timesheet-row-hover">
+                      {/* Avatar */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{
+                          background: project.color || '#6366f1',
+                          width: '32px',
+                          height: '32px',
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          borderRadius: '50%',
+                          color: '#fff',
+                          fontWeight: 600,
+                          fontSize: '11px',
+                          overflow: 'hidden'
+                        }}>
+                          {m.photo ? (
+                            <img src={m.photo} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            getInitials(m.name)
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Tên */}
+                      <td style={{ padding: '12px 16px', fontWeight: 500 }}>
+                        {m.name}
+                      </td>
+
+                      {/* Email */}
+                      <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>
+                        {m.email}
+                      </td>
+
+                      {/* Role trong project */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {isOwner ? (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{t('project_detail.owner')}</span>
+                        ) : canEditProject() ? (
+                          <Select
+                            value={m.pivot?.role || 'member'}
+                            onChange={async (newRole) => {
+                              try {
+                                const res = await api.addProjectMember(project.id, { user_ids: [Number(m.id)], role: newRole });
+                                if (res.success) {
+                                  message.success(t('project_detail.toast.role_updated'));
+                                  fetchProjectData();
+                                }
+                              } catch (err) {
+                                console.error(err);
+                                message.error(t('project_detail.toast.role_update_failed'));
+                              }
+                            }}
+                            size="small"
+                            style={{ width: '110px' }}
+                          >
+                            <Select.Option value="manager">Manager</Select.Option>
+                            <Select.Option value="member">Member</Select.Option>
+                          </Select>
+                        ) : (
+                          <span style={{ color: '#6366f1', textTransform: 'capitalize', fontSize: '13px' }}>
+                            {m.pivot?.role || 'member'}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Task đang có */}
+                      <td style={{ padding: '12px 16px', fontWeight: 600 }}>
+                        {tasksCount}
+                      </td>
+
+                      {/* Ngày thêm */}
+                      <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>
+                        {formatJoinedDate(m.pivot?.joined_at)}
+                      </td>
+
+                      {/* Action */}
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        {!isOwner ? (
+                          canEditProject() ? (
+                            <Dropdown
+                              menu={{
+                                items: [
+                                  {
+                                    key: 'remove',
+                                    label: (
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <DeleteOutlined style={{ fontSize: '13px' }} />
+                                        {t('project_detail.remove_member_label')}
+                                      </span>
+                                    ),
+                                    danger: true,
+                                    onClick: () => {
+                                      Modal.confirm({
+                                        title: t('common.delete_confirm'),
+                                        content: t('project_detail.confirm_remove_member_name', { name: m.name }),
+                                        okText: t('common.delete'),
+                                        cancelText: t('common.cancel'),
+                                        okButtonProps: { danger: true },
+                                        onOk: () => handleRemoveMember(m.id)
+                                      });
+                                    }
+                                  }
+                                ]
+                              }}
+                              trigger={['click']}
+                            >
+                              <Button type="text" icon={<MoreOutlined />} size="small" />
+                            </Dropdown>
+                          ) : null
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -2682,33 +4227,33 @@ const ProjectDetailPage: React.FC = () => {
           {/* Toolbar Filters */}
           <div className="timesheet-filters" style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end', background: 'var(--bg-card)', padding: '16px 24px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '16px' }}>
             <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{lang === 'vi' ? 'Thời gian' : 'Timeframe'}</label>
+              <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('common.timeframe')}</label>
               <Select value={timesheetDateFilter} onChange={(val) => setTimesheetDateFilter(val)} style={{ width: '140px' }}>
-                <Select.Option value="all">{lang === 'vi' ? 'Tất cả' : 'All'}</Select.Option>
-                <Select.Option value="today">{lang === 'vi' ? 'Hôm nay' : 'Today'}</Select.Option>
-                <Select.Option value="week">{lang === 'vi' ? 'Tuần này' : 'This Week'}</Select.Option>
-                <Select.Option value="month">{lang === 'vi' ? 'Tháng này' : 'This Month'}</Select.Option>
-                <Select.Option value="custom">{lang === 'vi' ? 'Tự chọn' : 'Custom'}</Select.Option>
+                <Select.Option value="all">{t('common.all')}</Select.Option>
+                <Select.Option value="today">{t('common.today')}</Select.Option>
+                <Select.Option value="week">{t('common.this_week')}</Select.Option>
+                <Select.Option value="month">{t('common.this_month')}</Select.Option>
+                <Select.Option value="custom">{t('common.custom')}</Select.Option>
               </Select>
             </div>
 
             {timesheetDateFilter === 'custom' && (
               <>
                 <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{lang === 'vi' ? 'Từ ngày' : 'From'}</label>
+                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('common.from')}</label>
                   <Input type="date" value={timesheetStartDate} onChange={(e) => setTimesheetStartDate(e.target.value)} style={{ width: '140px' }} />
                 </div>
                 <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{lang === 'vi' ? 'Đến ngày' : 'To'}</label>
+                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('common.to')}</label>
                   <Input type="date" value={timesheetEndDate} onChange={(e) => setTimesheetEndDate(e.target.value)} style={{ width: '140px' }} />
                 </div>
               </>
             )}
 
             <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{lang === 'vi' ? 'Thành viên' : 'Member'}</label>
+              <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('common.member')}</label>
               <Select value={timesheetMemberFilter} onChange={(val) => setTimesheetMemberFilter(val)} style={{ width: '180px' }}>
-                <Select.Option value="all">{lang === 'vi' ? 'Tất cả thành viên' : 'All Members'}</Select.Option>
+                <Select.Option value="all">{t('common.all_members')}</Select.Option>
                 {project.members?.map((m: any) => (
                   <Select.Option key={m.id} value={m.id}>{m.name}</Select.Option>
                 ))}
@@ -2717,7 +4262,7 @@ const ProjectDetailPage: React.FC = () => {
 
             <div className="filter-actions" style={{ marginLeft: 'auto' }}>
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setShowLogTimeModal(true)}>
-                {lang === 'vi' ? 'Ghi nhận thời gian' : 'Log Time'}
+                {t('timesheet.btn.log_time')}
               </Button>
             </div>
           </div>
@@ -2729,9 +4274,9 @@ const ProjectDetailPage: React.FC = () => {
                 <ClockCircleOutlined />
               </div>
               <div className="card-info" style={{ display: 'flex', flexDirection: 'column' }}>
-                <span className="label" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{lang === 'vi' ? 'Tổng thời gian ghi nhận' : 'Total Time Tracked'}</span>
+                <span className="label" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('common.total_time')}</span>
                 <span className="value" style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)' }}>{totalHours}h</span>
-                <span className="sub" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{filteredTimeEntries.length} {lang === 'vi' ? 'bản ghi' : 'entries'}</span>
+                <span className="sub" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{filteredTimeEntries.length} {t('common.entries')}</span>
               </div>
             </div>
 
@@ -2740,7 +4285,7 @@ const ProjectDetailPage: React.FC = () => {
                 <UserOutlined />
               </div>
               <div className="card-info" style={{ display: 'flex', flexDirection: 'column' }}>
-                <span className="label" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{lang === 'vi' ? 'Tích cực nhất' : 'Most Active Member'}</span>
+                <span className="label" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('common.most_active')}</span>
                 <span className="value" style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }}>{mostActiveMember}</span>
                 <span className="sub" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                   {maxMemberTime > 0 ? `${(maxMemberTime / 3600).toFixed(1)}h` : '0h'}
@@ -2753,7 +4298,7 @@ const ProjectDetailPage: React.FC = () => {
                 <CheckSquareOutlined />
               </div>
               <div className="card-info" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <span className="label" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{lang === 'vi' ? 'Công việc tốn thời gian' : 'Most Logged Task'}</span>
+                <span className="label" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('common.most_logged')}</span>
                 <span className="value" style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }} title={mostLoggedTask}>
                   {mostLoggedTask}
                 </span>
@@ -2768,14 +4313,14 @@ const ProjectDetailPage: React.FC = () => {
           {filteredTimeEntries.length > 0 && (
             <div className="timesheet-charts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '16px', marginBottom: '24px' }}>
               <div className="chart-card" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '20px' }}>
-                <h3 style={{ fontSize: '15px', color: 'var(--text-primary)', margin: '0 0 16px 0', fontWeight: 600 }}>{lang === 'vi' ? 'Thời gian theo thành viên (Giờ)' : 'Time per Member (Hours)'}</h3>
+                <h3 style={{ fontSize: '15px', color: 'var(--text-primary)', margin: '0 0 16px 0', fontWeight: 600 }}>{t('common.time_per_member')}</h3>
                 <div style={{ width: '100%', height: '240px' }}>
                   <ResponsiveContainer>
                     <BarChart data={memberChartData} layout="vertical" margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
                       <XAxis type="number" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
                       <YAxis dataKey="name" type="category" width={80} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                      <RechartsTooltip formatter={(value) => [`${value}h`, lang === 'vi' ? 'Thời gian' : 'Time']} />
+                      <RechartsTooltip formatter={(value) => [`${value}h`, t('common.timeframe')]} />
                       <Bar dataKey="hours" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={16} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -2783,7 +4328,7 @@ const ProjectDetailPage: React.FC = () => {
               </div>
 
               <div className="chart-card" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '20px' }}>
-                <h3 style={{ fontSize: '15px', color: 'var(--text-primary)', margin: '0 0 16px 0', fontWeight: 600 }}>{lang === 'vi' ? 'Phân bổ theo công việc' : 'Time per Task'}</h3>
+                <h3 style={{ fontSize: '15px', color: 'var(--text-primary)', margin: '0 0 16px 0', fontWeight: 600 }}>{t('common.time_per_task')}</h3>
                 <div style={{ width: '100%', height: '240px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                   {taskChartData.length > 0 ? (
                     <ResponsiveContainer>
@@ -2802,12 +4347,12 @@ const ProjectDetailPage: React.FC = () => {
                             <Cell key={`cell-${index}`} fill={['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#06b6d4'][index % 7]} />
                           ))}
                         </Pie>
-                        <RechartsTooltip formatter={(value) => [`${value}h`, lang === 'vi' ? 'Thời gian' : 'Time']} />
+                        <RechartsTooltip formatter={(value) => [`${value}h`, t('common.timeframe')]} />
                         <Legend verticalAlign="bottom" height={36} iconSize={8} iconType="circle" wrapperStyle={{ fontSize: '11px', color: 'var(--text-secondary)' }} />
                       </PieChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div style={{ color: 'var(--text-muted)' }}>{lang === 'vi' ? 'Chưa có dữ liệu' : 'No data'}</div>
+                    <div style={{ color: 'var(--text-muted)' }}>{t('common.no_data')}</div>
                   )}
                 </div>
               </div>
@@ -2816,23 +4361,23 @@ const ProjectDetailPage: React.FC = () => {
 
           {/* Table Logs */}
           <div className="timesheet-logs-container" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '20px' }}>
-            <h3 className="section-title" style={{ fontSize: '16px', color: 'var(--text-primary)', margin: '0 0 16px 0', fontWeight: 600 }}>{lang === 'vi' ? 'Nhật ký ghi nhận thời gian' : 'Time Tracking Logs'}</h3>
+            <h3 className="section-title" style={{ fontSize: '16px', color: 'var(--text-primary)', margin: '0 0 16px 0', fontWeight: 600 }}>{t('common.time_logs')}</h3>
             {loadingTimesheet ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}><Spin /></div>
             ) : filteredTimeEntries.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', background: 'var(--bg-body)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                {lang === 'vi' ? 'Chưa có bản ghi nhận thời gian nào.' : 'No time entries found.'}
+                {t('common.no_time_logs')}
               </div>
             ) : (
               <div className="timesheet-table-wrapper" style={{ overflowX: 'auto' }}>
                 <table className="timesheet-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-secondary)', fontSize: '13px' }}>
-                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{lang === 'vi' ? 'Thành viên' : 'Member'}</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{lang === 'vi' ? 'Công việc' : 'Task'}</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{lang === 'vi' ? 'Mô tả' : 'Description'}</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{lang === 'vi' ? 'Thời gian bắt đầu' : 'Start Time'}</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{lang === 'vi' ? 'Thời lượng' : 'Duration'}</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.member')}</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('timesheet.log_table.task')}</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('timesheet.log_table.description')}</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.start_time')}</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.duration')}</th>
                       <th style={{ padding: '12px 16px', fontWeight: 500 }}></th>
                     </tr>
                   </thead>
@@ -2859,7 +4404,7 @@ const ProjectDetailPage: React.FC = () => {
                           </td>
                           <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>
                             <span className="date-text">
-                              {new Date(entry.started_at).toLocaleString(lang === 'vi' ? 'vi-VN' : 'en-US', {
+                              {new Date(entry.started_at).toLocaleString(locale, {
                                 year: 'numeric', month: '2-digit', day: '2-digit',
                                 hour: '2-digit', minute: '2-digit'
                               })}
@@ -2871,10 +4416,10 @@ const ProjectDetailPage: React.FC = () => {
                           <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                             {isOwnerOrAdmin && (
                               <Popconfirm
-                                title={lang === 'vi' ? 'Xoá bản ghi thời gian này?' : 'Delete this time log?'}
+                                title={t('timesheet.confirm.delete_content')}
                                 onConfirm={() => handleDeleteTimeEntry(entry.id)}
-                                okText={lang === 'vi' ? 'Xoá' : 'Delete'}
-                                cancelText={lang === 'vi' ? 'Huỷ' : 'Cancel'}
+                                okText={t('common.delete')}
+                                cancelText={t('common.cancel')}
                               >
                                 <Button type="text" danger icon={<DeleteOutlined />} size="small" />
                               </Popconfirm>
@@ -2892,89 +4437,91 @@ const ProjectDetailPage: React.FC = () => {
       )}
 
       {/* Log Time Modal */}
-      <Modal
-        title={lang === 'vi' ? 'Ghi nhận thời gian thủ công' : 'Log Time Manually'}
-        open={showLogTimeModal}
-        onCancel={() => setShowLogTimeModal(false)}
-        onOk={handleAddManualTime}
-        okText={lang === 'vi' ? 'Ghi nhận' : 'Log Time'}
-        cancelText={lang === 'vi' ? 'Huỷ' : 'Cancel'}
-        className="timesheet-log-modal"
-        styles={{ body: { background: 'var(--bg-card)' } }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-              {lang === 'vi' ? 'Chọn công việc *' : 'Select Task *'}
-            </label>
-            <Select
-              style={{ width: '100%' }}
-              placeholder={lang === 'vi' ? 'Chọn một công việc thuộc dự án...' : 'Select a project task...'}
-              value={logTimeTask}
-              onChange={(val) => setLogTimeTask(val)}
-              showSearch
-              filterOption={(input, option) =>
-                String(option?.children || '').toLowerCase().includes(input.toLowerCase())
-              }
-            >
-              {tasks.map((t: any) => (
-                <Select.Option key={t.id} value={t.id}>{t.title}</Select.Option>
-              ))}
-            </Select>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+      {showLogTimeModal && (
+        <Modal
+          title={t('manual_log.title')}
+          open={showLogTimeModal}
+          onCancel={() => setShowLogTimeModal(false)}
+          onOk={handleAddManualTime}
+          okText={t('manual_log.submit')}
+          cancelText={t('common.cancel')}
+          className="timesheet-log-modal"
+          styles={{ body: { background: 'var(--bg-card)' } }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-                {lang === 'vi' ? 'Ngày ghi nhận' : 'Date'}
+                {t('manual_log.select_task')}
               </label>
-              <Input
-                type="date"
-                value={logTimeDate}
-                onChange={(e) => setLogTimeDate(e.target.value)}
-              />
+              <Select
+                style={{ width: '100%' }}
+                placeholder={t('manual_log.select_task_placeholder')}
+                value={logTimeTask}
+                onChange={(val) => setLogTimeTask(val)}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.children || '').toLowerCase().includes(input.toLowerCase())
+                }
+              >
+                {tasks.map((t: any) => (
+                  <Select.Option key={t.id} value={t.id}>{t.title}</Select.Option>
+                ))}
+              </Select>
             </div>
-            <div>
-              <label style={{ display: 'block', marginBottom: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-                {lang === 'vi' ? 'Thời lượng' : 'Duration'}
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                  {t('manual_log.start_time')}
+                </label>
                 <Input
-                  type="number"
-                  min={0}
-                  placeholder="h"
-                  value={logTimeHours || ''}
-                  onChange={(e) => setLogTimeHours(Math.max(0, parseInt(e.target.value) || 0))}
-                  style={{ width: '75px' }}
+                  type="date"
+                  value={logTimeDate}
+                  onChange={(e) => setLogTimeDate(e.target.value)}
                 />
-                <span style={{ color: 'var(--text-muted)' }}>h</span>
-                <Input
-                  type="number"
-                  min={0}
-                  max={59}
-                  placeholder="m"
-                  value={logTimeMinutes || ''}
-                  onChange={(e) => setLogTimeMinutes(Math.min(59, Math.max(0, parseInt(e.target.value) || 0)))}
-                  style={{ width: '75px' }}
-                />
-                <span style={{ color: 'var(--text-muted)' }}>m</span>
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                  {t('common.duration')}
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Input
+                    type="number"
+                    min={0}
+                    placeholder="h"
+                    value={logTimeHours || ''}
+                    onChange={(e) => setLogTimeHours(Math.max(0, parseInt(e.target.value) || 0))}
+                    style={{ width: '75px' }}
+                  />
+                  <span style={{ color: 'var(--text-muted)' }}>h</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={59}
+                    placeholder="m"
+                    value={logTimeMinutes || ''}
+                    onChange={(e) => setLogTimeMinutes(Math.min(59, Math.max(0, parseInt(e.target.value) || 0)))}
+                    style={{ width: '75px' }}
+                  />
+                  <span style={{ color: 'var(--text-muted)' }}>m</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div>
-            <label style={{ display: 'block', marginBottom: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-              {lang === 'vi' ? 'Ghi chú / Mô tả công việc' : 'Notes / Description'}
-            </label>
-            <Input.TextArea
-              rows={3}
-              placeholder={lang === 'vi' ? 'Nhập chi tiết công việc đã làm...' : 'What did you work on?...'}
-              value={logTimeDescription}
-              onChange={(e) => setLogTimeDescription(e.target.value)}
-            />
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                {t('manual_log.description')}
+              </label>
+              <Input.TextArea
+                rows={3}
+                placeholder={t('manual_log.description_placeholder')}
+                value={logTimeDescription}
+                onChange={(e) => setLogTimeDescription(e.target.value)}
+              />
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
 
       {/* Task Detail Sidebar Panel */}
       {selectedTask && (
@@ -2988,302 +4535,260 @@ const ProjectDetailPage: React.FC = () => {
       )}
 
       {/* Add Member Modal */}
-      <Modal
-        title={t('project_detail.add_member_modal.title' as any) || "Thêm thành viên"}
-        open={showAddMemberModal}
-        onCancel={() => setShowAddMemberModal(false)}
-        onOk={handleAddMember}
-        okText={t('project_detail.add_member_modal.ok' as any) || "Thêm vào dự án"}
-        cancelText={t('project_detail.cancel_btn' as any) || "Hủy"}
-      >
-        <div style={{ padding: '12px 0' }}>
-          <label style={{ display: 'block', marginBottom: '8px' }}>{t('project_detail.add_member_modal.label' as any) || "Chọn nhân viên từ hệ thống:"}</label>
-          <Select
-            mode="multiple"
-            showSearch
-            style={{ width: '100%' }}
-            placeholder={t('project_detail.add_member_modal.placeholder' as any) || "Chọn nhân viên..."}
-            optionFilterProp="children"
-            value={selectedNewMembers}
-            onChange={(val) => setSelectedNewMembers(val)}
-          >
-            {nonProjectUsers.map(u => (
-              <Select.Option key={u.id} value={u.id}>{u.name} ({u.email})</Select.Option>
-            ))}
-          </Select>
-        </div>
-      </Modal>
-
-      {/* Edit Project Details Modal */}
-      <Modal
-        title={t('projects.edit.title')}
-        open={showEditProjectModal}
-        onCancel={() => setShowEditProjectModal(false)}
-        onOk={handleUpdateProject}
-        okText={t('settings.workspace.save')}
-        cancelText={t('tasks.modal.cancel' as any)}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '12px 0' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '6px' }}>{t('projects.create.name')}</label>
-            <input
-              style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
-              value={editProjectForm.name}
-              onChange={(e) => setEditProjectForm({ ...editProjectForm, name: e.target.value })}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '6px' }}>{t('projects.create.desc')}</label>
-            <textarea
-              style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minHeight: '80px' }}
-              value={editProjectForm.description}
-              onChange={(e) => setEditProjectForm({ ...editProjectForm, description: e.target.value })}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '16px' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', marginBottom: '6px' }}>{t('projects.create.start_date')}</label>
-              <input
-                type="date"
-                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
-                value={editProjectForm.startDate}
-                onChange={(e) => setEditProjectForm({ ...editProjectForm, startDate: e.target.value })}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', marginBottom: '6px' }}>{t('projects.create.end_date')}</label>
-              <input
-                type="date"
-                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
-                value={editProjectForm.endDate}
-                onChange={(e) => setEditProjectForm({ ...editProjectForm, endDate: e.target.value })}
-              />
-            </div>
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '6px' }}>{t('projects.create.color')}</label>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6', '#a855f7'].map(c => (
-                <div
-                  key={c}
-                  style={{
-                    background: c,
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '50%',
-                    cursor: 'pointer',
-                    border: editProjectForm.color === c ? '3px solid #000' : '1px solid #ccc'
-                  }}
-                  onClick={() => setEditProjectForm({ ...editProjectForm, color: c })}
-                />
-              ))}
-            </div>
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '6px' }}>{t('projects.edit.status')}</label>
+      {showAddMemberModal && (
+        <Modal
+          title={t('project_detail.add_member_modal.title')}
+          open={showAddMemberModal}
+          onCancel={() => setShowAddMemberModal(false)}
+          onOk={handleAddMember}
+          okText={t('project_detail.add_member_modal.ok')}
+          cancelText={t('project_detail.cancel_btn')}
+        >
+          <div style={{ padding: '12px 0' }}>
+            <label style={{ display: 'block', marginBottom: '8px' }}>{t('project_detail.add_member_modal.label')}</label>
             <Select
+              mode="multiple"
+              showSearch
               style={{ width: '100%' }}
-              value={editProjectForm.status}
-              onChange={(val) => setEditProjectForm({ ...editProjectForm, status: val })}
+              placeholder={t('project_detail.add_member_modal.placeholder')}
+              optionLabelProp="label"
+              value={selectedNewMembers}
+              onChange={(val) => setSelectedNewMembers(val)}
+              filterOption={(input, option) =>
+                String(option?.title ?? '').toLowerCase().includes(input.toLowerCase())
+              }
             >
-              <Select.Option value="planning">{t('projects.status.planning')}</Select.Option>
-              <Select.Option value="active">{t('projects.status.active')}</Select.Option>
-              <Select.Option value="on_hold">{t('projects.status.on_hold')}</Select.Option>
-              <Select.Option value="completed">{t('projects.status.completed')}</Select.Option>
+              {nonProjectUsers.map(u => (
+                <Select.Option key={u.id} value={u.id} label={u.name} title={`${u.name} ${u.email}`}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      background: project?.color || '#6366f1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#fff',
+                      fontWeight: 600,
+                      fontSize: '11px',
+                      overflow: 'hidden',
+                      flexShrink: 0
+                    }}>
+                      {u.photo ? (
+                        <img src={u.photo} alt={u.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        getInitials(u.name)
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.3' }}>
+                      <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>{u.name}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{u.email}</span>
+                    </div>
+                  </div>
+                </Select.Option>
+              ))}
             </Select>
           </div>
+        </Modal>
+      )}
 
-          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '16px' }}>
-            <h4 style={{ color: 'var(--danger)', margin: '0 0 8px 0', fontSize: '14px' }}>{t('projects.edit.danger_zone')}</h4>
-            <p style={{ color: '#9ca0b0', fontSize: '12px', margin: '0 0 12px 0' }}>{t('projects.edit.danger_desc')}</p>
-            <Popconfirm
-              title={t('projects.edit.delete_btn')}
-              description={t('projects.confirm.delete_title')}
-              onConfirm={async () => {
-                const res = await api.deleteProject(project.id);
-                if (res.success) {
-                  message.success(t('projects.toast.delete_success'));
-                  window.dispatchEvent(new Event('projects-changed'));
-                  navigate('/projects');
-                }
-              }}
-              okText={t('projects.edit.delete_btn')}
-              cancelText={t('tasks.modal.cancel' as any)}
-              okType="danger"
-            >
-              <Button type="primary" danger>{t('projects.edit.delete_btn')}</Button>
-            </Popconfirm>
-          </div>
-        </div>
-      </Modal>
+      {/* Shared Edit Project Modal */}
+      {showEditProjectModal && (
+        <EditProjectModal
+          open={showEditProjectModal}
+          onClose={() => setShowEditProjectModal(false)}
+          project={editProjectForm}
+          onSaved={fetchProjectData}
+          onDeleted={() => navigate('/projects')}
+        />
+      )}
+
+      {showWorkflowEditor && (
+        <WorkflowEditor
+          open={showWorkflowEditor}
+          project={project}
+          onClose={() => setShowWorkflowEditor(false)}
+          onSaved={() => {
+            fetchProjectData();
+            fetchWorkflow();
+          }}
+        />
+      )}
 
       {/* Manage Statuses Modal */}
-      <Modal
-        title={t('projects.status.manage_title' as any) || 'Quản lý trạng thái công việc'}
-        open={showManageStatusesModal}
-        onCancel={() => setShowManageStatusesModal(false)}
-        onOk={() => handleSaveStatuses()}
-        width={900}
-        okText={t('projects.status.save_config' as any) || 'Lưu cấu hình'}
-        cancelText={t('tasks.panel.cancel')}
-        style={{ top: '50px' }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0' }}>
-          {/* Template Selector Row */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: 'rgba(120, 120, 120, 0.04)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                {t('projects.status.apply_template_label' as any) || 'Áp dụng Template mẫu:'}
-              </span>
-              <Select
-                style={{ width: '200px' }}
-                placeholder={t('projects.status.select_template_placeholder' as any) || 'Chọn Template...'}
-                value={selectedTemplateId}
-                onChange={(val) => {
-                  setSelectedTemplateId(val);
-                  handleApplyTemplate(val);
-                }}
-              >
-                {statusTemplates.map(tpl => (
-                  <Select.Option key={tpl.id} value={tpl.id}>{tpl.name}</Select.Option>
-                ))}
-              </Select>
-            </div>
-            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
-              {t('projects.status.apply_template_help' as any) || 'Chọn template có sẵn để áp dụng nhanh bộ trạng thái mẫu.'}
-            </div>
-          </div>
-
-          {/* Status Columns Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
-            {/* 1. NOT STARTED GROUP */}
-            <div style={{ background: 'rgba(120, 120, 120, 0.02)', borderRadius: '8px', border: '1px solid var(--border-color)', padding: '12px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#9ca0b0', textTransform: 'uppercase', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>{t('projects.status.group_not_started' as any) || 'CẦN LÀM (NOT STARTED)'}</span>
-                <span style={{ fontSize: '11px', background: 'rgba(120, 120, 120, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
-                  {activeStatuses.filter(s => s.type === 'not_started').length}
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {activeStatuses.filter(s => s.type === 'not_started').map((s, i) => renderStatusRow(s, i))}
-                <Button type="dashed" onClick={() => handleAddStatus('not_started')} style={{ width: '100%' }}>
-                  + {t('projects.status.add_status' as any) || 'Thêm trạng thái'}
-                </Button>
-              </div>
-            </div>
-
-            {/* 2. ACTIVE GROUP */}
-            <div style={{ background: 'rgba(59, 130, 246, 0.02)', borderRadius: '8px', border: '1px solid var(--border-color)', padding: '12px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>{t('projects.status.group_active' as any) || 'ĐANG THỰC HIỆN (ACTIVE)'}</span>
-                <span style={{ fontSize: '11px', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
-                  {activeStatuses.filter(s => s.type === 'active' || s.type === 'done' || !s.type).length}
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {activeStatuses.filter(s => s.type === 'active' || s.type === 'done' || !s.type).map((s, i) => renderStatusRow(s, i))}
-                <Button type="dashed" onClick={() => handleAddStatus('active')} style={{ width: '100%' }}>
-                  + {t('projects.status.add_status' as any) || 'Thêm trạng thái'}
-                </Button>
-              </div>
-            </div>
-
-            {/* 3. CLOSED GROUP */}
-            <div style={{ background: 'rgba(34, 197, 94, 0.02)', borderRadius: '8px', border: '1px solid var(--border-color)', padding: '12px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#22c55e', textTransform: 'uppercase', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>{t('projects.status.group_closed' as any) || 'HOÀN THÀNH (CLOSED)'}</span>
-                <span style={{ fontSize: '11px', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
-                  {activeStatuses.filter(s => s.type === 'closed').length}
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {activeStatuses.filter(s => s.type === 'closed').map((s, i) => renderStatusRow(s, i))}
-                <Button type="dashed" onClick={() => handleAddStatus('closed')} style={{ width: '100%' }}>
-                  + {t('projects.status.add_status' as any) || 'Thêm trạng thái'}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {/* Save as Template Options Row */}
-          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input
-                type="checkbox"
-                id="saveAsTemplateCheck"
-                checked={saveAsNewTemplate}
-                onChange={e => setSaveAsNewTemplate(e.target.checked)}
-                style={{ cursor: 'pointer' }}
-              />
-              <label htmlFor="saveAsTemplateCheck" style={{ fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
-                {t('projects.status.save_as_new_template' as any) || 'Lưu cấu hình này thành Template mới'}
-              </label>
-            </div>
-            {saveAsNewTemplate && (
-              <div style={{ paddingLeft: '22px' }}>
-                <Input
-                  placeholder={t('projects.status.new_template_placeholder' as any) || 'Nhập tên Template mới (ví dụ: Quy trình Marketing)...'}
-                  value={newTemplateName}
-                  onChange={e => setNewTemplateName(e.target.value)}
-                  style={{ maxWidth: '400px' }}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      </Modal>
-
-      {/* Mapping Statuses Modal */}
-      <Modal
-        title={t('projects.status.map_title' as any) || 'Chuyển đổi trạng thái công việc cũ'}
-        open={showMappingModal}
-        onCancel={() => setShowMappingModal(false)}
-        onOk={() => handleSaveStatuses(statusMappings)}
-        okText={t('projects.status.confirm_save' as any) || 'Xác nhận & Lưu'}
-        cancelText={t('tasks.panel.cancel')}
-        width={500}
-        destroyOnClose
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '10px 0' }}>
-          <div style={{
-            background: 'rgba(245, 158, 11, 0.1)',
-            border: '1px solid rgba(245, 158, 11, 0.2)',
-            borderRadius: '8px',
-            padding: '12px',
-            color: '#d97706',
-            fontSize: '13px',
-            lineHeight: '1.5'
-          }}>
-            <strong>{t('projects.status.map_attention_label' as any) || 'Chú ý:'}</strong>{' '}
-            {t('projects.status.map_attention_desc' as any) || 'Bạn đang xóa một số trạng thái vẫn còn công việc chưa hoàn thành. Hãy chọn trạng thái mới để chuyển các công việc này sang.'}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {orphanedStatusesToMap.map(os => (
-              <div key={os.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {showManageStatusesModal && (
+        <Modal
+          title={t('projects.status.manage_title')}
+          open={showManageStatusesModal}
+          onCancel={() => setShowManageStatusesModal(false)}
+          footer={[
+            <Button key="cancel" onClick={() => setShowManageStatusesModal(false)}>{t('tasks.panel.cancel')}</Button>,
+            <Button key="ok" type="primary" onClick={() => handleSaveStatuses()}>{t('projects.status.save_config')}</Button>
+          ]}
+          width={900}
+          style={{ top: '50px' }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0' }}>
+            {/* Template Selector Row */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: 'rgba(120, 120, 120, 0.04)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  {t('projects.status.map_field_label' as any, { name: os.name }) || `Chuyển công việc ở "${os.name}" sang:`}
+                  {t('projects.status.apply_template_label')}
                 </span>
                 <Select
-                  style={{ width: '100%' }}
-                  value={statusMappings[os.id]}
-                  onChange={(val) => setStatusMappings(prev => ({
-                    ...prev,
-                    [os.id]: val
-                  }))}
+                  style={{ width: '200px' }}
+                  placeholder={t('projects.status.select_template_placeholder')}
+                  value={selectedTemplateId}
+                  onChange={(val) => {
+                    setSelectedTemplateId(val);
+                    handleApplyTemplate(val);
+                  }}
                 >
-                  {activeStatuses.map(s => (
-                    <Select.Option key={s.id} value={s.id}>
-                      <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: s.color, marginRight: '8px' }} />
-                      {s.name}
-                    </Select.Option>
+                  {statusTemplates.map(tpl => (
+                    <Select.Option key={tpl.id} value={tpl.id}>{tpl.name}</Select.Option>
                   ))}
                 </Select>
               </div>
-            ))}
+              <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                {t('projects.status.apply_template_help')}
+              </div>
+            </div>
+
+            {/* Status Columns Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+              {/* 1. NOT STARTED GROUP */}
+              <div style={{ background: 'rgba(120, 120, 120, 0.02)', borderRadius: '8px', border: '1px solid var(--border-color)', padding: '12px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#9ca0b0', textTransform: 'uppercase', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{t('projects.status.group_not_started')}</span>
+                  <span style={{ fontSize: '11px', background: 'rgba(120, 120, 120, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                    {activeStatuses.filter(s => s.type === 'not_started').length}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {activeStatuses.filter(s => s.type === 'not_started').map((s, i) => renderStatusRow(s, i))}
+                  <Button type="dashed" onClick={() => handleAddStatus('not_started')} style={{ width: '100%' }}>
+                    + {t('projects.status.add_status')}
+                  </Button>
+                </div>
+              </div>
+
+              {/* 2. ACTIVE GROUP */}
+              <div style={{ background: 'rgba(59, 130, 246, 0.02)', borderRadius: '8px', border: '1px solid var(--border-color)', padding: '12px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{t('projects.status.group_active')}</span>
+                  <span style={{ fontSize: '11px', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                    {activeStatuses.filter(s => s.type === 'active' || s.type === 'done' || !s.type).length}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {activeStatuses.filter(s => s.type === 'active' || s.type === 'done' || !s.type).map((s, i) => renderStatusRow(s, i))}
+                  <Button type="dashed" onClick={() => handleAddStatus('active')} style={{ width: '100%' }}>
+                    + {t('projects.status.add_status')}
+                  </Button>
+                </div>
+              </div>
+
+              {/* 3. CLOSED GROUP */}
+              <div style={{ background: 'rgba(34, 197, 94, 0.02)', borderRadius: '8px', border: '1px solid var(--border-color)', padding: '12px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#22c55e', textTransform: 'uppercase', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{t('projects.status.group_closed')}</span>
+                  <span style={{ fontSize: '11px', background: 'rgba(34, 197, 94, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                    {activeStatuses.filter(s => s.type === 'closed').length}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {activeStatuses.filter(s => s.type === 'closed').map((s, i) => renderStatusRow(s, i))}
+                  <Button type="dashed" onClick={() => handleAddStatus('closed')} style={{ width: '100%' }}>
+                    + {t('projects.status.add_status')}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Save as Template Options Row */}
+            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="checkbox"
+                  id="saveAsTemplateCheck"
+                  checked={saveAsNewTemplate}
+                  onChange={e => setSaveAsNewTemplate(e.target.checked)}
+                  style={{ cursor: 'pointer' }}
+                />
+                <label htmlFor="saveAsTemplateCheck" style={{ fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
+                  {t('projects.status.save_as_new_template')}
+                </label>
+              </div>
+              {saveAsNewTemplate && (
+                <div style={{ paddingLeft: '22px' }}>
+                  <Input
+                    placeholder={t('projects.status.new_template_placeholder')}
+                    value={newTemplateName}
+                    onChange={e => setNewTemplateName(e.target.value)}
+                    style={{ maxWidth: '400px' }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
+
+      {/* Mapping Statuses Modal */}
+      {showMappingModal && (
+        <Modal
+          title={t('projects.status.map_title')}
+          open={showMappingModal}
+          onCancel={() => setShowMappingModal(false)}
+          onOk={() => handleSaveStatuses(statusMappings)}
+          okText={t('projects.status.confirm_save')}
+          cancelText={t('tasks.panel.cancel')}
+          width={500}
+          destroyOnHidden
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '10px 0' }}>
+            <div style={{
+              background: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid rgba(245, 158, 11, 0.2)',
+              borderRadius: '8px',
+              padding: '12px',
+              color: '#d97706',
+              fontSize: '13px',
+              lineHeight: '1.5'
+            }}>
+              <strong>{t('projects.status.map_attention_label')}</strong>{' '}
+              {t('projects.status.map_attention_desc')}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {orphanedStatusesToMap.map(os => (
+                <div key={os.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    {t('projects.status.map_field_label', { name: os.name })}
+                  </span>
+                  <Select
+                    style={{ width: '100%' }}
+                    value={statusMappings[os.id]}
+                    onChange={(val) => setStatusMappings(prev => ({
+                      ...prev,
+                      [os.id]: val
+                    }))}
+                  >
+                    {activeStatuses.map(s => (
+                      <Select.Option key={s.id} value={s.id}>
+                        <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: s.color, marginRight: '8px' }} />
+                        {s.name}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Modal>
+      )}
+      <DeleteConfirmComponent />
     </div>
   );
 };

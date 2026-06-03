@@ -50,6 +50,7 @@ class AiLocalizationTest extends TestCase
             'status' => 'todo',
             'priority' => 'medium',
             'creator_id' => $this->user->id,
+            'assignee_id' => $this->user->id,
             'position' => 1
         ]);
     }

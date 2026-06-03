@@ -22,11 +22,28 @@ class AuthController extends Controller
     /**
      * Step 1: Redirect user to Bitrix OAuth2 authorization page.
      */
-    public function redirect()
+    public function redirect(Request $request)
     {
+        $origin = $request->query('origin');
+        if (!$origin) {
+            $referer = $request->headers->get('referer');
+            if ($referer) {
+                $parsed = parse_url($referer);
+                if (isset($parsed['scheme']) && isset($parsed['host'])) {
+                    $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+                    $origin = $parsed['scheme'] . '://' . $parsed['host'] . $port;
+                }
+            }
+        }
+        if (!$origin) {
+            $host = $request->getHost();
+            $origin = "http://{$host}:3000";
+        }
+
         $authUrl = config('bitrix.url') . '/oauth/authorize/?' . http_build_query([
             'client_id' => config('bitrix.client_id'),
             'response_type' => 'code',
+            'state' => $origin,
         ]);
 
         return redirect()->away($authUrl);
@@ -160,13 +177,19 @@ HTML;
         ]);
 
         if ($data && isset($data['access_token'])) {
+            $state = $request->input('state');
+            if (!$state) {
+                $origins = explode(',', env('FRONTEND_URL', 'http://localhost:3000'));
+                $state = $origins[0];
+            }
+
             return $this->createUserAndToken(
                 accessToken: $data['access_token'],
                 refreshToken: $data['refresh_token'] ?? null,
                 expiresIn: $data['expires_in'] ?? 3600,
                 domain: $data['domain'] ?? $domain,
                 memberId: $data['member_id'] ?? $memberId,
-                redirect: true
+                redirectUrl: $state
             );
         }
 
@@ -203,7 +226,7 @@ HTML;
         int $expiresIn,
         ?string $domain,
         ?string $memberId,
-        bool $redirect = false
+        ?string $redirectUrl = null
     ): \Symfony\Component\HttpFoundation\Response {
         $bitrixUser = $this->bitrix->getCurrentUser($accessToken);
 
@@ -263,9 +286,16 @@ HTML;
         $user->tokens()->delete();
         $sanctumToken = $user->createToken('taskflow-session', ['*'], now()->addDays(30));
 
-        if ($redirect) {
-            $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-            return redirect()->away($frontendUrl . '/?token=' . $sanctumToken->plainTextToken);
+        // Sync all users in the background/inline to ensure assignee/member lists are populated
+        try {
+            $this->bitrix->setAccessToken($accessToken)->syncUsers();
+        } catch (\Exception $e) {
+            Log::error('Bitrix user sync on login failed: ' . $e->getMessage());
+        }
+
+        if ($redirectUrl) {
+            $redirectUrl = rtrim($redirectUrl, '/');
+            return redirect()->away($redirectUrl . '/?token=' . $sanctumToken->plainTextToken);
         }
 
         return response()->json([
@@ -393,6 +423,21 @@ HTML;
 
         $users = $query->get(['id', 'name', 'email', 'photo', 'work_position', 'role', 'department_ids']);
 
+        // Auto-sync fallback: If the database is missing managed users, trigger an on-the-fly sync.
+        // We only trigger if the user count is <= 1 AND there is no search query (to avoid syncing on empty search results).
+        if ($users->count() <= 1 && empty($search) && $currentUser && in_array($currentUser->role, ['manager', 'admin'])) {
+            try {
+                $token = $this->bitrix->ensureValidToken($currentUser);
+                if ($token) {
+                    $this->bitrix->syncUsers();
+                    // Re-run the query
+                    $users = $query->get(['id', 'name', 'email', 'photo', 'work_position', 'role', 'department_ids']);
+                }
+            } catch (\Exception $e) {
+                Log::error('Auto-sync in listUsers failed: ' . $e->getMessage());
+            }
+        }
+
         return response()->json([
             'success' => true,
             'data' => $users,
@@ -413,7 +458,7 @@ HTML;
         $request->validate([
             'theme' => 'sometimes|string|in:light,dark,system',
             'timezone' => 'sometimes|string|max:255',
-            'language' => 'sometimes|string|in:vi,en',
+            'language' => 'sometimes|string|in:vi,en,ja',
             'workspace_name' => 'sometimes|string|max:255',
             'notification_settings' => 'sometimes|array',
         ]);

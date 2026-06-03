@@ -119,6 +119,8 @@
       border: 1px solid $border-color;
       border-radius: $radius-md;
       min-height: 120px;
+      max-height: 350px;
+      overflow-y: auto;
       outline: none;
       font-family: $font-family;
       resize: vertical;
@@ -146,6 +148,12 @@
       border-top: 1px solid $border-color;
       height: 500px;
     }
+  }
+}
+
+.ant-input-affix-wrapper {
+  .ant-input {
+    background: transparent !important;
   }
 }
 
@@ -268,14 +276,14 @@
 
     .ant-picker-input {
       cursor: pointer;
-      
+
       input {
         cursor: pointer;
         color: var(--text-primary, #ffffff) !important;
         font-size: 12.5px !important;
         font-weight: 500;
         text-align: center;
-        
+
         &::placeholder {
           color: var(--text-muted, #9ca0b0) !important;
           text-align: center;
@@ -286,7 +294,7 @@
     .ant-picker-suffix {
       display: none !important;
     }
-    
+
     .ant-picker-clear {
       background: transparent !important;
       color: var(--text-muted, #9ca0b0) !important;
@@ -301,7 +309,565 @@
     right: 440px;
     width: min(1000px, calc(100vw - 440px));
   }
+
   .task-detail__backdrop {
     right: 440px;
+  }
+}
+
+// Brain AI Modal Styles
+.ai-brain-modal {
+  &__backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(5px);
+    z-index: 3000;
+    animation: fadeIn 0.2s ease;
+  }
+
+  &__container {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 460px;
+    max-width: 95vw;
+    background: linear-gradient(185deg, #16121e 0%, #0d0c11 100%);
+    border: 1px solid rgba(157, 78, 221, 0.25);
+    border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(157, 78, 221, 0.12);
+    z-index: 3001;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+
+    &-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    &-logo {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #a855f7, #6366f1, #ec4899);
+      box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+
+      .sparkle-icon {
+        font-size: 15px;
+        color: #fff;
+      }
+    }
+
+    &-title-wrapper {
+      display: flex;
+      flex-direction: column;
+    }
+
+    &-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.2;
+    }
+
+    &-subtitle {
+      font-size: 11px;
+      color: #9ca0b0;
+      margin-top: 2px;
+    }
+
+    &-close {
+      background: none;
+      border: none;
+      color: #9ca0b0;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff;
+      }
+    }
+  }
+
+  &__body {
+    padding: 20px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.15);
+
+    // Thin scrollbar for dark body
+    &::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.25);
+      }
+    }
+  }
+
+  &__content {
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #e4e4e7;
+
+    p {
+      margin-bottom: 12px;
+    }
+
+    ul,
+    ol {
+      padding-left: 20px;
+      margin-bottom: 12px;
+    }
+
+    li {
+      margin-bottom: 6px;
+    }
+  }
+
+  &__feedback-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+    padding-top: 8px;
+
+    .feedback-btn {
+      background: none;
+      border: none;
+      color: #9ca0b0;
+      cursor: pointer;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: #e4e4e7;
+      }
+    }
+  }
+
+  &__input-wrapper {
+    padding: 12px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  &__input-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 8px 12px;
+    transition: all 0.2s ease;
+
+    &:focus-within {
+      border-color: rgba(168, 85, 247, 0.5);
+      background: rgba(255, 255, 255, 0.07);
+      box-shadow: 0 0 8px rgba(168, 85, 247, 0.25);
+    }
+
+    input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #fff;
+      font-size: 13px;
+
+      &::placeholder {
+        color: #6b7280;
+      }
+    }
+
+    .input-action {
+      color: #9ca0b0;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      transition: color 0.2s ease;
+
+      &:hover {
+        color: #fff;
+      }
+
+      &.send {
+        color: #a855f7;
+
+        &:hover {
+          color: #c084fc;
+        }
+      }
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.25);
+  }
+
+  &__action-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    color: #e4e4e7;
+    font-size: 13px;
+
+    &-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    .enter-badge {
+      font-size: 10px;
+      color: #9ca0b0;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+  }
+}
+
+html[data-theme="light"] {
+  .ai-brain-modal {
+    &__backdrop {
+      background: rgba(0, 0, 0, 0.4);
+    }
+
+    &__container {
+      background: linear-gradient(185deg, #ffffff 0%, #f8fafc 100%);
+      border: 1px solid rgba(168, 85, 247, 0.2);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1), 0 0 20px rgba(168, 85, 247, 0.05);
+      color: var(--text-primary);
+    }
+
+    &__header {
+      border-bottom: 1px solid var(--border-color);
+
+      &-title {
+        color: var(--text-primary);
+      }
+
+      &-subtitle {
+        color: var(--text-secondary);
+      }
+
+      &-close {
+        color: var(--text-secondary);
+
+        &:hover {
+          background: var(--bg-card-hover);
+          color: var(--text-primary);
+        }
+      }
+    }
+
+    &__body {
+      background: rgba(168, 85, 247, 0.02);
+
+      &::-webkit-scrollbar-thumb {
+        background: rgba(0, 0, 0, 0.1);
+
+        &:hover {
+          background: rgba(0, 0, 0, 0.2);
+        }
+      }
+    }
+
+    &__content {
+      color: var(--text-primary);
+    }
+
+    &__feedback-row {
+      border-top: 1px solid var(--border-color);
+
+      .feedback-btn {
+        color: var(--text-secondary);
+
+        &:hover {
+          background: var(--bg-card-hover);
+          color: var(--text-primary);
+        }
+      }
+    }
+
+    &__input-wrapper {
+      border-top: 1px solid var(--border-color);
+      background: var(--bg-card);
+    }
+
+    &__input-container {
+      background: var(--bg-input);
+      border: 1px solid var(--border-color);
+
+      &:focus-within {
+        border-color: rgba(168, 85, 247, 0.4);
+        background: #fff;
+        box-shadow: 0 0 8px rgba(168, 85, 247, 0.15);
+      }
+
+      input {
+        color: var(--text-primary);
+
+        &::placeholder {
+          color: var(--text-muted);
+        }
+      }
+
+      .input-action {
+        color: var(--text-secondary);
+
+        &:hover {
+          color: var(--text-primary);
+        }
+
+        &.send {
+          color: #a855f7;
+
+          &:hover {
+            color: #8b5cf6;
+          }
+        }
+      }
+    }
+
+    &__actions {
+      border-top: 1px solid var(--border-color);
+      background: var(--bg-card-hover);
+    }
+
+    &__action-item {
+      color: var(--text-secondary);
+
+      &:hover {
+        background: var(--bg-card);
+        color: var(--text-primary);
+      }
+
+      .enter-badge {
+        color: var(--text-secondary);
+        background: var(--bg-card-hover);
+        border: 1px solid var(--border-color);
+      }
+    }
+  }
+}
+
+@keyframes scaleUp {
+  from {
+    transform: translate(-50%, -50%) scale(0.96);
+    opacity: 0;
+  }
+
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+}
+
+.add-checklist-dashed-btn,
+.add-subtask-dashed-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: $font-size-sm;
+  cursor: pointer;
+  transition: all $transition-fast;
+  margin-top: 4px;
+
+  &:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: rgba(99, 102, 241, 0.05);
+  }
+}
+
+// Custom styled checkbox for subtasks & checklists with excellent dark mode contrast
+.custom-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--text-muted, #505468) !important;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  outline: none;
+  margin: 0;
+
+  &:hover {
+    border-color: var(--primary, #6366f1) !important;
+  }
+
+  &:checked {
+    background: var(--success, #22c55e) !important;
+    border-color: var(--success, #22c55e) !important;
+
+    &::after {
+      content: '✓' !important;
+      color: white !important;
+      font-size: 10px !important;
+      font-weight: 700 !important;
+      display: block !important;
+      line-height: 1 !important;
+    }
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+// Dashed circle placeholder for empty assignee/dates
+.empty-placeholder-circle {
+  width: 22px;
+  height: 22px;
+  border: 1px dashed var(--text-tertiary, #6b7084) !important;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.01);
+  color: var(--text-tertiary, #6b7084);
+  transition: all 0.15s ease;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--primary-light, #818cf8) !important;
+    color: var(--primary-light, #818cf8);
+    background: rgba(99, 102, 241, 0.05);
+  }
+}
+
+// Unified item container rows with stronger borders for dark mode
+.subtask-item-row,
+.checklist-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-card-hover) !important;
+  border: 1px solid var(--border-light, #333654) !important;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--primary, #6366f1) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+}
+
+// Action buttons with borders
+.subtask-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--border-color, #2a2d42) !important;
+  background: var(--bg-body, #0f1117) !important;
+  color: var(--primary, #6366f1) !important;
+  transition: all 0.15s ease !important;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--primary, #6366f1) !important;
+    background: var(--primary-bg, rgba(99, 102, 241, 0.08)) !important;
+    color: var(--primary-light, #818cf8) !important;
+  }
+}
+
+.subtask-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--border-color, #2a2d42) !important;
+  background: var(--bg-body, #0f1117) !important;
+  color: var(--danger, #ef4444) !important;
+  transition: all 0.15s ease !important;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--danger, #ef4444) !important;
+    background: var(--danger-bg, rgba(239, 68, 68, 0.1)) !important;
+    color: var(--danger, #ef4444) !important;
   }
 }

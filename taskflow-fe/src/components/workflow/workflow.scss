@@ -1,0 +1,521 @@
+@import '../../styles/variables';
+
+.workflow-editor-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: $bg-body;
+  z-index: 1050;
+  display: flex;
+  flex-direction: column;
+  color: $text-primary;
+  font-family: $font-family;
+  animation: workflowFadeIn 0.25s ease-out;
+
+  @keyframes workflowFadeIn {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  // Header Toolbar
+  .workflow-toolbar {
+    height: 52px;
+    border-bottom: 1px solid $border-color;
+    background: $bg-header;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 10;
+    box-shadow: none;
+
+    .toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        color: $text-primary;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .project-badge {
+        font-size: 11px;
+        background: $bg-input;
+        border: 1px solid $border-color;
+        padding: 2px 8px;
+        border-radius: $radius-sm;
+        color: $text-secondary;
+      }
+    }
+
+    .toolbar-center {
+      display: flex;
+      align-items: center;
+    }
+
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+  }
+
+  // Main Editor Workspace Layout
+  .workflow-workspace {
+    flex: 1;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+  }
+
+  // Visual Canvas
+  .workflow-canvas-container {
+    flex: 1;
+    position: relative;
+    overflow: auto;
+    background-color: $bg-body;
+    background-size: 20px 20px;
+    background-image: radial-gradient($border-color 1.5px, transparent 1.5px);
+    user-select: none;
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
+
+    .workflow-svg-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 2000px;
+      height: 2000px;
+      pointer-events: none;
+      z-index: 1;
+
+      path.transition-line {
+        fill: none;
+        stroke: var(--transition-normal);
+        stroke-width: 2.5;
+        pointer-events: stroke;
+        cursor: pointer;
+        transition: stroke $transition-fast;
+
+        &.hovered {
+          stroke: var(--transition-hover);
+        }
+
+        &.selected {
+          stroke: var(--transition-selected);
+        }
+      }
+    }
+
+    .workflow-nodes-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 2000px;
+      height: 2000px;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .workflow-tags-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 2000px;
+      height: 2000px;
+      pointer-events: none;
+      z-index: 3;
+    }
+  }
+
+  // Toolbar action buttons – match dark theme concept
+  .workflow-toolbar {
+    .toolbar-right {
+      .ant-btn {
+        border-radius: $radius-md;
+      }
+
+      .ant-btn-default {
+        background: rgba(99, 102, 241, 0.06);
+        border: 1px solid rgba(99, 102, 241, 0.25);
+        color: $primary-light;
+        font-weight: 500;
+        font-size: 12px;
+        transition: all $transition-fast;
+
+        &:hover {
+          background: rgba(99, 102, 241, 0.14);
+          border-color: rgba(99, 102, 241, 0.45);
+          color: $primary-light;
+        }
+
+        .anticon {
+          color: $primary-light;
+        }
+      }
+
+      .ant-btn-primary {
+        background: $primary;
+        border-color: $primary;
+        font-weight: 600;
+        font-size: 12px;
+        box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+
+        &:hover {
+          background: $primary-dark;
+          border-color: $primary-dark;
+          box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+        }
+      }
+    }
+  }
+
+  // Node styles
+  .workflow-node {
+    position: absolute;
+    width: 170px;
+    height: 62px;
+    background: $bg-card;
+    border: 2px solid $border-color;
+    border-radius: $radius-lg;
+    padding: 10px 12px;
+    box-shadow: $shadow-md;
+    pointer-events: auto;
+    cursor: move;
+    transition: border-color $transition-fast, box-shadow $transition-fast;
+
+    &:hover {
+      border-color: $text-secondary;
+      box-shadow: $shadow-lg;
+    }
+
+    &.selected {
+      border-color: $primary;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2), $shadow-lg;
+    }
+
+    .node-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+
+      .node-category {
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 1px 5px;
+        border-radius: $radius-sm;
+      }
+    }
+
+    .node-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: $text-primary;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .node-initial-badge {
+      position: absolute;
+      top: -10px;
+      left: 12px;
+      background: $primary;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 10px;
+      border: 2px solid $bg-card;
+    }
+  }
+
+  // START Node (Special circular/oval node)
+  .workflow-start-node {
+    position: absolute;
+    width: 56px;
+    height: 56px;
+    border-radius: $radius-full;
+    background: $bg-card-hover;
+    border: 2.5px solid $text-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: $text-secondary;
+    box-shadow: $shadow-sm;
+    pointer-events: auto;
+    cursor: move;
+    white-space: nowrap;
+    line-height: 1;
+
+    &.selected {
+      border-color: $primary;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    }
+  }
+
+  // Right Sidebar
+  .workflow-sidebar {
+    width: 340px;
+    border-left: 1px solid $border-color;
+    background: $bg-card;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.05);
+
+    .sidebar-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid $border-color;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+
+      h3 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: $text-primary;
+      }
+
+      .close-sidebar {
+        cursor: pointer;
+        color: $text-tertiary;
+        font-size: 14px;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: $radius-sm;
+        transition: all $transition-fast;
+
+        &:hover {
+          background: $bg-card-hover;
+          color: $text-primary;
+        }
+      }
+    }
+
+    .sidebar-content {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+
+      .sidebar-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+
+        label {
+          font-size: 11px;
+          font-weight: 600;
+          color: $text-tertiary;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .section-desc {
+          font-size: 11px;
+          color: $text-muted;
+          line-height: 1.4;
+          margin-top: 2px;
+        }
+      }
+
+      .sidebar-transition-card {
+        transition: all $transition-fast;
+        &:hover {
+          background: rgba(99, 102, 241, 0.06) !important;
+          border-color: rgba(99, 102, 241, 0.3) !important;
+        }
+      }
+
+      .rule-item-card {
+        transition: all $transition-fast;
+        &:hover {
+          background: rgba(99, 102, 241, 0.06) !important;
+          border-color: rgba(99, 102, 241, 0.3) !important;
+          box-shadow: $shadow-sm;
+        }
+      }
+    }
+
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid $border-color;
+      background: rgba(120, 120, 120, 0.02);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .empty-sidebar-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      text-align: center;
+      color: $text-muted;
+
+      svg, .empty-icon {
+        font-size: 32px;
+        margin-bottom: 16px;
+        opacity: 0.6;
+      }
+
+      h4 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: $text-secondary;
+      }
+
+      p {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+    }
+  }
+
+  // Active overlay helper when adding transition
+  .canvas-instruction-overlay {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    pointer-events: none;
+    z-index: 5;
+    box-shadow: $shadow-lg;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+
+    @keyframes slideDown {
+      from { transform: translate(-50%, -10px); opacity: 0; }
+      to { transform: translate(-50%, 0); opacity: 1; }
+    }
+  }
+}
+
+// Rules Modal Styling Integration
+.rules-modal-layout {
+  .rules-modal-sidebar {
+    .ant-btn-text {
+      color: $text-secondary;
+      &:hover {
+        background: $bg-card-hover;
+        color: $text-primary;
+      }
+    }
+  }
+
+  .rule-template-card {
+    border: 1px solid $border-color;
+    background: $bg-card;
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: $primary !important;
+      box-shadow: $shadow-md;
+      transform: translateY(-1px);
+    }
+  }
+}
+
+.selected-avatar-item {
+  position: relative;
+  transition: all 0.2s ease-in-out;
+  
+  .avatar-delete-icon {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.6);
+    transition: all 0.15s ease-in-out;
+  }
+
+  &:hover {
+    transform: translateY(-3px) scale(1.1);
+    z-index: 100 !important; // bring hovered avatar to the front
+    
+    .avatar-delete-icon {
+      opacity: 1;
+      pointer-events: auto;
+      transform: scale(1);
+    }
+  }
+}
+
+.member-selector-item {
+  &:hover {
+    background-color: rgba(99, 102, 241, 0.05);
+  }
+}
+
+.toolbar-tool-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 16px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  height: 48px;
+  gap: 2px;
+
+  &:hover {
+    background: rgba(120, 120, 120, 0.08);
+    color: var(--text-primary);
+  }
+
+  &.active {
+    background: rgba(99, 102, 241, 0.1);
+    color: #6366f1;
+
+    &:hover {
+      background: rgba(99, 102, 241, 0.15);
+    }
+  }
+
+  svg {
+    transition: transform 0.2s ease;
+  }
+  
+  &:hover svg {
+    transform: scale(1.05);
+  }
+}

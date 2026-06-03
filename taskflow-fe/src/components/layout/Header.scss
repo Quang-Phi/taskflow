@@ -179,3 +179,63 @@
     }
   }
 }
+
+// ===== CUSTOM NOTIFICATION BANNER =====
+.custom-notification {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--shadow-lg) !important;
+  padding: 12px 14px !important;
+  backdrop-filter: blur(12px);
+  min-width: 340px;
+
+  .ant-notification-notice-message {
+    color: var(--text-primary) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    margin-left: 36px !important;
+  }
+
+  .ant-notification-notice-description {
+    color: var(--text-secondary) !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+    margin-top: 4px !important;
+    margin-left: 36px !important;
+
+    strong {
+      color: var(--text-primary) !important;
+    }
+
+    span.highlight {
+      color: var(--primary-light) !important;
+      font-weight: 500;
+    }
+  }
+
+  .ant-notification-notice-close {
+    color: var(--text-tertiary) !important;
+    top: 10px !important;
+    right: 12px !important;
+
+    &:hover {
+      color: var(--text-primary) !important;
+    }
+  }
+
+  .notification-icon-wrapper {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+}
+
+.custom-notification-close:hover {
+  color: var(--text-primary) !important;
+}

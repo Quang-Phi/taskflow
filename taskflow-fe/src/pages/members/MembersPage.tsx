@@ -32,13 +32,13 @@ interface Department {
 const statusColors: Record<string, string> = { backlog: '#6b7084', todo: '#9ca0b0', 'in-progress': '#3b82f6', 'in-review': '#a855f7', done: '#22c55e' };
 
 const MembersPage: React.FC = () => {
-  const { t, lang } = useTranslation();
+  const { t, lang, locale } = useTranslation();
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [deptFilter, setDeptFilter] = useState('all');
-  
+
   const [members, setMembers] = useState<Member[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -52,7 +52,7 @@ const MembersPage: React.FC = () => {
   const [memberTasksLoading, setMemberTasksLoading] = useState(false);
   const [memberEvaluations, setMemberEvaluations] = useState<any[]>([]);
   const [memberEvaluationsLoading, setMemberEvaluationsLoading] = useState(false);
-  const [memberTaskCounts, setMemberTaskCounts] = useState<Record<string, { done: number; total: number }>>({}); 
+  const [memberTaskCounts, setMemberTaskCounts] = useState<Record<string, { done: number; total: number }>>({});
 
   // Edit Modal state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -71,14 +71,14 @@ const MembersPage: React.FC = () => {
 
   const isAdmin = currentUser?.role === 'admin';
   const isSuperAdmin = currentUser && Number(currentUser.id) === 632;
-  const isVi = lang === 'vi';
 
-  const getRating = (score: number, isVi: boolean) => {
-    if (score >= 9) return { label: '⭐ Excellent', labelVi: '⭐ Xuất sắc', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
-    if (score >= 7) return { label: '✅ Good', labelVi: '✅ Tốt', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' };
-    if (score >= 5) return { label: '🔵 Fair', labelVi: '🔵 Khá', color: '#3b82f6', bg: 'rgba(59,130,246,0.1)' };
-    if (score >= 3) return { label: '🟡 Average', labelVi: '🟡 Trung bình', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
-    return { label: '🔴 Poor', labelVi: '🔴 Yếu', color: '#ef4444', bg: 'rgba(239,68,68,0.1)' };
+
+  const getRating = (score: number, t: any) => {
+    if (score >= 9) return { emoji: '⭐', label: t('eval.rating.excellent'), color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
+    if (score >= 7) return { emoji: '✅', label: t('eval.rating.good'), color: '#22c55e', bg: 'rgba(34,197,94,0.1)' };
+    if (score >= 5) return { emoji: '🔵', label: t('eval.rating.fair'), color: '#3b82f6', bg: 'rgba(59,130,246,0.1)' };
+    if (score >= 3) return { emoji: '🟡', label: t('eval.rating.average'), color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
+    return { emoji: '🔴', label: t('eval.rating.poor'), color: '#ef4444', bg: 'rgba(239,68,68,0.1)' };
   };
 
   const fetchMemberTasks = async (member: Member) => {
@@ -109,7 +109,7 @@ const MembersPage: React.FC = () => {
         setMemberEvaluations([]);
         return;
       }
-      const res = await api.getEvaluations({ employee_id: localId });
+      const res = await api.getEvaluations({ employee_id: localId, status: 'published' });
       if (res.success) {
         setMemberEvaluations(res.data || []);
       }
@@ -150,7 +150,7 @@ const MembersPage: React.FC = () => {
           api.getMe(),
           api.getDepartments(),
         ]);
-        
+
         if (meRes) {
           setCurrentUser(meRes);
         }
@@ -251,7 +251,7 @@ const MembersPage: React.FC = () => {
 
       if (res.success) {
         message.success(t('members.toast.save_success'));
-        
+
         const updatedRole = res.data?.role || editRole;
         // Update local state
         setMembers((prev) =>
@@ -287,11 +287,11 @@ const MembersPage: React.FC = () => {
         />
       );
     }
-    
+
     const initials = member.name
       ? member.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
       : 'U';
-    
+
     const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#14b8a6', '#3b82f6'];
     const charCodeSum = member.name ? member.name.split('').reduce((sum: number, char: string) => sum + char.charCodeAt(0), 0) : 0;
     const color = colors[charCodeSum % colors.length];
@@ -324,7 +324,7 @@ const MembersPage: React.FC = () => {
     // Resolve all department names
     const resolvedDepts = ids.map(id => {
       const d = departments.find((dept) => Number(dept.id) === id);
-      return d ? d.name : (isVi ? `Phòng ${id}` : `Dept ${id}`);
+      return d ? d.name : t('members.dept.id_fallback', { id });
     });
 
     const visibleIds = ids.slice(0, 2);
@@ -356,7 +356,7 @@ const MembersPage: React.FC = () => {
   if (loading) {
     return (
       <div className="members-page-loading" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '400px' }}>
-        <Spin size="large" tip={t('members.loading.meta')} />
+        <Spin size="large" description={t('members.loading.meta')} />
       </div>
     );
   }
@@ -394,7 +394,7 @@ const MembersPage: React.FC = () => {
               <option key={d.id} value={d.id}>{d.name}</option>
             ))}
           </select>
-          
+
           {/* Role Filter */}
           <select className="members-page__filter-select" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
             <option value="all">{t('members.filter.role_all')}</option>
@@ -416,7 +416,7 @@ const MembersPage: React.FC = () => {
         </div>
         {membersLoading ? (
           <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-            <Spin size="large" tip={t('members.loading.data')} />
+            <Spin size="large" description={t('members.loading.data')} />
           </div>
         ) : members.length === 0 ? (
           <div style={{ padding: '60px 0', display: 'flex', justifyContent: 'center', background: 'var(--bg-card)', borderRadius: '8px' }}>
@@ -476,7 +476,7 @@ const MembersPage: React.FC = () => {
             </div>
           ))
         )}
-        
+
         {!membersLoading && total > 0 && (
           <div className="members-page__pagination" style={{ display: 'flex', justifyContent: 'flex-end', padding: '16px 20px', borderTop: '1px solid var(--divider)' }}>
             <Pagination
@@ -507,21 +507,21 @@ const MembersPage: React.FC = () => {
               <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{t('members.drawer.title')}</span>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 {isSuperAdmin && Number(selectedMember.id) !== 632 && (
-                  <button 
+                  <button
                     className="edit-btn-header"
-                    style={{ 
-                      background: 'var(--primary-color)', 
-                      color: '#fff', 
-                      border: 'none', 
-                      padding: '4px 10px', 
-                      borderRadius: '4px', 
-                      fontSize: '12px', 
+                    style={{
+                      background: 'var(--primary-color)',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '4px 10px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '4px',
                       fontWeight: 500
-                    }} 
+                    }}
                     onClick={(e) => handleOpenEdit(selectedMember, e)}
                   >
                     <EditOutlined /> {t('members.action.edit' as any || 'Edit')}
@@ -542,7 +542,7 @@ const MembersPage: React.FC = () => {
                 </div>
               </div>
             </div>
-            
+
             <div className="members-page__drawer-stats">
               {(() => {
                 const totalTasks = memberTasks.length;
@@ -575,7 +575,7 @@ const MembersPage: React.FC = () => {
                 ) : (
                   memberTasks.map((tItem, i) => {
                     const statusKey = (tItem.status || '').replace('_', '-');
-                    const dueDate = tItem.due_date ? new Date(tItem.due_date).toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US', { day: '2-digit', month: 'short' }) : '';
+                    const dueDate = tItem.due_date ? new Date(tItem.due_date).toLocaleDateString(locale, { day: '2-digit', month: 'short' }) : '';
                     return (
                       <div key={tItem.id || i} className="members-page__task-list-item">
                         <div className="left">
@@ -595,11 +595,11 @@ const MembersPage: React.FC = () => {
                 memberEvaluationsLoading ? (
                   <div style={{ padding: '40px', textAlign: 'center' }}><Spin /></div>
                 ) : memberEvaluations.length === 0 ? (
-                  <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={t('members.drawer.no_evaluations' as any || 'Không có đánh giá')} /></div>
+                  <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={t('members.drawer.no_evaluations')} /></div>
                 ) : (
                   memberEvaluations.map((ev, i) => {
-                    const rating = getRating(ev.total_score, isVi);
-                    const formattedDate = ev.published_at ? new Date(ev.published_at).toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US', { month: 'short', year: 'numeric' }) : '';
+                    const rating = getRating(ev.total_score, t);
+                    const formattedDate = ev.published_at ? new Date(ev.published_at).toLocaleDateString(locale, { month: 'short', year: 'numeric' }) : '';
                     return (
                       <div key={ev.id || i} className="members-page__eval-item">
                         <div className="left">
@@ -609,7 +609,7 @@ const MembersPage: React.FC = () => {
                         <div className="right">
                           <span className="score" style={{ color: rating.color }}>{ev.total_score}/10</span>
                           <span className="rating" style={{ background: rating.bg, color: rating.color }}>
-                            {isVi ? rating.labelVi : rating.label}
+                            {rating.emoji} {rating.label}
                           </span>
                         </div>
                       </div>
@@ -627,15 +627,15 @@ const MembersPage: React.FC = () => {
         <Modal
           title={
             <div style={{ color: 'var(--text-primary)', fontSize: '16px', fontWeight: 600 }}>
-              {t('members.modal.title', { name: editingMember.name }) || `Cài đặt phân quyền: ${editingMember.name}`}
+              {t('members.modal.title', { name: editingMember.name })}
             </div>
           }
           open={isEditModalOpen}
           onOk={handleSaveUser}
           onCancel={() => { setIsEditModalOpen(false); setEditingMember(null); }}
           confirmLoading={saving}
-          okText={t('members.modal.save') || 'Lưu thay đổi'}
-          cancelText={t('members.modal.cancel') || 'Hủy bỏ'}
+          okText={t('members.modal.save')}
+          cancelText={t('members.modal.cancel')}
           className="dark-theme-modal"
           styles={{
             body: { background: 'var(--bg-modal)', color: 'var(--text-primary)', padding: '20px 0' },
@@ -645,19 +645,19 @@ const MembersPage: React.FC = () => {
             {/* App Role Select */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                {t('members.modal.role_label') || 'Vai trò trong ứng dụng'}
+                {t('members.modal.role_label')}
               </label>
               <Select
                 value={editRole === 'admin' ? 'admin' : 'employee'}
                 onChange={(val) => setEditRole(val as any)}
                 style={{ width: '100%' }}
                 options={[
-                  { value: 'admin', label: t('members.modal.role.admin') || 'Quản trị viên' },
-                  { value: 'employee', label: t('members.modal.role.employee') || 'Thành viên' },
+                  { value: 'admin', label: t('members.modal.role.admin') },
+                  { value: 'employee', label: t('members.modal.role.employee') },
                 ]}
               />
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                * Vai trò phòng ban (Nhân viên / Quản lý) được tự động quản lý theo Bitrix.
+                {t('members.modal.role_note')}
               </span>
             </div>
           </div>

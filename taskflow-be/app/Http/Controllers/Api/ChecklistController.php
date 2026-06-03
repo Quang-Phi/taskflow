@@ -39,6 +39,13 @@ class ChecklistController extends Controller
             'position' => $position,
         ]);
 
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'created_checklist',
+            'details' => "Created checklist: \"{$checklist->name}\""
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Checklist created successfully',
@@ -67,6 +74,13 @@ class ChecklistController extends Controller
         $checklist->name = $request->input('name');
         $checklist->save();
 
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'updated_checklist',
+            'details' => "Renamed checklist to \"{$checklist->name}\""
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Checklist updated successfully',
@@ -88,7 +102,15 @@ class ChecklistController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 
+        $checklistName = $checklist->name;
         $checklist->delete();
+
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'deleted_checklist',
+            'details' => "Deleted checklist \"{$checklistName}\"."
+        ]);
 
         return response()->json([
             'success' => true,
@@ -125,6 +147,13 @@ class ChecklistController extends Controller
             'position' => $position,
         ]);
 
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'created_checklist_item',
+            'details' => "Added item \"{$item->name}\" to checklist \"{$checklist->name}\""
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Checklist item created successfully',
@@ -153,6 +182,9 @@ class ChecklistController extends Controller
             'assignee_id' => 'nullable|exists:users,id',
         ]);
 
+        $oldChecked = $item->is_checked;
+        $oldName = $item->name;
+
         if ($request->has('name')) {
             $item->name = $request->input('name');
         }
@@ -164,6 +196,23 @@ class ChecklistController extends Controller
         }
 
         $item->save();
+
+        $activityDetails = null;
+        if ($request->has('is_checked') && $oldChecked != $item->is_checked) {
+            $status = $item->is_checked ? 'checked' : 'unchecked';
+            $activityDetails = "Marked item \"{$item->name}\" as {$status}";
+        } else if ($request->has('name') && $oldName !== $item->name) {
+            $activityDetails = "Renamed checklist item \"{$oldName}\" to \"{$item->name}\"";
+        } else {
+            $activityDetails = "Updated item \"{$item->name}\" in checklist \"{$checklist->name}\"";
+        }
+
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'updated_checklist_item',
+            'details' => $activityDetails
+        ]);
 
         return response()->json([
             'success' => true,
@@ -187,7 +236,16 @@ class ChecklistController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 
+        $itemName = $item->name;
+        $checklistName = $checklist->name;
         $item->delete();
+
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'deleted_checklist_item',
+            'details' => "Deleted item \"{$itemName}\" from checklist \"{$checklistName}\""
+        ]);
 
         return response()->json([
             'success' => true,
@@ -237,6 +295,13 @@ class ChecklistController extends Controller
 
             // Delete the checklist item
             $item->delete();
+
+            \App\Models\TaskActivity::create([
+                'task_id' => $parentTask->id,
+                'user_id' => $user->id,
+                'action' => 'converted_checklist_item',
+                'details' => "Converted item \"{$item->name}\" to {$type}"
+            ]);
 
             return response()->json([
                 'success' => true,

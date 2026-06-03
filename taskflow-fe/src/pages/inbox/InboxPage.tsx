@@ -9,6 +9,7 @@ import './InboxPage.scss';
 interface NotificationItem {
   id: number;
   user: string;
+  photo?: string | null;
   avatar: string;
   color: string;
   action: string;
@@ -35,7 +36,6 @@ const typeIcons: Record<string, { icon: React.ReactNode; bg: string; color: stri
 
 const InboxPage: React.FC = () => {
   const { t, lang } = useTranslation();
-  const isVi = lang === 'vi';
   const navigate = useNavigate();
 
   const [tab, setTab] = useState('all');
@@ -56,7 +56,7 @@ const InboxPage: React.FC = () => {
 
   // Translate action keys
   const translateAction = (action: string): string => {
-    const map: Record<string, string> = isVi ? {
+    const map: Record<string, string> = lang === 'vi' ? {
       'assigned you a task': 'đã giao cho bạn công việc',
       'commented on': 'đã bình luận vào',
       'mentioned you on': 'đã nhắc đến bạn trong',
@@ -75,12 +75,12 @@ const InboxPage: React.FC = () => {
     const now = Date.now();
     const diff = now - new Date(iso).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return isVi ? 'Vừa xong' : 'Just now';
-    if (mins < 60) return isVi ? `${mins} phút trước` : `${mins}m ago`;
+    if (mins < 1) return t('common.just_now');
+    if (mins < 60) return t('common.time.minutes_ago', { n: mins });
     const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return isVi ? `${hrs} giờ trước` : `${hrs}h ago`;
+    if (hrs < 24) return t('common.time.hours_ago', { n: hrs });
     const days = Math.floor(hrs / 24);
-    return isVi ? `${days} ngày trước` : `${days}d ago`;
+    return t('common.time.days_ago', { n: days });
   };
 
   const fetchNotifications = useCallback(async (currentTab: string, pageNum = 1, append = false) => {
@@ -126,13 +126,15 @@ const InboxPage: React.FC = () => {
       if (customEvent.detail) {
         const n = customEvent.detail;
         const actorName = n.actor?.name || 'System';
+        const actorPhoto = n.actor?.photo || null;
         const initials = actorName.split(' ').map((p: string) => p[0]).join('').slice(0, 2).toUpperCase();
         
         const newItem: NotificationItem = {
           id: n.id,
           user: actorName,
-          avatar: initials,
-          color: '#6366f1',
+          photo: actorPhoto,
+          avatar: n.type === 'deadline' ? '⏰' : initials,
+          color: n.type === 'deadline' ? '#ef4444' : '#6366f1',
           action: n.action,
           target: n.target,
           extra: n.extra,
@@ -161,7 +163,7 @@ const InboxPage: React.FC = () => {
       await api.markNotificationsRead();
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
       updateUnreadCount(0);
-      message.success(isVi ? 'Đã đánh dấu tất cả đã đọc' : 'Marked all as read');
+      message.success(t('inbox.mark_all_read'));
     } catch (err) {
       console.error('Mark read error:', err);
     }
@@ -230,7 +232,22 @@ const InboxPage: React.FC = () => {
                   className={`inbox-page__item ${!n.read ? 'unread' : ''}`}
                   onClick={() => handleNotificationClick(n)}
                 >
-                  <div className="avatar" style={{ background: n.color }}>{n.avatar}</div>
+                  <div 
+                    className="avatar" 
+                    style={{ 
+                      background: n.photo ? 'transparent' : n.color,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {n.photo ? (
+                      <img src={n.photo} alt={n.user} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      n.avatar
+                    )}
+                  </div>
                   <div className="content">
                     <div className="text">
                       <strong>{n.user}</strong> {translateAction(n.action)} <span className="highlight">{n.target}</span>
@@ -243,7 +260,7 @@ const InboxPage: React.FC = () => {
               );
             })}
             {loadingMore && <div style={{ textAlign: 'center', padding: '16px' }}><Spin size="small" /></div>}
-            {!hasMore && notifications.length > 0 && <div style={{ textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', padding: '12px' }}>{isVi ? 'Đã tải hết thông báo' : 'All notifications loaded'}</div>}
+            {!hasMore && notifications.length > 0 && <div style={{ textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', padding: '12px' }}>{t('inbox.all_loaded')}</div>}
           </>
         )}
       </div>

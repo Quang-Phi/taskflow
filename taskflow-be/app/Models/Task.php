@@ -16,6 +16,7 @@ class Task extends Model
         'description',
         'status',
         'priority',
+        'type',
         'assignee_id',
         'creator_id',
         'estimated_hours',

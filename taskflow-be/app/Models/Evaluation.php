@@ -52,17 +52,13 @@ class Evaluation extends Model
      */
     public function calculateTotalScore(): float
     {
-        // 40% from on-time rate, 30% from completion rate, 30% from manual criteria
-        $taskScore = ($this->on_time_rate / 100) * 10 * 0.4;
+        // 50% from on-time rate, 50% from completion rate
+        $taskScore = ($this->on_time_rate / 100) * 10 * 0.5;
         $completionRate = $this->total_tasks > 0
-            ? ($this->completed_tasks / $this->total_tasks) * 10 * 0.3
+            ? ($this->completed_tasks / $this->total_tasks) * 10 * 0.5
             : 0;
-        $manualAvg = ($this->score_quality + $this->score_responsibility +
-            $this->score_communication + $this->score_creativity +
-            $this->score_discipline) / 5;
-        $manualScore = $manualAvg * 0.3;
 
-        $this->total_score = round($taskScore + $completionRate + $manualScore, 1);
+        $this->total_score = round($taskScore + $completionRate, 1);
         return $this->total_score;
     }
 }

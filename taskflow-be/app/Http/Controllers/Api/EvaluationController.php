@@ -63,17 +63,11 @@ class EvaluationController extends Controller
             $query->where('period', $period);
         }
 
-        $evaluations = $query->orderBy('period', 'desc')->orderBy('total_score', 'desc')->get();
-
-        $data = $evaluations->map(function ($eval) {
-            return $this->formatEvaluation($eval);
-        });
-
-        // Summary stats
-        $totalCount = $evaluations->count();
-        $publishedCount = $evaluations->where('status', 'published')->count();
-        $draftCount = $evaluations->where('status', 'draft')->count();
-        $avgScore = $totalCount > 0 ? round($evaluations->avg('total_score'), 1) : 0;
+        // Summary stats (unpaginated)
+        $totalCount = $query->count();
+        $publishedCount = (clone $query)->where('status', 'published')->count();
+        $draftCount = (clone $query)->where('status', 'draft')->count();
+        $avgScore = $totalCount > 0 ? round((clone $query)->avg('total_score'), 1) : 0;
 
         // Available periods (Distinct from DB + Suggested recent periods)
         $dbPeriods = Evaluation::selectRaw('DISTINCT period')
@@ -101,6 +95,41 @@ class EvaluationController extends Controller
         });
 
         $periods = $merged;
+
+        if ($request->has('page')) {
+            $perPage = $request->input('per_page', 10);
+            $paginated = $query->orderBy('period', 'desc')->orderBy('total_score', 'desc')->paginate($perPage);
+            
+            $items = collect($paginated->items())->map(function ($eval) {
+                return $this->formatEvaluation($eval);
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $items,
+                'summary' => [
+                    'total_employees' => $totalCount,
+                    'published' => $publishedCount,
+                    'draft' => $draftCount,
+                    'avg_score' => $avgScore,
+                ],
+                'periods' => $periods,
+                'current_period' => $period,
+                'pagination' => [
+                    'current_page' => $paginated->currentPage(),
+                    'last_page' => $paginated->lastPage(),
+                    'per_page' => $paginated->perPage(),
+                    'total' => $paginated->total(),
+                    'has_more' => $paginated->hasMorePages(),
+                ]
+            ]);
+        }
+
+        $evaluations = $query->orderBy('period', 'desc')->orderBy('total_score', 'desc')->get();
+
+        $data = $evaluations->map(function ($eval) {
+            return $this->formatEvaluation($eval);
+        });
 
         return response()->json([
             'success' => true,
@@ -175,6 +204,8 @@ class EvaluationController extends Controller
                 'total_score' => 0,
                 'status' => 'draft',
             ]);
+            $eval->calculateTotalScore();
+            $eval->save();
 
             $created++;
         }
@@ -313,20 +344,12 @@ class EvaluationController extends Controller
         }
 
         $request->validate([
-            'score_quality' => 'nullable|numeric|min:0|max:10',
-            'score_responsibility' => 'nullable|numeric|min:0|max:10',
-            'score_communication' => 'nullable|numeric|min:0|max:10',
-            'score_creativity' => 'nullable|numeric|min:0|max:10',
-            'score_discipline' => 'nullable|numeric|min:0|max:10',
             'comment' => 'nullable|string',
             'publish' => 'nullable|boolean',
         ]);
 
-        $fields = ['score_quality', 'score_responsibility', 'score_communication', 'score_creativity', 'score_discipline', 'comment'];
-        foreach ($fields as $field) {
-            if ($request->has($field)) {
-                $eval->$field = $request->input($field);
-            }
+        if ($request->has('comment')) {
+            $eval->comment = $request->input('comment');
         }
 
         // Refresh task stats
@@ -449,13 +472,6 @@ class EvaluationController extends Controller
             'completed_tasks' => $eval->completed_tasks,
             'on_time_tasks' => $eval->on_time_tasks,
             'on_time_rate' => $eval->on_time_rate,
-            'scores' => [
-                'quality' => $eval->score_quality,
-                'responsibility' => $eval->score_responsibility,
-                'communication' => $eval->score_communication,
-                'creativity' => $eval->score_creativity,
-                'discipline' => $eval->score_discipline,
-            ],
             'total_score' => $eval->total_score,
             'comment' => $eval->comment,
             'status' => $eval->status,
@@ -545,4 +561,5 @@ class EvaluationController extends Controller
 
         return $subordinateIds;
     }
+
 }

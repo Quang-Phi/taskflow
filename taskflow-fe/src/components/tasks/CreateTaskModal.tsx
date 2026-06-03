@@ -24,7 +24,6 @@ const FlagIcon: React.FC<{ color: string; size?: number }> = ({ color, size = 14
   </svg>
 );
 
-// Priority Config ClickUp Style
 const PRIORITIES = [
   { id: 'urgent', name: 'Khẩn cấp', nameEn: 'Urgent', color: '#ef4444' },
   { id: 'high', name: 'Cao', nameEn: 'High', color: '#f97316' },
@@ -38,7 +37,7 @@ const PriorityPicker: React.FC<{
   disabled?: boolean;
   onChange: (val: string) => void;
 }> = ({ value, onChange, disabled }) => {
-  const { t, lang } = useTranslation();
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const current = PRIORITIES.find(p => p.id === value) || PRIORITIES[2];
 
@@ -62,7 +61,7 @@ const PriorityPicker: React.FC<{
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <FlagIcon color={p.color} size={15} />
             <span style={{ fontSize: '13px', fontWeight: 600, color: p.id === value ? 'var(--primary)' : 'var(--text-primary)' }}>
-              {lang === 'vi' ? p.name : p.nameEn}
+              {t(`tasks.priority.${p.id}` as any)}
             </span>
           </div>
           {p.id === value && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '11px' }} />}
@@ -91,7 +90,7 @@ const PriorityPicker: React.FC<{
       >
         <FlagIcon color={current.color} size={14} />
         <span style={{ fontSize: '12px', fontWeight: 600, color: current.color }}>
-          {lang === 'vi' ? current.name : current.nameEn}
+          {t(`tasks.priority.${current.id}` as any)}
         </span>
         <DownOutlined style={{ fontSize: '8px', color: 'var(--text-muted)' }} />
       </button>
@@ -115,13 +114,14 @@ const ClickUpStatusPicker: React.FC<{
   disabled?: boolean;
   hideCheckButton?: boolean;
 }> = ({ currentStatusId, projectStatuses, onChange, disabled, hideCheckButton = false }) => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
   const statuses = projectStatuses && projectStatuses.length > 0 ? projectStatuses : [
-    { id: 'todo', name: 'CẦN LÀM', color: '#9ca0b0', type: 'not_started' },
-    { id: 'doing', name: 'ĐANG LÀM', color: '#3b82f6', type: 'active' },
-    { id: 'done', name: 'HOÀN THÀNH', color: '#22c55e', type: 'closed' }
+    { id: 'todo', name: t('tasks.status.todo'), color: '#9ca0b0', type: 'not_started' },
+    { id: 'doing', name: t('tasks.status.in_progress'), color: '#3b82f6', type: 'active' },
+    { id: 'done', name: t('tasks.status.done'), color: '#22c55e', type: 'closed' }
   ];
 
   const currentStatus = statuses.find(s => s.id === currentStatusId) || {
@@ -184,15 +184,15 @@ const ClickUpStatusPicker: React.FC<{
     <div style={{ width: '240px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <Input
         size="small"
-        placeholder="Tìm trạng thái..."
+        placeholder={t('tasks.panel.status_search_placeholder')}
         value={searchTerm}
         onChange={e => setSearchTerm(e.target.value)}
         allowClear
       />
       <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
-        {renderGroup('Cần làm', filtered.not_started)}
-        {renderGroup('Đang hoạt động', filtered.active)}
-        {renderGroup('Đã đóng', filtered.closed)}
+        {renderGroup(t('tasks.status_group.not_started'), filtered.not_started)}
+        {renderGroup(t('tasks.status_group.active'), filtered.active)}
+        {renderGroup(t('tasks.status_group.closed'), filtered.closed)}
       </div>
     </div>
   );
@@ -200,7 +200,7 @@ const ClickUpStatusPicker: React.FC<{
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '1px', background: 'var(--border-color)', borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
       {!isLastStatus && !hideCheckButton && (
-        <Tooltip title="Chuyển sang trạng thái tiếp theo">
+        <Tooltip title={t('tasks.panel.next_status_tooltip')}>
           <button
             onClick={handleNextStep}
             disabled={disabled}
@@ -267,10 +267,12 @@ export interface CreateTaskModalOpenDetail {
   checklistId?: number;
   checklistItemId?: number;
   onSuccess?: (createdTask: any) => void;
+  startDate?: string;
+  dueDate?: string;
 }
 
 const CreateTaskModal: React.FC = () => {
-  const { t, lang } = useTranslation();
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -290,8 +292,9 @@ const CreateTaskModal: React.FC = () => {
   const [status, setStatus] = useState('todo');
   const [assigneeId, setAssigneeId] = useState<number | undefined>(undefined);
   const [priority, setPriority] = useState<string>('medium');
-  const [startDate, setStartDate] = useState<string>('');
-  const [dueDate, setDueDate] = useState<string>('');
+  const [taskType, setTaskType] = useState<'task' | 'bug'>('task');
+  const [startDate, setStartDate] = useState<dayjs.Dayjs | null>(null);
+  const [dueDate, setDueDate] = useState<dayjs.Dayjs | null>(null);
 
   // Load projects list
   const loadProjects = async () => {
@@ -340,6 +343,7 @@ const CreateTaskModal: React.FC = () => {
     const handleOpen = (e: Event) => {
       const customEvent = e as CustomEvent<CreateTaskModalOpenDetail>;
       const detail = customEvent.detail || {};
+      console.log('detail inside handleOpen:', detail);
 
       // Reset states
       setTitle(detail.title || '');
@@ -352,8 +356,9 @@ const CreateTaskModal: React.FC = () => {
       // Default other fields
       setAssigneeId(undefined);
       setPriority('medium');
-      setStartDate('');
-      setDueDate('');
+      setTaskType('task');
+      setStartDate(detail.startDate ? dayjs(detail.startDate) : null);
+      setDueDate(detail.dueDate ? dayjs(detail.dueDate) : null);
 
       // Open Modal
       setIsOpen(true);
@@ -378,8 +383,9 @@ const CreateTaskModal: React.FC = () => {
     setOnSuccessCallback(undefined);
     setAssigneeId(undefined);
     setPriority('medium');
-    setStartDate('');
-    setDueDate('');
+    setTaskType('task');
+    setStartDate(null);
+    setDueDate(null);
   };
 
   const getInitials = (nameStr: string) => {
@@ -407,9 +413,10 @@ const CreateTaskModal: React.FC = () => {
         description: description.trim() || null,
         status: status,
         priority: priority,
+        type: taskType,
         assignee_id: assigneeId || null,
-        start_date: startDate ? new Date(startDate).toISOString() : null,
-        due_date: dueDate ? new Date(dueDate).toISOString() : null,
+        start_date: startDate ? startDate.toISOString() : null,
+        due_date: dueDate ? dueDate.toISOString() : null,
       };
 
       const res = await api.createTask(payload);
@@ -448,10 +455,10 @@ const CreateTaskModal: React.FC = () => {
       open={isOpen}
       onCancel={handleClose}
       footer={null}
-      width={640}
+      width={540}
       closable={false}
       className="create-task-modal-v2"
-      destroyOnClose
+      destroyOnHidden
       zIndex={1100}
     >
       <div className="create-task-modal-v2__wrapper">
@@ -468,6 +475,7 @@ const CreateTaskModal: React.FC = () => {
               popupClassName="project-selector-dropdown"
               showSearch
               optionLabelProp="label"
+              popupMatchSelectWidth={false}
               filterOption={(input, option) =>
                 String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
               }
@@ -482,10 +490,38 @@ const CreateTaskModal: React.FC = () => {
               ))}
             </Select>
             <span className="slash-divider">/</span>
-            <div className="task-type-badge">
-              <CheckCircleOutlined />
-              <span>{t('tasks.create_modal.task')}</span>
-            </div>
+            <Select
+              value={taskType}
+              onChange={(val) => setTaskType(val)}
+              bordered={false}
+              popupClassName="task-type-selector-dropdown"
+              style={{ minWidth: 130 }}
+              dropdownStyle={{ minWidth: 140 }}
+              optionLabelProp="label"
+            >
+              <Select.Option value="task" label={
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#6366f1', fontWeight: 600, fontSize: '13px' }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="1.5" width="13" height="13" rx="2.5" fill="#6366f1" opacity="0.15" stroke="#6366f1" strokeWidth="1.3" /><path d="M4.5 8L7 10.5L11.5 5.5" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  {t('task.type.task')}
+                </span>
+              }>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', color: '#6366f1', fontWeight: 600 }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="1.5" width="13" height="13" rx="2.5" fill="#6366f1" opacity="0.15" stroke="#6366f1" strokeWidth="1.3" /><path d="M4.5 8L7 10.5L11.5 5.5" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  {t('task.type.task')}
+                </span>
+              </Select.Option>
+              <Select.Option value="bug" label={
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontWeight: 600, fontSize: '13px' }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="9" r="4.5" fill="#ef4444" /><path d="M6 4.5C6 3.4 6.9 2.5 8 2.5s2 .9 2 2" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" fill="none" /><path d="M5 6.5L3 5M11 6.5L13 5" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><path d="M4 9H2M12 9h2" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><path d="M5 11.5L3 13M11 11.5L13 13" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><ellipse cx="8" cy="9" rx="2" ry="2.5" fill="#fca5a5" opacity="0.4" /></svg>
+                  {t('task.type.bug')}
+                </span>
+              }>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', color: '#ef4444', fontWeight: 600 }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="9" r="4.5" fill="#ef4444" /><path d="M6 4.5C6 3.4 6.9 2.5 8 2.5s2 .9 2 2" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" fill="none" /><path d="M5 6.5L3 5M11 6.5L13 5" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><path d="M4 9H2M12 9h2" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><path d="M5 11.5L3 13M11 11.5L13 13" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><ellipse cx="8" cy="9" rx="2" ry="2.5" fill="#fca5a5" opacity="0.4" /></svg>
+                  {t('task.type.bug')}
+                </span>
+              </Select.Option>
+            </Select>
           </div>
           <button className="close-btn" onClick={handleClose}>
             <CloseOutlined />
@@ -528,9 +564,9 @@ const CreateTaskModal: React.FC = () => {
                 <ClickUpStatusPicker
                   currentStatusId={status}
                   projectStatuses={projectStatuses.length > 0 ? projectStatuses : [
-                    { id: 'todo', name: 'TO DO', color: '#8c8c8c' },
-                    { id: 'in_progress', name: 'IN PROGRESS', color: '#1890ff' },
-                    { id: 'done', name: 'DONE', color: '#52c41a' }
+                    { id: 'todo', name: t('tasks.status.todo'), color: '#8c8c8c' },
+                    { id: 'in_progress', name: t('tasks.status.in_progress'), color: '#1890ff' },
+                    { id: 'done', name: t('tasks.status.done'), color: '#52c41a' }
                   ]}
                   onChange={setStatus}
                   hideCheckButton={true}
@@ -548,7 +584,7 @@ const CreateTaskModal: React.FC = () => {
                 <Dropdown
                   disabled={!selectedProjectId}
                   trigger={['click']}
-                  dropdownRender={() => (
+                  popupRender={() => (
                     <div style={{ background: 'var(--bg-card, #1e1e1e)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', minWidth: '200px' }} className="assignee-dropdown-container">
                       <div style={{ fontSize: '11px', padding: '6px 12px', color: 'var(--text-muted)', fontWeight: 600 }}>{t('tasks.panel.assignee')}</div>
                       <div
@@ -649,20 +685,20 @@ const CreateTaskModal: React.FC = () => {
                     showTime
                     format="DD/MM/YYYY HH:mm"
                     placeholder={t('tasks.panel.start_date_placeholder')}
-                    value={startDate ? dayjs(startDate) : null}
-                    onChange={(date) => setStartDate(date ? date.toISOString() : '')}
+                    value={startDate}
+                    onChange={setStartDate}
                     className="premium-date-picker"
-                    bordered={false}
+                    variant="borderless"
                   />
                   <span className="date-arrow">→</span>
                   <DatePicker
                     showTime
                     format="DD/MM/YYYY HH:mm"
                     placeholder={t('tasks.panel.due_date_placeholder')}
-                    value={dueDate ? dayjs(dueDate) : null}
-                    onChange={(date) => setDueDate(date ? date.toISOString() : '')}
+                    value={dueDate}
+                    onChange={setDueDate}
                     className="premium-date-picker"
-                    bordered={false}
+                    variant="borderless"
                   />
                 </div>
               </div>

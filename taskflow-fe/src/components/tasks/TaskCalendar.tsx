@@ -3,9 +3,11 @@ import { Popover, Select } from 'antd';
 import {
   LeftOutlined,
   RightOutlined,
-  FlagOutlined
+  FlagOutlined,
+  PlusOutlined
 } from '@ant-design/icons';
 import { useTranslation } from '../../utils/i18n';
+import TaskTypeBadge from './TaskTypeBadge';
 
 interface Task {
   id: string | number;
@@ -26,12 +28,14 @@ interface Task {
   subtasks?: Task[];
   parent_task_id?: string | number;
   time_entries?: any[];
+  type?: string;
 }
 
 interface TaskCalendarProps {
   tasks: Task[];
   onSelectTask: (task: Task) => void;
   columns: any[];
+  projectId?: number | string;
 }
 
 const formatDateTime = (dateStr?: string) => {
@@ -51,8 +55,8 @@ const getInitials = (name: string) => {
   return name.substring(0, 2).toUpperCase();
 };
 
-export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask, columns }) => {
-  const { t, lang } = useTranslation();
+export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask, columns, projectId }) => {
+  const { t, lang, locale } = useTranslation();
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const currentMonth = currentDate.getMonth();
@@ -70,6 +74,20 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
     setCurrentDate(new Date());
   };
 
+  const handleCreateTask = (day: Date) => {
+    const start = new Date(day);
+    start.setHours(9, 0, 0, 0);
+
+    const event = new CustomEvent('open-create-task-modal', {
+      detail: {
+        projectId: projectId ? Number(projectId) : undefined,
+        startDate: start.toISOString(),
+        dueDate: '',
+      }
+    });
+    window.dispatchEvent(event);
+  };
+
   const priorityLabels: Record<string, string> = {
     urgent: t('tasks.priority.urgent') || 'Khẩn cấp',
     high: t('tasks.priority.high') || 'Cao',
@@ -85,9 +103,15 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
   ];
 
   // Week days
-  const weekDays = lang === 'vi' 
-    ? ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy']
-    : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const weekDays = [
+    t('calendar.week.sun'),
+    t('calendar.week.mon'),
+    t('calendar.week.tue'),
+    t('calendar.week.wed'),
+    t('calendar.week.thu'),
+    t('calendar.week.fri'),
+    t('calendar.week.sat'),
+  ];
 
   // Generate 10 years before and 10 years after the selected year
   const years: number[] = [];
@@ -98,7 +122,7 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
   // Month selector options
   const monthOptions = monthNames.map((name, index) => ({
     value: index,
-    label: lang === 'vi' ? `Tháng ${index + 1}` : name
+    label: t('calendar.month_label', { n: index + 1 })
   }));
 
   // Calculate dates of month grid (6 weeks = 42 cells)
@@ -119,10 +143,19 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
     weeks.push(calendarDays.slice(i * 7, (i + 1) * 7));
   }
 
-  const toDateString = (d: Date) => {
+  const toLocalYMD = (dateOrStr: Date | string) => {
+    const d = new Date(dateOrStr);
+    if (isNaN(d.getTime())) return '';
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   };
+
+  const parseLocalYMD = (ymdStr: string) => {
+    const parts = ymdStr.split('-');
+    return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  };
+
+  const toDateString = (d: Date) => toLocalYMD(d);
 
   const isToday = (d: Date) => {
     const today = new Date();
@@ -132,11 +165,11 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
   };
 
   const getTaskDuration = (task: any) => {
-    const startStr = task.start_date ? task.start_date.substring(0, 10) : task.due_date?.substring(0, 10) || '';
-    const endStr = task.due_date ? task.due_date.substring(0, 10) : startStr;
+    const startStr = task.start_date ? toLocalYMD(task.start_date) : task.due_date ? toLocalYMD(task.due_date) : '';
+    const endStr = task.due_date ? toLocalYMD(task.due_date) : startStr;
     if (!startStr || !endStr) return 0;
-    const start = new Date(startStr).getTime();
-    const end = new Date(endStr).getTime();
+    const start = parseLocalYMD(startStr).getTime();
+    const end = parseLocalYMD(endStr).getTime();
     return Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1);
   };
 
@@ -165,7 +198,7 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
             value={currentMonth}
             onChange={(m) => setCurrentDate(new Date(currentYear, m, 1))}
             options={monthOptions}
-            style={{ width: lang === 'vi' ? 120 : 135 }}
+            style={{ width: 135 }}
             size="middle"
           />
           <Select
@@ -176,7 +209,7 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
             size="middle"
           />
           <button className="task-calendar__btn" onClick={handleToday}>
-            {lang === 'vi' ? 'Hôm nay' : 'Today'}
+            {t('calendar.today_btn')}
           </button>
           <div className="task-calendar__arrows">
             <button className="task-calendar__btn icon-btn" onClick={handlePrevMonth}>
@@ -204,11 +237,11 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
           const weekStartStr = toDateString(week[0]);
           const weekEndStr = toDateString(week[6]);
 
-          // Filter tasks overlapping this week
+           // Filter tasks overlapping this week
           const overlappingTasks = tasks.filter(task => {
             if (!task.due_date) return false;
-            const taskStartStr = task.start_date ? task.start_date.substring(0, 10) : task.due_date.substring(0, 10);
-            const taskEndStr = task.due_date.substring(0, 10);
+            const taskStartStr = task.start_date ? toLocalYMD(task.start_date) : toLocalYMD(task.due_date);
+            const taskEndStr = toLocalYMD(task.due_date);
             return taskStartStr <= weekEndStr && taskEndStr >= weekStartStr;
           });
 
@@ -218,14 +251,14 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
           // Assign tasks to tracks
           const tracks: Task[][] = [];
           overlappingTasks.forEach(task => {
-            const taskStartStr = task.start_date ? task.start_date.substring(0, 10) : task.due_date?.substring(0, 10) || '';
-            const taskEndStr = task.due_date ? task.due_date.substring(0, 10) : taskStartStr;
+            const taskStartStr = task.start_date ? toLocalYMD(task.start_date) : task.due_date ? toLocalYMD(task.due_date) : '';
+            const taskEndStr = task.due_date ? toLocalYMD(task.due_date) : taskStartStr;
 
             let assignedTrackIndex = -1;
             for (let i = 0; i < tracks.length; i++) {
               const hasOverlap = tracks[i].some(existingTask => {
-                const existingStartStr = existingTask.start_date ? existingTask.start_date.substring(0, 10) : existingTask.due_date?.substring(0, 10) || '';
-                const existingEndStr = existingTask.due_date ? existingTask.due_date.substring(0, 10) : existingStartStr;
+                const existingStartStr = existingTask.start_date ? toLocalYMD(existingTask.start_date) : existingTask.due_date ? toLocalYMD(existingTask.due_date) : '';
+                const existingEndStr = existingTask.due_date ? toLocalYMD(existingTask.due_date) : existingStartStr;
                 return !(taskEndStr < existingStartStr || taskStartStr > existingEndStr);
               });
 
@@ -251,7 +284,19 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
                   const classes = `task-calendar__day ${!isCurrentMonth ? 'outside-month' : ''} ${isToday(day) ? 'today' : ''}`;
                   return (
                     <div key={dayIndex} className={classes}>
-                      <span className="task-calendar__day-number">{day.getDate()}</span>
+                      <div className="task-calendar__day-top">
+                        <button
+                          className="task-calendar__day-add-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCreateTask(day);
+                          }}
+                          title={t('project_detail.add_task' as any) || 'Thêm công việc'}
+                        >
+                          <PlusOutlined />
+                        </button>
+                        <span className="task-calendar__day-number">{day.getDate()}</span>
+                      </div>
                     </div>
                   );
                 })}
@@ -262,8 +307,11 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
                 {tracks.map((track, trackIndex) => (
                   <div key={trackIndex} className="task-calendar__track">
                     {track.map(task => {
-                      const taskStart = task.start_date ? new Date(task.start_date.substring(0, 10)) : new Date(task.due_date!.substring(0, 10));
-                      const taskEnd = new Date(task.due_date!.substring(0, 10));
+                      const taskStartStr = task.start_date ? toLocalYMD(task.start_date) : toLocalYMD(task.due_date!);
+                      const taskEndStr = toLocalYMD(task.due_date!);
+
+                      const taskStart = parseLocalYMD(taskStartStr);
+                      const taskEnd = parseLocalYMD(taskEndStr);
 
                       const startCol = taskStart < week[0] ? 0 : Math.round((taskStart.getTime() - week[0].getTime()) / (1000 * 60 * 60 * 24));
                       const endCol = taskEnd > week[6] ? 6 : Math.round((taskEnd.getTime() - week[0].getTime()) / (1000 * 60 * 60 * 24));
@@ -300,8 +348,19 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
 
                       const popoverContent = (
                         <div style={{ minWidth: '220px', padding: '4px' }}>
-                          <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
-                            {task.title}
+                          <h4 style={{ 
+                            margin: '0 0 10px 0', 
+                            fontSize: '13px', 
+                            fontWeight: 600, 
+                            color: 'var(--text-primary)', 
+                            borderBottom: '1px solid var(--border-color)', 
+                            paddingBottom: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}>
+                            <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                            <span>{task.title}</span>
                           </h4>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px' }}>
                             {/* Status */}
@@ -423,8 +482,11 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
                               marginRight: isTaskEnd ? '8px' : '0px',
                             }}
                           >
-                            <span className="task-calendar__event-title">
-                              {task.title}
+                            <span className="task-calendar__event-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', width: '100%', overflow: 'hidden' }}>
+                              <span style={{ display: 'inline-flex', transform: 'scale(0.85)', flexShrink: 0 }}>
+                                <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                              </span>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.title}</span>
                             </span>
                           </div>
                         </Popover>

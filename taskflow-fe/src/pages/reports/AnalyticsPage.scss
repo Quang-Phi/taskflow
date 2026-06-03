@@ -26,12 +26,18 @@
   }
 
   // Recharts overrides
-  .recharts-cartesian-axis-tick-value { fill: $text-muted !important; font-size: 11px !important; }
-  .recharts-legend-item-text { color: $text-secondary !important; font-size: 12px !important; }
+  .recharts-cartesian-axis-tick-value { fill: var(--text-muted) !important; font-size: 11px !important; }
+  .recharts-legend-item-text { color: var(--text-secondary) !important; font-size: 12px !important; }
   .recharts-tooltip-wrapper {
-    .recharts-default-tooltip { background: $bg-tooltip !important; border: 1px solid $border-color !important; border-radius: $radius-md !important;
-      .recharts-tooltip-label { color: $text-primary !important; }
-      .recharts-tooltip-item { color: $text-secondary !important; }
+    .recharts-default-tooltip { 
+      background: var(--bg-card) !important; 
+      border: 1px solid var(--border-color) !important; 
+      border-radius: $radius-md !important;
+      box-shadow: var(--shadow-md) !important;
+      padding: 10px 14px !important;
+      
+      .recharts-tooltip-label { color: var(--text-primary) !important; font-weight: 600 !important; }
+      .recharts-tooltip-item { color: var(--text-secondary) !important; font-size: 12.5px !important; }
     }
   }
 

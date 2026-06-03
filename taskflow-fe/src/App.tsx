@@ -26,6 +26,16 @@ const App: React.FC = () => {
     const token = params.get('token');
     if (token) {
       localStorage.setItem('taskflow_token', token);
+
+      // Check if this page is rendered inside an iframe (for silent refresh)
+      if (window.parent !== window) {
+        window.parent.postMessage({
+          type: 'SILENT_REFRESH_SUCCESS',
+          token: token
+        }, window.location.origin);
+        return;
+      }
+
       const redirectPath = localStorage.getItem('taskflow_redirect_path') || '/';
       localStorage.removeItem('taskflow_redirect_path');
       window.location.href = redirectPath;
@@ -39,10 +49,11 @@ const App: React.FC = () => {
       if (currentFullPath && !currentFullPath.includes('token=')) {
         localStorage.setItem('taskflow_redirect_path', currentFullPath);
       }
-      const backendUrl = process.env.REACT_APP_API_URL 
-        ? process.env.REACT_APP_API_URL.replace('/api', '') 
-        : 'http://localhost:8000';
-      window.location.href = `${backendUrl}/auth/redirect`;
+      const backendUrl = (process.env.REACT_APP_API_URL || 'http://localhost:8000/api')
+        .replace(/\/api\/?$/, '')
+        .replace(/\/+$/, '');
+      const publicUrl = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL) || '';
+      window.location.href = `${backendUrl}/auth/redirect?origin=${encodeURIComponent(window.location.origin + publicUrl)}`;
     }
   }, []);
 
@@ -113,7 +124,7 @@ const App: React.FC = () => {
           </Route>
         </Routes>
       </BrowserRouter>
-    </ConfigProvider>
+    </ConfigProvider >
   );
 };
 

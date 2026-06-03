@@ -1,0 +1,201 @@
+@import '../../styles/variables';
+@import '../../styles/mixins';
+
+.project-icon-picker-overlay {
+  .ant-popover-inner {
+    padding: 12px !important;
+    background: $bg-card !important;
+    border: 1px solid $border-color;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
+    border-radius: $radius-lg !important;
+  }
+
+  .ant-popover-arrow {
+    display: none;
+  }
+}
+
+.project-icon-picker-popover {
+  width: 300px;
+
+  .ant-tabs-nav {
+    margin-bottom: 12px !important;
+
+    .ant-tabs-tab {
+      padding: 6px 12px !important;
+      font-size: 13px;
+      color: $text-secondary;
+
+      .anticon {
+        margin-right: 6px;
+      }
+
+      &.ant-tabs-tab-active .ant-tabs-tab-btn {
+        color: $primary-light !important;
+        font-weight: 600;
+      }
+    }
+
+    .ant-tabs-ink-bar {
+      background: $primary !important;
+    }
+  }
+
+  .tab-pane-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    &.avatar-tab {
+      align-items: center;
+      padding: 8px 0;
+    }
+  }
+
+  // --- COLOR SELECTION ---
+  .color-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 6px;
+    margin-bottom: 4px;
+
+    .color-dot-option {
+      width: 22px;
+      height: 22px;
+      border-radius: $radius-full;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: all $transition-fast;
+
+      &:hover {
+        transform: scale(1.15);
+      }
+
+      &.selected {
+        border-color: white;
+        box-shadow: 0 0 0 2px $primary;
+      }
+    }
+  }
+
+  // --- SEARCH BAR ---
+  .icon-search-bar {
+    input {
+      background: transparent !important;
+      border-color: $border-color !important;
+      color: $text-primary !important;
+      border-radius: $radius-md;
+
+      &::placeholder {
+        color: $text-muted;
+      }
+    }
+  }
+
+  // --- ICON PICKER GRID ---
+  .icon-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    max-height: 150px;
+    overflow-y: auto;
+    padding-right: 4px;
+
+    &::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: $border-color;
+      border-radius: 2px;
+    }
+
+    .icon-grid-option {
+      height: 30px;
+      border-radius: $radius-md;
+      @include flex-center;
+      cursor: pointer;
+      border: 1px solid transparent;
+      color: $text-secondary;
+      font-size: 15px;
+      transition: all $transition-fast;
+      background: rgba(255, 255, 255, 0.02);
+
+      &:hover {
+        background: $bg-card-hover;
+        color: $text-primary;
+        transform: translateY(-1px);
+      }
+
+      &.selected {
+        background: $primary-bg;
+        border-color: $primary;
+        color: $primary-light;
+      }
+    }
+  }
+
+  // --- AVATAR UPLOADER ---
+  .avatar-upload-dropzone {
+    width: 100%;
+    height: 100px;
+    border: 2px dashed $border-color;
+    border-radius: $radius-lg;
+    @include flex-center;
+    flex-direction: column;
+    gap: 8px;
+    cursor: pointer;
+    transition: all $transition-fast;
+    color: $text-secondary;
+
+    &:hover, &.is-dragging {
+      border-color: $primary;
+      color: $primary-light;
+      background: rgba(99, 102, 241, 0.08);
+    }
+
+    .upload-icon {
+      font-size: 24px;
+    }
+
+    .upload-text {
+      font-size: 12px;
+      font-weight: 500;
+    }
+  }
+
+  .avatar-preview-section {
+    @include flex-center;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+
+    .uploaded-avatar-preview {
+      width: 64px;
+      height: 64px;
+      border-radius: $radius-lg;
+      object-fit: cover;
+      border: 2px solid $border-color;
+    }
+  }
+}
+
+// --- TRIGGER BUBBLE ---
+.project-icon-bubble-trigger {
+  border-radius: $radius-lg;
+  @include flex-center;
+  overflow: hidden;
+  transition: all $transition-fast;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  }
+
+  &.has-avatar {
+    border-color: $border-color;
+    background: $bg-input;
+  }
+}

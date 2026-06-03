@@ -25,8 +25,7 @@ interface AnalyticsData {
 }
 
 const AnalyticsPage: React.FC = () => {
-  const { t, lang } = useTranslation();
-  const isVi = lang === 'vi';
+  const { t, lang, locale } = useTranslation();
 
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,11 +40,11 @@ const AnalyticsPage: React.FC = () => {
   };
 
   const priorityLabels: Record<string, string> = {
-    urgent: t('tasks.priority.urgent') || (isVi ? 'Khẩn cấp' : 'Urgent'),
+    urgent: t('tasks.priority.urgent'),
     high: t('tasks.priority.high'),
     medium: t('tasks.priority.medium'),
     low: t('tasks.priority.low'),
-    none: t('tasks.priority.none') || (isVi ? 'Không ưu tiên' : 'No priority'),
+    none: t('tasks.priority.none'),
   };
 
   const fetchData = useCallback(async (projId: string) => {
@@ -58,11 +57,11 @@ const AnalyticsPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Analytics load error:', err);
-      message.error(isVi ? 'Lỗi tải dữ liệu phân tích' : 'Failed to load analytics');
+      message.error(t('analytics.load_err'));
     } finally {
       setLoading(false);
     }
-  }, [isVi]);
+  }, [t]);
 
   useEffect(() => {
     fetchData(projectFilter);
@@ -83,7 +82,7 @@ const AnalyticsPage: React.FC = () => {
   if (!data) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '400px' }}>
-        <Empty description={isVi ? 'Không có dữ liệu' : 'No data available'} />
+        <Empty description={t('analytics.no_data')} />
       </div>
     );
   }
@@ -103,13 +102,73 @@ const AnalyticsPage: React.FC = () => {
   }));
 
   const completedLabel = t('dashboard.completed');
-  const createdLabel = isVi ? 'Đã tạo mới' : 'Created';
+  const createdLabel = t('analytics.trend.created');
 
   const completionTrend = data.completion_trend.map(item => ({
-    week: isVi ? `Tuần ${item.week.replace('W', '')}` : item.week,
+    week: item.week.startsWith('W') ? t('analytics.trend.week_label', { n: item.week.replace('W', '') }) : item.week,
     [completedLabel]: item.completed,
     [createdLabel]: item.created,
   }));
+
+  const handleExport = () => {
+    if (!data) return;
+
+    const activeProject = projectFilter === 'all'
+      ? t('analytics.project.all')
+      : (data.projects.find(p => String(p.id) === projectFilter)?.name || projectFilter);
+
+    const csvContent: string[] = [];
+
+    csvContent.push(`"${t('analytics.csv.report_title')}"`);
+    csvContent.push(`"${t('analytics.csv.project')}:","${activeProject}"`);
+    csvContent.push(`"${t('analytics.csv.export_date')}:","${new Date().toLocaleString(locale)}"`);
+    csvContent.push('');
+
+    csvContent.push(`"${t('analytics.csv.section_overview')}"`);
+    csvContent.push(`"${t('analytics.csv.status')}","${t('analytics.csv.quantity')}"`);
+    data.task_overview.forEach(item => {
+      const label = statusLabels[item.name] || item.name;
+      csvContent.push(`"${label}","${item.value}"`);
+    });
+    csvContent.push(`"${t('analytics.csv.total_tasks')}","${data.total_tasks}"`);
+    csvContent.push(`"${t('analytics.csv.completion_rate')}","${completionRate}%"`);
+    csvContent.push('');
+
+    csvContent.push(`"${t('analytics.csv.section_priority')}"`);
+    csvContent.push(`"${t('analytics.csv.priority')}","${t('analytics.csv.quantity')}"`);
+    data.priority_dist.forEach(item => {
+      const label = priorityLabels[item.name] || item.name;
+      csvContent.push(`"${label}","${item.count}"`);
+    });
+    csvContent.push('');
+
+    csvContent.push(`"${t('analytics.csv.section_workload')}"`);
+    csvContent.push(`"${t('analytics.csv.member')}","${t('analytics.csv.non_completed')}"`);
+    data.workload.forEach(item => {
+      csvContent.push(`"${item.name}","${item.tasks}"`);
+    });
+    csvContent.push('');
+
+    csvContent.push(`"${t('analytics.csv.section_performance')}"`);
+    csvContent.push(`"${t('analytics.csv.member')}","${t('analytics.csv.total')}","${t('analytics.csv.completed')}","${t('analytics.csv.on_time_pct')}","${t('analytics.csv.avg_time')}"`);
+    data.team_performance.forEach(item => {
+      csvContent.push(`"${item.name}","${item.total}","${item.completed}","${item.on_time}%","${item.avg_time}"`);
+    });
+
+    const blob = new Blob([`\uFEFF${csvContent.join('\n')}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+
+    const safeProjectName = activeProject.toLowerCase().replace(/[^a-z0-9_]/gi, '_');
+    const timestamp = new Date().toISOString().slice(0, 10);
+    link.setAttribute('download', `bao_cao_phan_tich_${safeProjectName}_${timestamp}.csv`);
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    message.success(t('analytics.export_success'));
+  };
 
   return (
     <div className="analytics-page">
@@ -126,7 +185,7 @@ const AnalyticsPage: React.FC = () => {
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
-        <button className="export-btn"><DownloadOutlined /> {t('analytics.action.export')}</button>
+        <button className="export-btn" onClick={handleExport}><DownloadOutlined /> {t('analytics.action.export')}</button>
       </div>
 
       <div className="analytics-page__grid">
@@ -137,7 +196,7 @@ const AnalyticsPage: React.FC = () => {
             <span className="sub">{t('analytics.chart.overview_total', { count: data.total_tasks })}</span>
           </div>
           {data.total_tasks === 0 ? (
-            <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={isVi ? 'Chưa có task' : 'No tasks'} /></div>
+            <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={t('analytics.no_tasks')} /></div>
           ) : (
             <ResponsiveContainer width="100%" height={250}>
               <PieChart>
@@ -157,7 +216,7 @@ const AnalyticsPage: React.FC = () => {
             <h3>{t('analytics.chart.priority')}</h3>
           </div>
           {priorityDist.every(p => p.count === 0) ? (
-            <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={isVi ? 'Chưa có dữ liệu' : 'No data'} /></div>
+            <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={t('analytics.no_data')} /></div>
           ) : (
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={priorityDist} barCategoryGap="30%">
@@ -203,7 +262,7 @@ const AnalyticsPage: React.FC = () => {
             <span className="sub">{t('analytics.chart.workload_sub')}</span>
           </div>
           {data.workload.length === 0 ? (
-            <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={isVi ? 'Chưa có dữ liệu' : 'No data'} /></div>
+            <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={t('analytics.no_data')} /></div>
           ) : (
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={data.workload} layout="vertical" barCategoryGap="25%">
@@ -267,7 +326,7 @@ const AnalyticsPage: React.FC = () => {
           <span>{t('analytics.performance.avg_time')}</span>
         </div>
         {data.team_performance.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={isVi ? 'Chưa có dữ liệu' : 'No data'} /></div>
+          <div style={{ padding: '40px', textAlign: 'center' }}><Empty description={t('analytics.no_data')} /></div>
         ) : (
           data.team_performance.map((m) => (
             <div key={m.name} className="analytics-page__team-row">

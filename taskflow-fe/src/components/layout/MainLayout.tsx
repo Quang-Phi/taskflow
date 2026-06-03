@@ -40,11 +40,11 @@ const MainLayout: React.FC = () => {
       }
 
       // 2. Ignore other shortcuts if typing in any input field
-      const isInputActive = 
-        ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName || '') || 
+      const isInputActive =
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName || '') ||
         document.activeElement?.hasAttribute('contenteditable') ||
         document.activeElement?.classList.contains('ant-select-selection-search-input');
-      
+
       if (isInputActive) return;
 
       // 3. Escape key to close panels
@@ -53,23 +53,6 @@ const MainLayout: React.FC = () => {
         setSearchOpen(false);
         setAiOpen(false);
         return;
-      }
-
-      // 4. Keyboard Shortcuts: C, P, M
-      const key = e.key.toLowerCase();
-      if (key === 'c') {
-        e.preventDefault();
-        if (location.pathname.startsWith('/projects/')) {
-          window.dispatchEvent(new Event('trigger-add-task'));
-        } else {
-          navigate('/my-tasks');
-        }
-      } else if (key === 'p') {
-        e.preventDefault();
-        navigate('/projects');
-      } else if (key === 'm') {
-        e.preventDefault();
-        navigate('/my-tasks');
       }
     };
 
@@ -95,10 +78,10 @@ const MainLayout: React.FC = () => {
       </div>
       <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
       <CreateTaskModal />
-      
+
       {/* Floating Sparkles AI Assistant Trigger */}
       {!aiOpen && (
-        <div className="main-layout__ai-trigger" onClick={() => setAiOpen(true)} title="Trợ lý AI ClickUp Max">
+        <div className="main-layout__ai-trigger" onClick={() => setAiOpen(true)} title="Trợ lý AI">
           ✨
         </div>
       )}

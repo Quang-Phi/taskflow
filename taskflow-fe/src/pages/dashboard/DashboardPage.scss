@@ -194,14 +194,20 @@
       font-size: 9px;
       cursor: pointer;
 
+      &--backlog {
+        border-color: $status-backlog;
+      }
+
       &--todo {
         border-color: $status-todo;
-        color: transparent;
       }
 
       &--in-progress {
         border-color: $status-in-progress;
-        color: $status-in-progress;
+      }
+
+      &--review, &--in-review {
+        border-color: $status-in-review;
       }
 
       &--done {
@@ -217,10 +223,15 @@
     }
 
     &-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       font-size: $font-size-base;
       color: $text-primary;
-      @include text-ellipsis;
       font-weight: 500;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
 
     &-meta {

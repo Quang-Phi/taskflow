@@ -25,6 +25,7 @@ import {
   SmileOutlined,
   CheckSquareOutlined,
   SubnodeOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { getEcho } from '../../services/echo';
@@ -1089,6 +1090,8 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   const [panelTab, setPanelTab] = useState<'comments' | 'history'>('comments');
   const [aiPromptChecklist, setAiPromptChecklist] = useState('');
   const [aiChecklistLoading, setAiChecklistLoading] = useState(false);
+  const [isAiChecklistPopoverOpen, setIsAiChecklistPopoverOpen] = useState(false);
+  const [isAiDescChecklistPopoverOpen, setIsAiDescChecklistPopoverOpen] = useState(false);
 
   // Comment replies & expansion states
   const [replyText, setReplyText] = useState('');
@@ -1643,6 +1646,8 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
           };
         });
         setAiPromptChecklist('');
+        setIsAiChecklistPopoverOpen(false);
+        setIsAiDescChecklistPopoverOpen(false);
       }
     } catch (err) {
       console.error(err);
@@ -2766,6 +2771,48 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                   }
                 }}
               />
+              {taskEditable && (
+                <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                  <Popover
+                    open={isAiDescChecklistPopoverOpen}
+                    onOpenChange={setIsAiDescChecklistPopoverOpen}
+                    content={
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '250px' }}>
+                        <span style={{ fontWeight: 500, fontSize: '12px' }}>Gợi ý checklist bằng AI</span>
+                        <Input.TextArea
+                          placeholder="Nhập yêu cầu gợi ý (ví dụ: checklist cho test API, checklist code review...)"
+                          rows={3}
+                          value={aiPromptChecklist}
+                          onChange={(e) => setAiPromptChecklist(e.target.value)}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'end', gap: '8px' }}>
+                          <Button size="small" onClick={() => { setAiPromptChecklist(''); setIsAiDescChecklistPopoverOpen(false); }}>Hủy</Button>
+                          <Button
+                            type="primary"
+                            size="small"
+                            loading={aiChecklistLoading}
+                            onClick={() => handleGenerateAiChecklist(aiPromptChecklist)}
+                          >
+                            Tạo
+                          </Button>
+                        </div>
+                      </div>
+                    }
+                    title={null}
+                    trigger="click"
+                  >
+                    <Button
+                      type="default"
+                      size="small"
+                      icon={<RobotOutlined />}
+                      style={{ color: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}
+                      loading={aiChecklistLoading}
+                    >
+                      Gợi ý checklist từ AI
+                    </Button>
+                  </Popover>
+                </div>
+              )}
             </div>
 
             {/* Subtasks Section */}
@@ -3155,15 +3202,56 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
                 {/* Create Checklist */}
                 {taskEditable && (
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<PlusOutlined />}
-                    style={{ color: 'var(--primary-color)' }}
-                    onClick={handleQuickCreateChecklist}
-                  >
-                    {t('tasks.panel.add_checklist')}
-                  </Button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <Popover
+                      open={isAiChecklistPopoverOpen}
+                      onOpenChange={setIsAiChecklistPopoverOpen}
+                      content={
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '250px' }}>
+                          <span style={{ fontWeight: 500, fontSize: '12px' }}>Gợi ý checklist bằng AI</span>
+                          <Input.TextArea
+                            placeholder="Nhập yêu cầu gợi ý (ví dụ: checklist cho test API, checklist code review...)"
+                            rows={3}
+                            value={aiPromptChecklist}
+                            onChange={(e) => setAiPromptChecklist(e.target.value)}
+                          />
+                          <div style={{ display: 'flex', justifyContent: 'end', gap: '8px' }}>
+                            <Button size="small" onClick={() => { setAiPromptChecklist(''); setIsAiChecklistPopoverOpen(false); }}>Hủy</Button>
+                            <Button
+                              type="primary"
+                              size="small"
+                              loading={aiChecklistLoading}
+                              onClick={() => handleGenerateAiChecklist(aiPromptChecklist)}
+                            >
+                              Tạo
+                            </Button>
+                          </div>
+                        </div>
+                      }
+                      title={null}
+                      trigger="click"
+                    >
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<RobotOutlined />}
+                        style={{ color: 'var(--primary-color)' }}
+                        loading={aiChecklistLoading}
+                      >
+                        Gợi ý checklist từ AI
+                      </Button>
+                    </Popover>
+
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      style={{ color: 'var(--primary-color)' }}
+                      onClick={handleQuickCreateChecklist}
+                    >
+                      {t('tasks.panel.add_checklist')}
+                    </Button>
+                  </div>
                 )}
               </div>
 
@@ -3522,7 +3610,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                                 )}
                               </div>
                             )}
-                              {/* Action Bar */}
+                            {/* Action Bar */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '4px', fontSize: '11px', paddingLeft: '8px', width: '100%' }}>
                               <span style={{ color: 'var(--text-secondary)' }}>
                                 {new Date(comment.created_at).toLocaleString('vi-VN')}
@@ -3987,28 +4075,28 @@ const renderCommentText = (text: string) => {
 const renderMarkdown = (text: string) => {
   if (!text) return '';
   let html = text;
-  
+
   // Escape HTML to prevent XSS
   html = html
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
-    
+
   // Code block
   html = html.replace(/```([\s\S]*?)```/g, '<pre style="background: rgba(120, 120, 120, 0.12); padding: 8px 12px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 12.5px; margin: 8px 0; border: 1px solid var(--border-color); color: var(--text-primary);"><code>$1</code></pre>');
-  
+
   // Inline code
   html = html.replace(/`([^`\n]+)`/g, '<code style="background: rgba(120, 120, 120, 0.12); padding: 2px 5px; border-radius: 4px; font-family: monospace; font-size: 12.5px; color: #e11d48;">$1</code>');
-  
+
   // Bold
   html = html.replace(/\*\*([^\*]+)\*\*/g, '<strong>$1</strong>');
-  
+
   // Italic
   html = html.replace(/\*([^\*]+)\*/g, '<em>$1</em>');
-  
+
   // Bullet lists
   html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li style="margin-left: 16px; margin-bottom: 4px; list-style-type: disc;">$1</li>');
-  
+
   const parts = html.split(/(<pre[\s\S]*?<\/pre>)/g);
   for (let i = 0; i < parts.length; i++) {
     if (!parts[i].startsWith('<pre')) {
@@ -4016,6 +4104,6 @@ const renderMarkdown = (text: string) => {
     }
   }
   html = parts.join('');
-  
+
   return <div className="ai-markdown-content" dangerouslySetInnerHTML={{ __html: html }} style={{ fontSize: '13px', lineHeight: '1.5', color: 'var(--text-primary)' }} />;
 };

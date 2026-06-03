@@ -1,9 +1,55 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
+import { message } from 'antd';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+const getApiBaseUrl = (): string => {
+  let url = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+  url = url.replace(/\/+$/, '');
+  if (!url.endsWith('/api')) {
+    url = `${url}/api`;
+  }
+  return url;
+};
+const API_BASE_URL = getApiBaseUrl();
+
+const triggerSilentRefresh = (): Promise<string> => {
+  return new Promise<string>((resolve, reject) => {
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.id = 'taskflow-silent-refresh-iframe';
+
+    const backendUrl = API_BASE_URL.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+    iframe.src = `${backendUrl}/auth/redirect?origin=${encodeURIComponent(window.location.origin)}`;
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Silent refresh timeout'));
+    }, 12000);
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data && event.data.type === 'SILENT_REFRESH_SUCCESS' && event.data.token) {
+        cleanup();
+        resolve(event.data.token);
+      }
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      window.removeEventListener('message', handleMessage);
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    document.body.appendChild(iframe);
+  });
+};
 
 class ApiClient {
   private client: AxiosInstance;
+  private isRefreshing = false;
+  private failedQueue: any[] = [];
 
   constructor() {
     this.client = axios.create({
@@ -24,27 +70,89 @@ class ApiClient {
         const lang = localStorage.getItem('taskflow_lang') || 'vi';
         if (config.headers) {
           config.headers['X-Language'] = lang;
+          config.headers['ngrok-skip-browser-warning'] = 'true';
         }
         return config;
       },
       (error) => Promise.reject(error)
     );
 
-    // Response interceptor: handle 401
+    // Response interceptor: handle 401 and capture server time offset
     this.client.interceptors.response.use(
-      (response: AxiosResponse) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          const isBitrixError = error.config?.url?.includes('/bitrix/') || 
+      (response: AxiosResponse) => {
+        if (response.data && response.data.server_time) {
+          const serverTimeStr = response.data.server_time;
+          const serverTimeMs = new Date(serverTimeStr).getTime();
+          if (!isNaN(serverTimeMs)) {
+            const offset = serverTimeMs - Date.now();
+            localStorage.setItem('taskflow_server_time_offset', String(offset));
+          }
+        }
+        return response;
+      },
+      async (error) => {
+        const originalRequest = error.config;
+
+        if (error.response?.status === 401 && !originalRequest._retry) {
+          const isBitrixError = originalRequest.url?.includes('/bitrix/') || 
                                 error.response?.data?.message?.toLowerCase().includes('bitrix');
           
-          if (!isBitrixError) {
-            localStorage.removeItem('taskflow_token');
+          if (isBitrixError) {
+            return Promise.reject(error);
           }
-          
-          console.warn(`[API] 401 Unauthorized ${isBitrixError ? '(Bitrix token issue)' : '(Session expired)'}. Redirecting to auth...`);
-          const backendUrl = API_BASE_URL.replace('/api', '');
-          window.location.href = `${backendUrl}/auth/redirect`;
+
+          // If running standalone (not embedded in an iframe), do not attempt silent refresh via iframe (it will be blocked by X-Frame-Options sameorigin)
+          if (window.self === window.top) {
+            localStorage.removeItem('taskflow_token');
+            message.error('Phiên đăng nhập đã hết hạn. Đang chuyển hướng...', 2);
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            const backendUrl = API_BASE_URL.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+            const publicUrl = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL) || '';
+            window.location.href = `${backendUrl}/auth/redirect?origin=${encodeURIComponent(window.location.origin + publicUrl)}`;
+            return Promise.reject(error);
+          }
+
+          if (this.isRefreshing) {
+            return new Promise((resolve, reject) => {
+              this.failedQueue.push({ resolve, reject, config: originalRequest });
+            });
+          }
+
+          originalRequest._retry = true;
+          this.isRefreshing = true;
+
+          try {
+            console.warn('[API] 401 Unauthorized. Starting silent token refresh via iframe...');
+            const newToken = await triggerSilentRefresh();
+            console.info('[API] Silent token refresh succeeded!');
+
+            localStorage.setItem('taskflow_token', newToken);
+
+            if (originalRequest.headers) {
+              originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            }
+
+            this.processQueue(null, newToken);
+            this.isRefreshing = false;
+
+            return this.client(originalRequest);
+          } catch (refreshError) {
+            console.error('[API] Silent refresh failed or timed out:', refreshError);
+            this.processQueue(refreshError, null);
+            this.isRefreshing = false;
+
+            localStorage.removeItem('taskflow_token');
+
+            // Notify user via Ant Design message before redirecting
+            message.error('Phiên đăng nhập đã hết hạn. Đang tải lại trang...', 2);
+
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            const backendUrl = API_BASE_URL.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+            const publicUrl = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL) || '';
+            window.location.href = `${backendUrl}/auth/redirect?origin=${encodeURIComponent(window.location.origin + publicUrl)}`;
+
+            return Promise.reject(error);
+          }
         }
         return Promise.reject(error);
       }
@@ -71,6 +179,20 @@ class ApiClient {
       getPromises.set(key, promise);
       return promise;
     }) as any;
+  }
+
+  private processQueue(error: any, token: string | null = null) {
+    this.failedQueue.forEach((prom) => {
+      if (error) {
+        prom.reject(error);
+      } else {
+        if (prom.config.headers) {
+          prom.config.headers.Authorization = `Bearer ${token}`;
+        }
+        prom.resolve(this.client(prom.config));
+      }
+    });
+    this.failedQueue = [];
   }
 
   // === AUTH (SSO via Bitrix cookies) ===
@@ -125,11 +247,6 @@ class ApiClient {
   }
 
   async updateEvaluation(id: number, data: {
-    score_quality?: number;
-    score_responsibility?: number;
-    score_communication?: number;
-    score_creativity?: number;
-    score_discipline?: number;
     comment?: string;
     publish?: boolean;
   }) {
@@ -206,10 +323,12 @@ class ApiClient {
     name: string;
     description?: string;
     color?: string;
+    icon?: string | null;
     priority?: 'low' | 'medium' | 'high';
     status?: 'planning' | 'active' | 'completed' | 'on_hold';
     start_date?: string;
     end_date?: string;
+    member_ids?: (string | number)[];
   }) {
     const res = await this.client.post('/projects', data);
     return res.data;
@@ -265,6 +384,37 @@ class ApiClient {
     return res.data;
   }
 
+  // === WORKFLOW ===
+  async getWorkflow(projectId: string | number) {
+    const res = await this.client.get(`/projects/${projectId}/workflow`);
+    return res.data;
+  }
+
+  async updateWorkflow(projectId: string | number, workflow: {
+    mode: 'unrestricted' | 'restricted';
+    transitions: Array<{
+      id: string;
+      name: string;
+      from: string;
+      to: string;
+      allowed_roles: string[];
+    }>;
+    global_transitions?: Array<{
+      id: string;
+      name: string;
+      to: string;
+      allowed_roles: string[];
+    }>;
+  }) {
+    const res = await this.client.put(`/projects/${projectId}/workflow`, workflow);
+    return res.data;
+  }
+
+  async getAvailableTransitions(projectId: string | number, statusId: string) {
+    const res = await this.client.get(`/projects/${projectId}/transitions/${statusId}`);
+    return res.data;
+  }
+
   async getTasks(projectIdOrParams?: string | number | { project_id?: string | number; assignee_id?: string | number }) {
     let params: any = {};
     if (projectIdOrParams) {
@@ -282,7 +432,7 @@ class ApiClient {
     project_id: string | number;
     title: string;
     description?: string;
-    status?: 'todo' | 'in_progress' | 'review' | 'done';
+    status?: string;
     priority?: 'low' | 'medium' | 'high';
     assignee_id?: string | number;
     estimated_hours?: number;
@@ -310,7 +460,7 @@ class ApiClient {
     return res.data;
   }
 
-  async updateTaskStatus(id: string | number, data: { status: 'todo' | 'in_progress' | 'review' | 'done'; position?: number }) {
+  async updateTaskStatus(id: string | number, data: { status: string; position?: number }) {
     const res = await this.client.put(`/tasks/${id}/status`, data);
     return res.data;
   }
@@ -460,14 +610,28 @@ class ApiClient {
     return res.data;
   }
 
+  async renameAttachment(id: string | number, fileName: string) {
+    const res = await this.client.put(`/attachments/${id}`, { file_name: fileName });
+    return res.data;
+  }
+
   async search(query: string) {
     const res = await this.client.get('/search', { params: { q: query } });
     return res.data;
   }
 
-  // === AI ASSISTANT ===
-  async generateAiChecklist(taskId: string | number, prompt?: string) {
-    const res = await this.client.post(`/tasks/${taskId}/ai/checklist`, { prompt });
+  async generateAiChecklist(taskId: string | number, prompt?: string, preview?: boolean, items?: string[]) {
+    const res = await this.client.post(`/tasks/${taskId}/ai/checklist`, { prompt, preview, items });
+    return res.data;
+  }
+
+  async generateAiSubtasks(taskId: string | number, prompt?: string, preview?: boolean, subtasks?: string[]) {
+    const res = await this.client.post(`/tasks/${taskId}/ai/subtasks`, { prompt, preview, subtasks });
+    return res.data;
+  }
+
+  async generateAiDescription(taskId: string | number, prompt?: string, preview?: boolean, description?: string) {
+    const res = await this.client.post(`/tasks/${taskId}/ai/description`, { prompt, preview, description });
     return res.data;
   }
 
@@ -479,6 +643,10 @@ class ApiClient {
   async chatGlobalAi(messages: { role: 'user' | 'ai'; content: string }[]) {
     const res = await this.client.post('/ai/global/chat', { messages });
     return res.data;
+  }
+
+  getBackendUrl() {
+    return API_BASE_URL.replace('/api', '');
   }
 
   getClient() {

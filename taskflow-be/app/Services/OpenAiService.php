@@ -47,6 +47,18 @@ class OpenAiService
     }
 
     /**
+     * Get the target language name for a language code.
+     */
+    protected function getTargetLanguageName(string $lang): string
+    {
+        return match ($lang) {
+            'en' => 'English',
+            'ja' => 'Japanese',
+            default => 'Vietnamese',
+        };
+    }
+
+    /**
      * Determine if OpenAI API is configured.
      */
     public function isConfigured(): bool
@@ -121,10 +133,12 @@ class OpenAiService
             return $this->getMockChecklist($title, $lang);
         }
 
-        $targetLang = $lang === 'en' ? 'English' : 'Vietnamese';
-        $exampleFormat = $lang === 'en' 
-            ? '{"items": ["Prepare document", "Design UI mockup", "Program backend API"]}'
-            : '{"items": ["Chuẩn bị tài liệu", "Thiết kế giao diện mockup", "Lập trình API backend"]}';
+        $targetLang = $this->getTargetLanguageName($lang);
+        $exampleFormat = match ($lang) {
+            'en' => '{"items": ["Prepare document", "Design UI mockup", "Program backend API"]}',
+            'ja' => '{"items": ["資料を準備する", "UIモックアップをデザインする", "バックエンドAPIを開発する"]}',
+            default => '{"items": ["Chuẩn bị tài liệu", "Thiết kế giao diện mockup", "Lập trình API backend"]}',
+        };
 
         $systemPrompt = "You are a highly efficient project management assistant. "
             . "Generate a checklist of action items/subtasks for a task titled '{$title}'. "
@@ -178,31 +192,36 @@ class OpenAiService
     {
         $lang = $this->getLanguage();
         if (!$this->isConfigured()) {
-            if ($lang === 'en') {
-                return "⚠️ **OpenAI API Key configuration is empty!**\n\nPlease configure the `OPENAI_API_KEY` field in the Laravel backend `.env` file (`taskflow-be/.env`) to start chatting with the AI Assistant.";
-            }
-            return "⚠️ **Cấu hình OpenAI API Key trống!**\n\nVui lòng cấu hình trường `OPENAI_API_KEY` trong file `.env` của backend Laravel (`taskflow-be/.env`) để bắt đầu trò chuyện với Trợ lý AI.";
+            return match ($lang) {
+                'en' => "⚠️ **OpenAI API Key configuration is empty!**\n\nPlease configure the `OPENAI_API_KEY` field in the Laravel backend `.env` file (`taskflow-be/.env`) to start chatting with the AI Assistant.",
+                'ja' => "⚠️ **OpenAI APIキーが設定されていません！**\n\nAIアシスタントとチャットを開始するには、Laravelバックエンドの`.env`ファイル（`taskflow-be/.env`）で`OPENAI_API_KEY`フィールドを設定してください。",
+                default => "⚠️ **Cấu hình OpenAI API Key trống!**\n\nVui lòng cấu hình trường `OPENAI_API_KEY` trong file `.env` của backend Laravel (`taskflow-be/.env`) để bắt đầu trò chuyện với Trợ lý AI.",
+            };
         }
 
         $commentsText = '';
         if (!empty($taskDetails['comments'])) {
-            $commentsText = $lang === 'en' ? "Recent comments/discussions:\n" : "Bình luận/Thảo luận gần đây:\n";
+            $commentsText = match ($lang) {
+                'en' => "Recent comments/discussions:\n",
+                'ja' => "最近のコメント/ディスカッション:\n",
+                default => "Bình luận/Thảo luận gần đây:\n",
+            };
             foreach ($taskDetails['comments'] as $c) {
-                $authorName = $c['user']['name'] ?? ($lang === 'en' ? 'Anonymous' : 'Ẩn danh');
+                $authorName = $c['user']['name'] ?? match ($lang) { 'en' => 'Anonymous', 'ja' => '匿名', default => 'Ẩn danh' };
                 $content = strip_tags($c['content'] ?? '');
                 $commentsText .= "- {$authorName}: {$content}\n";
             }
         }
 
-        $taskTitleLabel = $lang === 'en' ? 'Task Title' : 'Tiêu đề công việc';
-        $descLabel = $lang === 'en' ? 'Description' : 'Mô tả';
-        $statusLabel = $lang === 'en' ? 'Status' : 'Trạng thái';
-        $priorityLabel = $lang === 'en' ? 'Priority' : 'Mức độ ưu tiên';
-        $assigneeLabel = $lang === 'en' ? 'Assignee' : 'Người thực hiện (Assignee)';
-        $projectLabel = $lang === 'en' ? 'Project' : 'Dự án';
-        $noDescLabel = $lang === 'en' ? 'No description' : 'Không có mô tả';
-        $unassignedLabel = $lang === 'en' ? 'Unassigned' : 'Chưa phân công';
-        $unknownLabel = $lang === 'en' ? 'Unknown' : 'Không rõ';
+        $taskTitleLabel = match ($lang) { 'en' => 'Task Title', 'ja' => 'タスクタイトル', default => 'Tiêu đề công việc' };
+        $descLabel = match ($lang) { 'en' => 'Description', 'ja' => '説明', default => 'Mô tả' };
+        $statusLabel = match ($lang) { 'en' => 'Status', 'ja' => 'ステータス', default => 'Trạng thái' };
+        $priorityLabel = match ($lang) { 'en' => 'Priority', 'ja' => '優先度', default => 'Mức độ ưu tiên' };
+        $assigneeLabel = match ($lang) { 'en' => 'Assignee', 'ja' => '担当者', default => 'Người thực hiện (Assignee)' };
+        $projectLabel = match ($lang) { 'en' => 'Project', 'ja' => 'プロジェクト', default => 'Dự án' };
+        $noDescLabel = match ($lang) { 'en' => 'No description', 'ja' => '説明なし', default => 'Không có mô tả' };
+        $unassignedLabel = match ($lang) { 'en' => 'Unassigned', 'ja' => '未割り当て', default => 'Chưa phân công' };
+        $unknownLabel = match ($lang) { 'en' => 'Unknown', 'ja' => '不明', default => 'Không rõ' };
 
         $systemPrompt = "You are an intelligent project management assistant for TaskFlow. "
             . "You help the user understand, manage, and execute their tasks.\n\n"
@@ -220,6 +239,8 @@ class OpenAiService
         if ($lang === 'en') {
             $systemPrompt .= "Please reply politely and professionally in English. Use markdown formatting to present clearly (lists, bolding, codeblocks if needed). "
                 . "If the user asks you to draft a reply to a comment, write a professional and polite draft.";
+        } elseif ($lang === 'ja') {
+            $systemPrompt .= "丁寧かつプロフェッショナルに日本語で返答してください。マークダウン形式を使用して分かりやすく提示してください（リスト、太字、必要に応じてコードブロック）。ユーザーがコメントへの返信を依頼した場合は、プロフェッショナルで丁寧な下書きを作成してください。";
         } else {
             $systemPrompt .= "Hãy trả lời một cách lịch sự, chuyên nghiệp bằng tiếng Việt. Sử dụng markdown format để trình bày rõ ràng (list, in đậm, codeblock nếu cần). "
                 . "Nếu người dùng nhờ soạn tin nhắn phản hồi bình luận, hãy viết nháp một phản hồi chuyên nghiệp và lịch sự.";
@@ -250,41 +271,52 @@ class OpenAiService
 
             if ($response->successful()) {
                 $data = $response->json();
-                return $data['choices'][0]['message']['content'] ?? ($lang === 'en' ? 'Sorry, I did not receive a response from the AI.' : 'Xin lỗi, tôi không nhận được phản hồi từ AI.');
+                return $data['choices'][0]['message']['content'] ?? match ($lang) {
+                    'en' => 'Sorry, I did not receive a response from the AI.',
+                    'ja' => '申し訳ございません、AIからの応答を受信できませんでした。',
+                    default => 'Xin lỗi, tôi không nhận được phản hồi từ AI.',
+                };
             }
 
             Log::error('OpenAiService chat completion failed', [
                 'status' => $response->status(),
                 'body' => $response->body()
             ]);
-            return $lang === 'en' 
-                ? "⚠️ An error occurred while connecting to OpenAI API. Please check your key configuration." 
-                : "⚠️ Đã xảy ra lỗi khi kết nối tới OpenAI API. Vui lòng kiểm tra lại cấu hình key.";
+            return match ($lang) {
+                'en' => "⚠️ An error occurred while connecting to OpenAI API. Please check your key configuration.",
+                'ja' => "⚠️ OpenAI APIへの接続中にエラーが発生しました。キーの設定を確認してください。",
+                default => "⚠️ Đã xảy ra lỗi khi kết nối tới OpenAI API. Vui lòng kiểm tra lại cấu hình key.",
+            };
         } catch (\Exception $e) {
             Log::error('OpenAiService chat completion exception', [
                 'message' => $e->getMessage()
             ]);
-            return $lang === 'en' 
-                ? "⚠️ Cannot connect to OpenAI. Error: " . $e->getMessage() 
-                : "⚠️ Không thể kết nối tới OpenAI. Lỗi: " . $e->getMessage();
+            return match ($lang) {
+                'en' => "⚠️ Cannot connect to OpenAI. Error: " . $e->getMessage(),
+                'ja' => "⚠️ OpenAIに接続できません。エラー: " . $e->getMessage(),
+                default => "⚠️ Không thể kết nối tới OpenAI. Lỗi: " . $e->getMessage(),
+            };
         }
     }
 
     /**
-     * Chat globally with tools (ClickUp Max style) supporting task/project creation, comments, timers.
+     * Chat globally with tools supporting task/project creation, comments, timers.
      */
     public function globalChat(array $messages, User $user): array
     {
+        @set_time_limit(180);
         $lang = $this->getLanguage();
         $this->executedEvents = [];
         if (!$this->isConfigured()) {
             return $this->handleMockGlobalChat($messages, $user);
         }
 
-        $targetLangText = $lang === 'en' ? 'English' : 'Vietnamese';
-        $exampleSuggestions = $lang === 'en' 
-            ? "['Reopen task x', 'Stop timer for task y', 'Add a comment to task z']"
-            : "['Mở lại task x', 'Dừng timer cho task y', 'Thêm bình luận vào task z']";
+        $targetLangText = $this->getTargetLanguageName($lang);
+        $exampleSuggestions = match ($lang) {
+            'en' => "['Reopen task x', 'Stop timer for task y', 'Add a comment to task z']",
+            'ja' => "['タスクxを再開する', 'タスクyのタイマーを停止', 'タスクzにコメントを追加']",
+            default => "['Mở lại task x', 'Dừng timer cho task y', 'Thêm bình luận vào task z']",
+        };
 
         // System prompt context
         $systemPrompt = "You are 'Brain' (or Max), a powerful global AI assistant for the TaskFlow project management platform. "
@@ -349,9 +381,11 @@ class OpenAiService
                         'body' => $response->body()
                     ]);
                     return [
-                        'reply' => $lang === 'en' 
-                            ? "⚠️ An error occurred while communicating with OpenAI API. Error code: " . $response->status()
-                            : "⚠️ Đã xảy ra lỗi khi trao đổi với OpenAI API. Mã lỗi: " . $response->status(),
+                        'reply' => match ($lang) {
+                            'en' => "⚠️ An error occurred while communicating with OpenAI API. Error code: " . $response->status(),
+                            'ja' => "⚠️ OpenAI APIとの通信中にエラーが発生しました。エラーコード: " . $response->status(),
+                            default => "⚠️ Đã xảy ra lỗi khi trao đổi với OpenAI API. Mã lỗi: " . $response->status(),
+                        },
                         'actions' => []
                     ];
                 }
@@ -487,7 +521,11 @@ class OpenAiService
                 $finalReply = $this->cleanRemainingFunctionTags($lastAssistantContent, $lang);
 
                 return [
-                    'reply' => $finalReply !== '' ? $finalReply : ($lang === 'en' ? 'I did not understand your request.' : 'Tôi chưa hiểu rõ yêu cầu của bạn.'),
+                    'reply' => $finalReply !== '' ? $finalReply : match ($lang) {
+                        'en' => 'I did not understand your request.',
+                        'ja' => 'リクエストを理解できませんでした。',
+                        default => 'Tôi chưa hiểu rõ yêu cầu của bạn.',
+                    },
                     'actions' => $suggestedFollowUps,
                     'events' => $this->executedEvents
                 ];
@@ -497,9 +535,11 @@ class OpenAiService
                     'message' => $e->getMessage()
                 ]);
                 return [
-                    'reply' => $lang === 'en' 
-                        ? "⚠️ An error occurred during processing: " . $e->getMessage()
-                        : "⚠️ Có lỗi xảy ra trong quá trình xử lý: " . $e->getMessage(),
+                    'reply' => match ($lang) {
+                        'en' => "⚠️ An error occurred during processing: " . $e->getMessage(),
+                        'ja' => "⚠️ 処理中にエラーが発生しました: " . $e->getMessage(),
+                        default => "⚠️ Có lỗi xảy ra trong quá trình xử lý: " . $e->getMessage(),
+                    },
                     'actions' => [],
                     'events' => $this->executedEvents
                 ];
@@ -507,9 +547,11 @@ class OpenAiService
         }
 
         return [
-            'reply' => $lang === 'en' 
-                ? "Sorry, the system was interrupted due to reaching the consecutive processing limit."
-                : "Xin lỗi, hệ thống bị gián đoạn do đạt giới hạn xử lý liên tiếp.",
+            'reply' => match ($lang) {
+                'en' => "Sorry, the system was interrupted due to reaching the consecutive processing limit.",
+                'ja' => "申し訳ございません、連続処理の上限に達したため、システムが中断されました。",
+                default => "Xin lỗi, hệ thống bị gián đoạn do đạt giới hạn xử lý liên tiếp.",
+            },
             'actions' => [],
             'events' => $this->executedEvents
         ];
@@ -520,7 +562,7 @@ class OpenAiService
      */
     protected function getToolsSchema(string $lang = 'vi'): array
     {
-        $isEn = ($lang === 'en');
+        $isEn = ($lang !== 'vi'); // Both en and ja use English tool descriptions
         return [
             [
                 'type' => 'function',
@@ -760,6 +802,34 @@ class OpenAiService
             [
                 'type' => 'function',
                 'function' => [
+                    'name' => 'list_time_entries',
+                    'description' => $isEn ? 'Get a list of logged work time entries (old logs) for the current user or specific filters.' : 'Lấy danh sách các bản ghi thời gian (log cũ) đã log của người dùng hiện tại hoặc các bộ lọc.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'user_id' => [
+                                'type' => 'integer',
+                                'description' => $isEn ? 'Filter by user ID' : 'Lọc theo ID người dùng'
+                            ],
+                            'task_id' => [
+                                'type' => 'integer',
+                                'description' => $isEn ? 'Filter by task ID' : 'Lọc theo ID công việc'
+                            ],
+                            'date' => [
+                                'type' => 'string',
+                                'description' => $isEn ? 'Filter by date in YYYY-MM-DD format (e.g. today)' : 'Lọc theo ngày định dạng YYYY-MM-DD'
+                            ],
+                            'limit' => [
+                                'type' => 'integer',
+                                'description' => $isEn ? 'Limit results count' : 'Giới hạn số lượng kết quả'
+                            ]
+                        ]
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
                     'name' => 'get_stuck_tasks',
                     'description' => $isEn ? 'Get a list of stuck tasks (no activity or comments updated in the last 7 days).' : 'Lấy danh sách các công việc bị kẹt (không có cập nhật hoạt động hay bình luận gì trong vòng 7 ngày qua).',
                     'parameters' => [
@@ -796,7 +866,7 @@ class OpenAiService
      */
     protected function executeTool(string $name, array $args, User $user, string $lang = 'vi'): array
     {
-        $isEn = ($lang === 'en');
+        $isEn = ($lang !== 'vi'); // Both en and ja use English for internal tool results
         try {
             switch ($name) {
                 case 'list_projects':
@@ -1030,6 +1100,23 @@ class OpenAiService
                         return ['success' => false, 'message' => $isEn ? 'Task not found.' : 'Không tìm thấy task.'];
                     }
 
+                    $project = $task->project;
+                    if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+                        return [
+                            'success' => false,
+                            'message' => $isEn ? 'Unauthorized to track time on this task.' : 'Bạn không có quyền ghi nhận thời gian cho công việc này.'
+                        ];
+                    }
+
+                    if (!$task->assignee_id) {
+                        return [
+                            'success' => false,
+                            'message' => $isEn 
+                                ? 'Cannot track time on an unassigned task. Please assign the task first.' 
+                                : 'Không thể ghi nhận thời gian cho công việc chưa được gán cho ai. Vui lòng gán công việc trước.'
+                        ];
+                    }
+
                     // Stop running timers
                     TimeEntry::where('user_id', $user->id)
                         ->whereNull('ended_at')
@@ -1117,6 +1204,29 @@ class OpenAiService
                         'timer' => $entry ? $entry->toArray() : null
                     ];
 
+                case 'list_time_entries':
+                    $query = TimeEntry::with(['task:id,title,project_id', 'task.project:id,name']);
+                    if (!empty($args['user_id'])) {
+                        $query->where('user_id', $args['user_id']);
+                    } else {
+                        $query->where('user_id', $user->id);
+                    }
+                    if (!empty($args['task_id'])) {
+                        $query->where('task_id', $args['task_id']);
+                    }
+                    if (!empty($args['date'])) {
+                        $date = Carbon::parse($args['date']);
+                        $query->whereDate('started_at', $date);
+                    }
+
+                    $limit = $args['limit'] ?? 20;
+                    $entries = $query->orderBy('started_at', 'desc')->limit($limit)->get()->toArray();
+
+                    return [
+                        'success' => true,
+                        'time_entries' => $entries
+                    ];
+
                 case 'list_users':
                     $query = User::query();
                     if (!empty($args['project_id'])) {
@@ -1161,7 +1271,7 @@ class OpenAiService
     protected function handleMockGlobalChat(array $messages, User $user): array
     {
         $lang = $this->getLanguage();
-        $isEn = ($lang === 'en');
+        $isEn = ($lang !== 'vi'); // Both en and ja use English for mock mode
         $this->executedEvents = [];
         $lastMessage = end($messages);
         $text = $lastMessage['content'] ?? '';
@@ -1419,7 +1529,75 @@ class OpenAiService
             } else {
                 $reply = $notice . "🚀 **Brain:** " . ($isEn ? "Error: " : "Lỗi: ") . ($res['message'] ?? ($isEn ? 'Cannot post comment.' : 'Không thể gửi bình luận.'));
             }
-        } 
+        }
+        elseif (preg_match('/(?:xem timer đang chạy|xem log đang chạy|timer đang chạy|running timer|get running timer)/ui', $text)) {
+            $res = $this->executeTool('get_running_timer', [], $user, $lang);
+            $timer = $res['timer'] ?? null;
+            if ($timer) {
+                $taskTitle = $timer['task']['title'] ?? 'N/A';
+                $started = Carbon::parse($timer['started_at']);
+                $diff = now()->diff($started);
+                $duration = sprintf('%02dh %02dm %02ds', $diff->h, $diff->i, $diff->s);
+
+                $reply = $isEn
+                    ? $notice . "⏱️ **Brain:** You have a running timer for task **\"{$taskTitle}\"** (ID: {$timer['task_id']}).\n\nIt started at **{$started->format('H:i:s')}** and has been running for **{$duration}**."
+                    : $notice . "⏱️ **Brain:** Bạn đang có bộ đếm giờ (timer) chạy cho công việc **\"{$taskTitle}\"** (ID: {$timer['task_id']}).\n\nĐồng hồ bắt đầu từ lúc **{$started->format('H:i:s')}** và đã chạy được **{$duration}**.";
+                $actions = $isEn ? ["Stop timer for task {$timer['task_id']}"] : ["Dừng timer cho task {$timer['task_id']}"];
+            } else {
+                $reply = $isEn
+                    ? $notice . "⏱️ **Brain:** You don't have any running timer right now."
+                    : $notice . "⏱️ **Brain:** Hiện tại không có bộ đếm giờ (timer) nào đang chạy cho tài khoản của bạn.";
+                $actions = $isEn ? ["View project list", "Find stuck tasks"] : ["Xem danh sách dự án", "Tìm các task bị kẹt"];
+            }
+        }
+        elseif (preg_match('/(?:hôm nay tôi đã log bao nhiêu|tổng thời gian đã log|xem log cũ|lịch sử log|log cũ|lịch sử chấm công|time entries|list time entries)/ui', $text)) {
+            $today = Carbon::today()->toDateString();
+            $res = $this->executeTool('list_time_entries', ['date' => $today], $user, $lang);
+            $entries = $res['time_entries'] ?? [];
+
+            if (empty($entries)) {
+                $reply = $isEn
+                    ? $notice . "📅 **Brain:** You haven't logged any time entries today."
+                    : $notice . "📅 **Brain:** Bạn chưa ghi nhận (log) thời gian làm việc nào trong ngày hôm nay.";
+                $actions = $isEn ? ["View project list"] : ["Xem danh sách dự án"];
+            } else {
+                $totalSeconds = 0;
+                $listStr = "";
+                foreach ($entries as $e) {
+                    $taskTitle = $e['task']['title'] ?? 'N/A';
+                    $durationSec = $e['duration'] ?? 0;
+                    $totalSeconds += $durationSec;
+
+                    $hours = floor($durationSec / 3600);
+                    $minutes = floor(($durationSec % 3600) / 60);
+                    $seconds = $durationSec % 60;
+
+                    $durationStr = "";
+                    if ($hours > 0) $durationStr .= "{$hours}h ";
+                    if ($minutes > 0 || $hours > 0) $durationStr .= "{$minutes}m ";
+                    $durationStr .= "{$seconds}s";
+
+                    $started = Carbon::parse($e['started_at'])->format('H:i');
+                    $listStr .= "- **{$taskTitle}** (ID: {$e['task_id']}): Logged **{$durationStr}** starting at {$started}\n";
+                }
+
+                $totHours = floor($totalSeconds / 3600);
+                $totMins = floor(($totalSeconds % 3600) / 60);
+                $totSecs = $totalSeconds % 60;
+                $totStr = sprintf('%02dh %02dm %02ds', $totHours, $totMins, $totSecs);
+
+                $reply = $isEn
+                    ? $notice . "📅 **Brain:** You have logged a total of **{$totStr}** across " . count($entries) . " entries today:\n\n" . $listStr
+                    : $notice . "📅 **Brain:** Hôm nay bạn đã ghi nhận tổng cộng **{$totStr}** qua " . count($entries) . " bản ghi:\n\n" . $listStr;
+
+                $runningRes = $this->executeTool('get_running_timer', [], $user, $lang);
+                if (!empty($runningRes['timer'])) {
+                    $actions = $isEn ? ["Stop current running timer"] : ["Dừng timer đang chạy"];
+                } else {
+                    $actions = $isEn ? ["View project list", "Find stuck tasks"] : ["Xem danh sách dự án", "Tìm các task bị kẹt"];
+                }
+            }
+        }
         else {
             if ($isEn) {
                 $reply = $notice . "🤖 **Brain:** Hello! I am your global AI assistant. Since `OPENAI_API_KEY` is not configured, you can enter the following commands to experience live simulation with actual data:\n\n"
@@ -1464,24 +1642,181 @@ class OpenAiService
      */
     protected function getMockChecklist(string $title, string $lang = 'vi'): array
     {
-        if ($lang === 'en') {
-            return [
+        return match ($lang) {
+            'en' => [
                 "Analyze requirement description for: {$title}",
                 "Outline implementation plan & Initial UI mockup designs",
                 "Implement development of the core components",
                 "Perform automated and manual unit tests",
                 "Review code & Deploy to staging environment",
                 "Handover task deliverables & Update task workflow status"
-            ];
+            ],
+            'ja' => [
+                "要件説明の分析: {$title}",
+                "実装計画の策定 & UIモックアップの初期デザイン",
+                "コアコンポーネントの開発実装",
+                "自動および手動ユニットテストの実施",
+                "コードレビュー & ステージング環境へのデプロイ",
+                "タスク成果物の引き渡し & ワークフローステータスの更新"
+            ],
+            default => [
+                "Phân tích yêu cầu công việc cho: {$title}",
+                "Lên kế hoạch thực hiện & Mockup giao diện sơ bộ",
+                "Lập trình phát triển các cấu phần chính",
+                "Kiểm thử tính năng tự động và thủ công",
+                "Review code & Triển khai lên môi trường staging",
+                "Bàn giao công việc và cập nhật trạng thái Task"
+            ],
+        };
+    }
+
+    /**
+     * Generate subtasks using OpenAI.
+     */
+    public function generateSubtasks(string $title, ?string $description = '', ?string $additionalPrompt = ''): array
+    {
+        $lang = $this->getLanguage();
+        if (!$this->isConfigured()) {
+            return $this->getMockSubtasks($title, $lang);
         }
-        return [
-            "Phân tích yêu cầu công việc cho: {$title}",
-            "Lên kế hoạch thực hiện & Mockup giao diện sơ bộ",
-            "Lập trình phát triển các cấu phần chính",
-            "Kiểm thử tính năng tự động và thủ công",
-            "Review code & Triển khai lên môi trường staging",
-            "Bàn giao công việc và cập nhật trạng thái Task"
-        ];
+
+        $targetLang = $this->getTargetLanguageName($lang);
+        $exampleFormat = match ($lang) {
+            'en' => '{"subtasks": ["Prepare document", "Design UI mockup", "Program backend API"]}',
+            'ja' => '{"subtasks": ["資料を準備する", "UIモックアップをデザインする", "バックエンドAPIを開発する"]}',
+            default => '{"subtasks": ["Chuẩn bị tài liệu", "Thiết kế giao diện mockup", "Lập trình API backend"]}',
+        };
+
+        $systemPrompt = "You are a highly efficient project management assistant. "
+            . "Generate a list of subtasks for a parent task titled '{$title}'. "
+            . "Parent Task Description: '{$description}'.\n"
+            . "Return ONLY a JSON object with a single key 'subtasks' containing an array of strings representing the subtask titles. "
+            . "Make them clear, actionable, and specific. Do not include markdown formatting like ```json ... ```. "
+            . "Translate to {$targetLang} since the user is using {$targetLang}. "
+            . "Example format: {$exampleFormat}";
+
+        $userPrompt = "Please generate 3 to 6 subtask titles.";
+        if ($additionalPrompt) {
+            $userPrompt .= " Additional guidelines: {$additionalPrompt}";
+        }
+
+        try {
+            $response = $this->postChatCompletion([
+                'messages' => [
+                    ['role' => 'system', 'content' => $systemPrompt],
+                    ['role' => 'user', 'content' => $userPrompt]
+                ],
+                'response_format' => ['type' => 'json_object'],
+                'temperature' => 0.7,
+            ], 20);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                $content = $data['choices'][0]['message']['content'] ?? '{}';
+                $decoded = json_decode($content, true);
+                if (isset($decoded['subtasks']) && is_array($decoded['subtasks'])) {
+                    return $decoded['subtasks'];
+                }
+            }
+
+            Log::error('OpenAiService subtasks generator failed', [
+                'status' => $response->status(),
+                'body' => $response->body()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('OpenAiService subtasks generator exception', [
+                'message' => $e->getMessage()
+            ]);
+        }
+
+        return $this->getMockSubtasks($title, $lang);
+    }
+
+    /**
+     * Fallback mock subtasks.
+     */
+    protected function getMockSubtasks(string $title, string $lang = 'vi'): array
+    {
+        return match ($lang) {
+            'en' => [
+                "Research details for: {$title}",
+                "Draft timeline & architecture design",
+                "Implement codebase modifications",
+                "Verify features & deploy code"
+            ],
+            'ja' => [
+                "詳細要件の調査: {$title}",
+                "タイムライン & アーキテクチャ設計の草案",
+                "コードベースの修正実装",
+                "機能検証 & デプロイ"
+            ],
+            default => [
+                "Nghiên cứu chi tiết yêu cầu cho: {$title}",
+                "Lên kế hoạch thực hiện & Thiết kế cấu trúc",
+                "Lập trình phát triển code",
+                "Kiểm thử và triển khai bàn giao"
+            ],
+        };
+    }
+
+    /**
+     * Generate task description using OpenAI.
+     */
+    public function generateDescription(string $title, ?string $additionalPrompt = ''): string
+    {
+        $lang = $this->getLanguage();
+        if (!$this->isConfigured()) {
+            return $this->getMockDescription($title, $lang);
+        }
+
+        $targetLang = $this->getTargetLanguageName($lang);
+        $systemPrompt = "You are a highly efficient project management assistant. "
+            . "Write a detailed and professional description for a task titled '{$title}'. "
+            . "Use markdown formatting for structure (e.g. bold titles, bullet points). "
+            . "Write the description in {$targetLang}.";
+
+        $userPrompt = "Please generate a description.";
+        if ($additionalPrompt) {
+            $userPrompt .= " Additional guidelines/requirements: {$additionalPrompt}";
+        }
+
+        try {
+            $response = $this->postChatCompletion([
+                'messages' => [
+                    ['role' => 'system', 'content' => $systemPrompt],
+                    ['role' => 'user', 'content' => $userPrompt]
+                ],
+                'temperature' => 0.7,
+            ], 20);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                return trim($data['choices'][0]['message']['content'] ?? '');
+            }
+
+            Log::error('OpenAiService description generator failed', [
+                'status' => $response->status(),
+                'body' => $response->body()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('OpenAiService description generator exception', [
+                'message' => $e->getMessage()
+            ]);
+        }
+
+        return $this->getMockDescription($title, $lang);
+    }
+
+    /**
+     * Fallback mock description.
+     */
+    protected function getMockDescription(string $title, string $lang = 'vi'): string
+    {
+        return match ($lang) {
+            'en' => "### Overview\nThis task is to handle: **{$title}**.\n\n### Key Deliverables\n- Research requirements & formulate details\n- Code implementation & integration testing\n- Perform validation and release",
+            'ja' => "### 概要\nこのタスクは次の内容を処理します: **{$title}**\n\n### 主な成果物\n- 要件調査 & 詳細の策定\n- コード実装 & 結合テスト\n- 検証とリリースの実施",
+            default => "### Tổng quan\nCông việc này nhằm thực hiện: **{$title}**.\n\n### Các bước triển khai chính\n- Khảo sát yêu cầu chi tiết & lên phương án\n- Lập trình tính năng & kiểm thử liên thông\n- Nghiệm thu tính năng và phát hành",
+        };
     }
     /**
      * Parse text-based function calls from content string.
@@ -1544,7 +1879,7 @@ class OpenAiService
      */
     protected function cleanRemainingFunctionTags(string $content, string $lang = 'vi'): string
     {
-        $isEn = ($lang === 'en');
+        $isEn = ($lang !== 'vi'); // Both en and ja use English for tag cleaning
         
         $friendlyNames = [
             'list_projects' => $isEn ? 'List Projects' : 'Xem danh sách dự án',

@@ -59,6 +59,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('projects/{id}/members', [ProjectController::class, 'addMember']);
     Route::delete('projects/{id}/members/{userId}', [ProjectController::class, 'removeMember']);
     Route::put('projects/{id}/statuses', [ProjectController::class, 'updateStatuses']);
+    Route::get('projects/{id}/workflow', [ProjectController::class, 'getWorkflow']);
+    Route::put('projects/{id}/workflow', [ProjectController::class, 'updateWorkflow']);
+    Route::get('projects/{id}/transitions/{statusId}', [ProjectController::class, 'getAvailableTransitions']);
     Route::get('projects/{id}/time-entries', [ProjectController::class, 'getTimeEntries']);
     Route::get('status-templates', [ProjectController::class, 'listStatusTemplates']);
     Route::post('status-templates', [ProjectController::class, 'createStatusTemplate']);
@@ -82,6 +85,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // AI Assistant
     Route::post('tasks/{id}/ai/checklist', [AiController::class, 'generateChecklist']);
+    Route::post('tasks/{id}/ai/subtasks', [AiController::class, 'generateSubtasks']);
+    Route::post('tasks/{id}/ai/description', [AiController::class, 'generateDescription']);
     Route::post('tasks/{id}/ai/chat', [AiController::class, 'chat']);
     Route::post('ai/global/chat', [AiController::class, 'globalChat']);
 
@@ -102,6 +107,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Attachments
     Route::post('tasks/{taskId}/attachments', [\App\Http\Controllers\Api\AttachmentController::class, 'store']);
+    Route::put('attachments/{id}', [\App\Http\Controllers\Api\AttachmentController::class, 'update']);
     Route::delete('attachments/{id}', [\App\Http\Controllers\Api\AttachmentController::class, 'destroy']);
 
     // Evaluations

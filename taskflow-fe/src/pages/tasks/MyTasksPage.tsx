@@ -1,7 +1,8 @@
 
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Dropdown, message, Modal, Select, Button, Timeline, Tooltip, Spin, Popover, Input } from 'antd';
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
+import { Dropdown, message, Modal, Select, Button, Timeline, Tooltip, Spin, Popover, Input, DatePicker, InputNumber } from 'antd';
+import dayjs from 'dayjs';
 import {
   RightOutlined,
   MoreOutlined,
@@ -18,6 +19,7 @@ import {
   UserOutlined,
   FlagOutlined,
   SearchOutlined,
+  InfoCircleOutlined,
   CalendarOutlined,
   DownOutlined,
   FilterOutlined,
@@ -26,7 +28,8 @@ import {
   PlayCircleOutlined,
   PauseCircleOutlined,
   ClockCircleOutlined,
-  LockOutlined
+  LockOutlined,
+  GroupOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from '../../utils/i18n';
 import { useSearchParams } from 'react-router-dom';
@@ -34,6 +37,8 @@ import api from '../../services/api';
 import './MyTasksPage.scss';
 import { TaskDetailPanel } from '../../components/tasks/TaskDetailPanel';
 import { TaskCalendar } from '../../components/tasks/TaskCalendar';
+import ManualTimeLogModal from '../../components/tasks/ManualTimeLogModal';
+import TaskTypeBadge from '../../components/tasks/TaskTypeBadge';
 
 interface User {
   id: number;
@@ -76,6 +81,7 @@ interface Task {
   description?: string;
   status: string;
   priority: string;
+  type?: string;
   project_id: number;
   project?: Project;
   assignee_id?: number;
@@ -137,159 +143,159 @@ const ClickUpStatusPicker: React.FC<{
   onChange,
   disabled
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [open, setOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [open, setOpen] = useState(false);
 
-  // Default statuses if project has none
-  const statuses = projectStatuses.length > 0 ? projectStatuses : [
-    { id: 'todo', name: 'TO DO', color: '#9ca0b0', type: 'not_started', position: 0 },
-    { id: 'in_progress', name: 'IN PROGRESS', color: '#3b82f6', type: 'active', position: 1 },
-    { id: 'review', name: 'REVIEW', color: '#a855f7', type: 'active', position: 2 },
-    { id: 'done', name: 'COMPLETE', color: '#22c55e', type: 'closed', position: 3 },
-  ];
+    // Default statuses if project has none
+    const statuses = projectStatuses.length > 0 ? projectStatuses : [
+      { id: 'todo', name: 'TO DO', color: '#9ca0b0', type: 'not_started', position: 0 },
+      { id: 'in_progress', name: 'IN PROGRESS', color: '#3b82f6', type: 'active', position: 1 },
+      { id: 'review', name: 'REVIEW', color: '#a855f7', type: 'active', position: 2 },
+      { id: 'done', name: 'COMPLETE', color: '#22c55e', type: 'closed', position: 3 },
+    ];
 
-  const currentStatus = statuses.find(s => s.id === currentStatusId) || statuses[0];
-  const isClosed = currentStatus?.type === 'closed';
+    const currentStatus = statuses.find(s => s.id === currentStatusId) || statuses[0];
+    const isClosed = currentStatus?.type === 'closed';
 
-  const toggleComplete = () => {
-    if (disabled) return;
-    const closedStatus = statuses.find(s => s.type === 'closed') || statuses[statuses.length - 1];
-    const notStartedStatus = statuses.find(s => s.type === 'not_started') || statuses[0];
-    onChange(isClosed ? notStartedStatus?.id : closedStatus?.id);
-  };
+    const toggleComplete = () => {
+      if (disabled) return;
+      const closedStatus = statuses.find(s => s.type === 'closed') || statuses[statuses.length - 1];
+      const notStartedStatus = statuses.find(s => s.type === 'not_started') || statuses[0];
+      onChange(isClosed ? notStartedStatus?.id : closedStatus?.id);
+    };
 
-  const groupedStatuses = {
-    not_started: statuses.filter(s => s.type === 'not_started' && s.name.toLowerCase().includes(searchTerm.toLowerCase())),
-    active: statuses.filter(s => (s.type === 'active' || s.type === 'done' || !s.type) && s.name.toLowerCase().includes(searchTerm.toLowerCase())),
-    closed: statuses.filter(s => s.type === 'closed' && s.name.toLowerCase().includes(searchTerm.toLowerCase())),
-  };
+    const groupedStatuses = {
+      not_started: statuses.filter(s => s.type === 'not_started' && s.name.toLowerCase().includes(searchTerm.toLowerCase())),
+      active: statuses.filter(s => (s.type === 'active' || s.type === 'done' || !s.type) && s.name.toLowerCase().includes(searchTerm.toLowerCase())),
+      closed: statuses.filter(s => s.type === 'closed' && s.name.toLowerCase().includes(searchTerm.toLowerCase())),
+    };
 
-  const popoverContent = (
-    <div style={{ width: '240px', padding: '4px' }}>
-      <Input
-        prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
-        placeholder="Tìm kiếm trạng thái..."
-        variant="filled"
-        size="small"
-        value={searchTerm}
-        onChange={e => setSearchTerm(e.target.value)}
-        style={{ marginBottom: '8px' }}
-        autoFocus
-      />
-      <div style={{ maxHeight: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {Object.entries(groupedStatuses).map(([groupKey, list]) => {
-          if (list.length === 0) return null;
-          const groupTitle = groupKey === 'not_started' ? 'Cần làm' : groupKey === 'active' ? 'Đang làm' : 'Hoàn thành';
-          return (
-            <div key={groupKey}>
-              <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '0 8px 4px 8px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>
-                {groupTitle}
-              </div>
-              {list.map((st: any) => {
-                const isSelected = st.id === currentStatusId;
-                let bullet = null;
-                if (st.type === 'closed') {
-                  bullet = <CheckCircleOutlined style={{ color: st.color, fontSize: '14px' }} />;
-                } else if (st.type === 'not_started') {
-                  bullet = <span style={{ width: '12px', height: '12px', borderRadius: '50%', border: `2px dashed ${st.color}`, display: 'inline-block' }} />;
-                } else {
-                  bullet = <span style={{ width: '12px', height: '12px', borderRadius: '50%', border: `2px solid ${st.color}`, display: 'inline-block' }} />;
-                }
+    const popoverContent = (
+      <div style={{ width: '240px', padding: '4px' }}>
+        <Input
+          prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
+          placeholder="Tìm kiếm trạng thái..."
+          variant="filled"
+          size="small"
+          value={searchTerm}
+          onChange={e => setSearchTerm(e.target.value)}
+          style={{ marginBottom: '8px' }}
+          autoFocus
+        />
+        <div style={{ maxHeight: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {Object.entries(groupedStatuses).map(([groupKey, list]) => {
+            if (list.length === 0) return null;
+            const groupTitle = groupKey === 'not_started' ? 'Cần làm' : groupKey === 'active' ? 'Đang làm' : 'Hoàn thành';
+            return (
+              <div key={groupKey}>
+                <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '0 8px 4px 8px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>
+                  {groupTitle}
+                </div>
+                {list.map((st: any) => {
+                  const isSelected = st.id === currentStatusId;
+                  let bullet = null;
+                  if (st.type === 'closed') {
+                    bullet = <CheckCircleOutlined style={{ color: st.color, fontSize: '14px' }} />;
+                  } else if (st.type === 'not_started') {
+                    bullet = <span style={{ width: '12px', height: '12px', borderRadius: '50%', border: `2px dashed ${st.color}`, display: 'inline-block' }} />;
+                  } else {
+                    bullet = <span style={{ width: '12px', height: '12px', borderRadius: '50%', border: `2px solid ${st.color}`, display: 'inline-block' }} />;
+                  }
 
-                return (
-                  <div
-                    key={st.id}
-                    onClick={() => {
-                      onChange(st.id);
-                      setOpen(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '6px 8px',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      background: isSelected ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
-                      transition: 'background 0.2s',
-                    }}
-                    className="status-item-hover"
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {bullet}
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: isSelected ? 'var(--primary)' : 'var(--text-primary)' }}>
-                        {st.name}
-                      </span>
+                  return (
+                    <div
+                      key={st.id}
+                      onClick={() => {
+                        onChange(st.id);
+                        setOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: isSelected ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
+                        transition: 'background 0.2s',
+                      }}
+                      className="status-item-hover"
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {bullet}
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: isSelected ? 'var(--primary)' : 'var(--text-primary)' }}>
+                          {st.name}
+                        </span>
+                      </div>
+                      {isSelected && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '12px' }} />}
                     </div>
-                    {isSelected && <CheckOutlined style={{ color: 'var(--primary)', fontSize: '12px' }} />}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
-  );
+    );
 
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '1px', background: 'var(--border-color)', borderRadius: '6px', overflow: 'hidden', width: 'fit-content', border: '1px solid var(--border-color)' }}>
-      <Tooltip title={isClosed ? "Mở lại công việc" : "Hoàn thành công việc"}>
-        <button
-          onClick={toggleComplete}
-          disabled={disabled}
-          style={{
-            background: isClosed ? '#22c55e' : 'var(--bg-card)',
-            border: 'none',
-            color: isClosed ? '#fff' : 'var(--text-muted)',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '6px 10px',
-            fontSize: '14px',
-            height: '30px',
-            transition: 'all 0.2s',
-            outline: 'none',
-          }}
-          className="clickup-status-checkbox"
-        >
-          {isClosed ? <CheckOutlined /> : <CheckCircleOutlined />}
-        </button>
-      </Tooltip>
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1px', background: 'var(--border-color)', borderRadius: '6px', overflow: 'hidden', width: 'fit-content', border: '1px solid var(--border-color)' }}>
+        <Tooltip title={isClosed ? "Mở lại công việc" : "Hoàn thành công việc"}>
+          <button
+            onClick={toggleComplete}
+            disabled={disabled}
+            style={{
+              background: isClosed ? '#22c55e' : 'var(--bg-card)',
+              border: 'none',
+              color: isClosed ? '#fff' : 'var(--text-muted)',
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '6px 10px',
+              fontSize: '14px',
+              height: '30px',
+              transition: 'all 0.2s',
+              outline: 'none',
+            }}
+            className="clickup-status-checkbox"
+          >
+            {isClosed ? <CheckOutlined /> : <CheckCircleOutlined />}
+          </button>
+        </Tooltip>
 
-      <Popover
-        content={popoverContent}
-        trigger={disabled ? [] as any : 'click'}
-        open={disabled ? false : open}
-        onOpenChange={setOpen}
-        placement="bottomLeft"
-      >
-        <button
-          disabled={disabled}
-          style={{
-            background: currentStatus?.color || '#9ca0b0',
-            border: 'none',
-            color: '#fff',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '0 12px',
-            fontSize: '11px',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px',
-            height: '30px',
-            outline: 'none',
-          }}
+        <Popover
+          content={popoverContent}
+          trigger={disabled ? [] as any : 'click'}
+          open={disabled ? false : open}
+          onOpenChange={setOpen}
+          placement="bottomLeft"
         >
-          {currentStatus?.name} <DownOutlined style={{ fontSize: '9px' }} />
-        </button>
-      </Popover>
-    </div>
-  );
-};
+          <button
+            disabled={disabled}
+            style={{
+              background: currentStatus?.color || '#9ca0b0',
+              border: 'none',
+              color: '#fff',
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '0 12px',
+              fontSize: '11px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              height: '30px',
+              outline: 'none',
+            }}
+          >
+            {currentStatus?.name} <DownOutlined style={{ fontSize: '9px' }} />
+          </button>
+        </Popover>
+      </div>
+    );
+  };
 
 // ===== PRIORITY CONFIG =====
 const MY_PRIORITIES = [
@@ -345,6 +351,344 @@ const MyPriorityPicker: React.FC<{ value: string; onChange: (v: string) => void;
   );
 };
 
+// ===== DEBOUNCED SEARCH INPUT COMPONENT =====
+interface DebouncedSearchInputProps {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder: string;
+  style?: React.CSSProperties;
+  className?: string;
+  variant?: 'outlined' | 'borderless' | 'filled';
+}
+
+const DebouncedSearchInput: React.FC<DebouncedSearchInputProps> = ({
+  value,
+  onChange,
+  placeholder,
+  style,
+  className,
+  variant
+}) => {
+  const [localValue, setLocalValue] = useState(value);
+
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localValue !== value) {
+        onChange(localValue);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [localValue, onChange, value]);
+
+  return (
+    <Input
+      prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
+      placeholder={placeholder}
+      variant={variant}
+      allowClear
+      value={localValue}
+      onChange={e => setLocalValue(e.target.value || '')}
+      style={style}
+      className={className}
+    />
+  );
+};
+
+// ===== MY TASKS FILTER POPOVER COMPONENT =====
+interface MyTasksFilterPopoverProps {
+  taskList: any[];
+  counts: { all: number; active: number; today: number; this_week: number; overdue: number; done: number; no_date: number };
+  t: any;
+  // Parent state values
+  filter: string;
+  typeFilter: string;
+  priorityFilter: string[];
+  projectFilter: number[];
+  // Parent update functions
+  setFilter: (val: string) => void;
+  setTypeFilter: (val: string) => void;
+  setPriorityFilter: (val: string[]) => void;
+  setProjectFilter: (val: number[]) => void;
+  handleFilterChange: (val: string) => void;
+}
+
+const MyTasksFilterPopover: React.FC<MyTasksFilterPopoverProps> = ({
+  taskList,
+  counts,
+  t,
+  filter,
+  typeFilter,
+  priorityFilter,
+  projectFilter,
+  setFilter,
+  setTypeFilter,
+  setPriorityFilter,
+  setProjectFilter,
+  handleFilterChange,
+}) => {
+  const [open, setOpen] = useState(false);
+  const [filterCategory, setFilterCategory] = useState<string>('type');
+
+  // Local state for filters
+  const [localFilter, setLocalFilter] = useState(filter);
+  const [localTypeFilter, setLocalTypeFilter] = useState(typeFilter);
+  const [localPriorityFilter, setLocalPriorityFilter] = useState(priorityFilter);
+  const [localProjectFilter, setLocalProjectFilter] = useState(projectFilter);
+
+  // Sync external changes (e.g. clear filters)
+  useEffect(() => {
+    setLocalFilter(filter);
+    setLocalTypeFilter(typeFilter);
+    setLocalPriorityFilter(priorityFilter);
+    setLocalProjectFilter(projectFilter);
+  }, [filter, typeFilter, priorityFilter, projectFilter]);
+
+  // Propagate to parent helper
+  const propagateFilters = useCallback((filters: {
+    filter: string;
+    typeFilter: string;
+    priorityFilter: string[];
+    projectFilter: number[];
+  }) => {
+    if (filters.filter !== filter) {
+      handleFilterChange(filters.filter);
+    }
+    setTypeFilter(filters.typeFilter);
+    setPriorityFilter(filters.priorityFilter);
+    setProjectFilter(filters.projectFilter);
+  }, [filter, handleFilterChange, setTypeFilter, setPriorityFilter, setProjectFilter]);
+
+  // Debounced apply
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      propagateFilters({
+        filter: localFilter,
+        typeFilter: localTypeFilter,
+        priorityFilter: localPriorityFilter,
+        projectFilter: localProjectFilter
+      });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [localFilter, localTypeFilter, localPriorityFilter, localProjectFilter, propagateFilters]);
+
+  // Force propagation on close
+  const handleOpenChange = (newOpen: boolean) => {
+    setOpen(newOpen);
+    if (!newOpen) {
+      propagateFilters({
+        filter: localFilter,
+        typeFilter: localTypeFilter,
+        priorityFilter: localPriorityFilter,
+        projectFilter: localProjectFilter
+      });
+    }
+  };
+
+  const handleLocalClear = () => {
+    setLocalFilter('all');
+    setLocalTypeFilter('all');
+    setLocalPriorityFilter([]);
+    setLocalProjectFilter([]);
+    // also clear parent
+    handleFilterChange('all');
+    setTypeFilter('all');
+    setPriorityFilter([]);
+    setProjectFilter([]);
+  };
+
+  const activeCount =
+    (localFilter !== 'all' ? 1 : 0) +
+    (localTypeFilter !== 'all' ? 1 : 0) +
+    (localPriorityFilter.length > 0 ? 1 : 0) +
+    (localProjectFilter.length > 0 ? 1 : 0);
+  const hasFilter = activeCount > 0;
+
+  const filterCategories = [
+    { key: 'type', label: t('task.type.label'), badge: localTypeFilter !== 'all' },
+    { key: 'status', label: t('tasks.group.status'), badge: localFilter !== 'all' },
+    { key: 'priority', label: t('tasks.filter.priority' as any) || 'Độ ưu tiên', badge: localPriorityFilter.length > 0 },
+    { key: 'project', label: t('tasks.filter.project' as any) || 'Dự án', badge: localProjectFilter.length > 0 },
+  ] as const;
+
+  const typeOptions = [
+    { value: 'task', label: t('task.type.task'), icon: <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="1.5" width="13" height="13" rx="2.5" fill="#6366f1" opacity="0.15" stroke="#6366f1" strokeWidth="1.3" /><path d="M4.5 8L7 10.5L11.5 5.5" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg> },
+    { value: 'bug', label: t('task.type.bug'), icon: <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="9" r="4.5" fill="#ef4444" /><path d="M6 4.5C6 3.4 6.9 2.5 8 2.5s2 .9 2 2" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" fill="none" /><path d="M5 6.5L3 5M11 6.5L13 5" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><path d="M4 9H2M12 9h2" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /><path d="M5 11.5L3 13M11 11.5L13 13" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round" /></svg> },
+  ] as const;
+
+  const statusOptions = [
+    { value: 'all', label: t('tasks.filter.all') || 'Tất cả', count: counts.all },
+    { value: 'active', label: t('tasks.filter.active') || 'Đang thực hiện', count: counts.active },
+    { value: 'today', label: t('tasks.filter.today' as any) || 'Hôm nay', count: counts.today },
+    { value: 'this_week', label: t('tasks.filter.this_week' as any) || 'Tuần này', count: counts.this_week },
+    { value: 'overdue', label: t('tasks.filter.overdue') || 'Quá hạn', count: counts.overdue },
+    { value: 'done', label: t('tasks.filter.done') || 'Đã xong', count: counts.done },
+    { value: 'no_date', label: t('tasks.filter.no_date' as any) || 'Không thời hạn', count: counts.no_date },
+  ] as const;
+
+  const priorityOptions = [
+    { value: 'urgent', label: t('tasks.priority.urgent'), color: '#ef4444' },
+    { value: 'high', label: t('tasks.priority.high'), color: '#f97316' },
+    { value: 'medium', label: t('tasks.priority.medium'), color: '#f59e0b' },
+    { value: 'low', label: t('tasks.priority.low'), color: '#6b7084' },
+  ] as const;
+
+  const projectOptions = Array.from(
+    new Map(taskList.filter(t => t.project).map(t => [t.project_id, t.project])).entries()
+  ).map(([id, proj]) => ({ id: id as number, name: (proj as any)?.name || `#${id}`, color: (proj as any)?.color || '#6366f1' }));
+
+  const CheckRow = ({ checked, onClick, icon, label, count, dotColor }: {
+    checked: boolean; onClick: () => void; icon?: React.ReactNode;
+    label: string; count?: number; dotColor?: string;
+  }) => (
+    <div onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: '10px',
+      padding: '8px 10px', borderRadius: '7px', cursor: 'pointer',
+      background: checked ? 'rgba(99,102,241,0.08)' : 'transparent',
+      transition: 'background 0.12s',
+    }} className="status-item-hover">
+      <span style={{
+        width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0,
+        border: checked ? '2px solid var(--primary)' : '2px solid var(--border-color)',
+        background: checked ? 'var(--primary)' : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'all 0.12s',
+      }}>
+        {checked && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+      </span>
+      {dotColor && <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: dotColor, flexShrink: 0 }} />}
+      {icon}
+      <span style={{ flex: 1, fontSize: '13px', fontWeight: checked ? 600 : 400, color: 'var(--text-primary)' }}>{label}</span>
+      {count !== undefined && <span style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-hover)', padding: '1px 7px', borderRadius: '10px' }}>{count}</span>}
+    </div>
+  );
+
+  const filterPanel = (
+    <div style={{ width: 480, display: 'flex', flexDirection: 'column', borderRadius: '10px', overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+      <div style={{ display: 'flex', minHeight: 300 }}>
+        <div style={{ width: 160, borderRight: '1px solid var(--border-color)', padding: '10px 0', display: 'flex', flexDirection: 'column', gap: '2px', flexShrink: 0 }}>
+          {filterCategories.map(cat => {
+            const isActive = cat.key === filterCategory;
+            return (
+              <div key={cat.key} onClick={() => setFilterCategory(cat.key)} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 16px', cursor: 'pointer', fontSize: '13px',
+                fontWeight: isActive ? 600 : 400,
+                background: isActive ? 'rgba(99,102,241,0.10)' : 'transparent',
+                color: isActive ? 'var(--primary)' : 'var(--text-primary)',
+                borderLeft: isActive ? '3px solid var(--primary)' : '3px solid transparent',
+                transition: 'all 0.12s',
+              }}>
+                <span>{cat.label}</span>
+                {cat.badge && (
+                  <span style={{ background: 'var(--primary)', color: '#fff', borderRadius: '10px', fontSize: '10px', fontWeight: 700, padding: '1px 6px', minWidth: '18px', textAlign: 'center' }}>✓</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ flex: 1, padding: '10px', display: 'flex', flexDirection: 'column', gap: '2px', overflowY: 'auto', maxHeight: 360 }}>
+          {filterCategory === 'type' && typeOptions.map(opt => (
+            <CheckRow key={opt.value}
+              checked={localTypeFilter === opt.value}
+              onClick={() => setLocalTypeFilter(localTypeFilter === opt.value ? 'all' : opt.value)}
+              icon={opt.icon} label={opt.label}
+            />
+          ))}
+
+          {filterCategory === 'status' && statusOptions.map(opt => (
+            <CheckRow key={opt.value}
+              checked={localFilter === opt.value}
+              onClick={() => setLocalFilter(opt.value)}
+              label={opt.label} count={opt.count}
+            />
+          ))}
+
+          {filterCategory === 'priority' && priorityOptions.map(opt => (
+            <CheckRow key={opt.value}
+              checked={localPriorityFilter.includes(opt.value)}
+              onClick={() => setLocalPriorityFilter(prev =>
+                prev.includes(opt.value) ? prev.filter(p => p !== opt.value) : [...prev, opt.value]
+              )}
+              dotColor={opt.color} label={opt.label}
+              count={taskList.filter(t => t.priority === opt.value).length}
+            />
+          ))}
+
+          {filterCategory === 'project' && (
+            projectOptions.length === 0
+              ? <div style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '13px' }}>{t('tasks.no_project')}</div>
+              : projectOptions.map(proj => (
+                <CheckRow key={proj.id}
+                  checked={localProjectFilter.includes(proj.id)}
+                  onClick={() => setLocalProjectFilter(prev =>
+                    prev.includes(proj.id) ? prev.filter(id => id !== proj.id) : [...prev, proj.id]
+                  )}
+                  icon={<span style={{ width: '8px', height: '8px', borderRadius: '50%', background: proj.color, flexShrink: 0 }} />}
+                  label={proj.name}
+                  count={taskList.filter(t => t.project_id === proj.id).length}
+                />
+              ))
+          )}
+        </div>
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 16px', borderTop: '1px solid var(--border-color)',
+        background: 'var(--bg-secondary)',
+      }}>
+        <button
+          onClick={handleLocalClear}
+          style={{ background: 'transparent', border: 'none', color: hasFilter ? '#ef4444' : 'var(--text-muted)', cursor: hasFilter ? 'pointer' : 'default', fontSize: '12px', fontWeight: 500, padding: 0 }}
+        >
+          {t('common.clear_filter')}
+        </button>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          {activeCount > 0 ? t('task.filter.active_count', { count: activeCount }) : t('task.filter.all_types')}
+        </span>
+      </div>
+    </div>
+  );
+
+  return (
+    <Popover
+      trigger="click"
+      placement="bottomLeft"
+      overlayStyle={{ padding: 0 }}
+      overlayInnerStyle={{ padding: 0, borderRadius: '10px', overflow: 'hidden' }}
+      content={filterPanel}
+      open={open}
+      onOpenChange={handleOpenChange}
+    >
+      <button style={{
+        display: 'flex', alignItems: 'center', gap: '6px',
+        padding: '6px 13px', borderRadius: '8px', cursor: 'pointer',
+        border: hasFilter ? '1.5px solid var(--primary)' : '1px solid var(--border-color)',
+        background: hasFilter ? 'rgba(99,102,241,0.10)' : 'var(--bg-card)',
+        color: hasFilter ? 'var(--primary)' : 'var(--text-secondary)',
+        fontSize: '13px', fontWeight: 500, outline: 'none', transition: 'all 0.15s',
+      }}>
+        <FilterOutlined style={{ fontSize: '13px' }} />
+        {t('common.filter')}
+        {hasFilter && (
+          <span style={{
+            background: 'var(--primary)', color: '#fff',
+            borderRadius: '10px', fontSize: '10px', fontWeight: 700,
+            padding: '1px 6px', minWidth: '18px', textAlign: 'center',
+          }}>
+            {activeCount}
+          </span>
+        )}
+      </button>
+    </Popover>
+  );
+};
+
 // ===== TIME TRACKER FOR MY TASKS =====
 const myFormatDuration = (seconds: number): string => {
   const total = Math.abs(seconds || 0);
@@ -388,15 +732,29 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
   const [showManualAdd, setShowManualAdd] = useState(false);
   const [manualHours, setManualHours] = useState(0);
   const [manualMinutes, setManualMinutes] = useState(0);
+  const [manualDate, setManualDate] = useState<any>(null);
   const [manualDesc, setManualDesc] = useState('');
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    if (showManualAdd) {
+      setManualDate(dayjs());
+    } else {
+      setManualHours(0);
+      setManualMinutes(0);
+      setManualDesc('');
+      setManualDate(null);
+    }
+  }, [showManualAdd]);
 
   useEffect(() => {
     const r = timeEntries.find((e: any) => !e.ended_at);
     setRunning(r || null);
     if (r) {
       const started = new Date(r.started_at).getTime();
-      setElapsed(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+      const offset = Number(localStorage.getItem('taskflow_server_time_offset') || 0);
+      setElapsed(Math.max(0, Math.floor((Date.now() + offset - started) / 1000)));
     }
   }, [timeEntries]);
 
@@ -404,7 +762,8 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
     if (running) {
       timerRef.current = setInterval(() => {
         const started = new Date(running.started_at).getTime();
-        setElapsed(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+        const offset = Number(localStorage.getItem('taskflow_server_time_offset') || 0);
+        setElapsed(Math.max(0, Math.floor((Date.now() + offset - started) / 1000)));
       }, 1000);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
@@ -418,7 +777,7 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
       window.dispatchEvent(new Event('timer-updated'));
       onUpdate();
     } catch (err: any) {
-      message.error(err.response?.data?.message || 'Không thể bắt đầu timer');
+      message.error(err.response?.data?.message || t('tasks.detail_toast.timer_start_err'));
     }
   };
 
@@ -428,65 +787,105 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
       window.dispatchEvent(new Event('timer-updated'));
       onUpdate();
     } catch (err: any) {
-      message.error(err.response?.data?.message || 'Không thể dừng timer');
+      message.error(err.response?.data?.message || t('tasks.detail_toast.timer_stop_err'));
     }
   };
 
   const handleAddManual = async () => {
     const totalSec = (manualHours * 3600) + (manualMinutes * 60);
-    if (totalSec <= 0) return;
+    if (totalSec <= 0) {
+      message.warning(t('tasks.panel.invalid_time'));
+      return;
+    }
     try {
-      await api.addManualTime(taskId, { duration: totalSec, description: manualDesc || undefined });
+      const payload: any = {
+        duration: totalSec,
+        description: manualDesc || undefined,
+      };
+      if (manualDate) {
+        payload.started_at = manualDate.toISOString();
+      }
+      await api.addManualTime(taskId, payload);
       setManualHours(0);
       setManualMinutes(0);
+      setManualDate(null);
       setManualDesc('');
       setShowManualAdd(false);
       window.dispatchEvent(new Event('timer-updated'));
       onUpdate();
-      message.success('Đã thêm thời gian');
+      message.success(t('tasks.detail_toast.time_added'));
     } catch (err: any) {
-      message.error('Không thể thêm thời gian');
+      message.error(err.response?.data?.message || t('tasks.detail_toast.time_add_err'));
     }
   };
 
   const manualAddContent = (
-    <div style={{ width: '220px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>Thêm thời gian thủ công</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <input
-          type="number"
-          min={0}
-          placeholder="0"
-          value={manualHours || ''}
-          onChange={e => setManualHours(Number(e.target.value) || 0)}
-          style={{ width: '60px', textAlign: 'center', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px', color: 'var(--text-primary)', fontSize: '12px', outline: 'none' }}
-        />
-        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>h</span>
-        <input
-          type="number"
-          min={0}
-          max={59}
-          placeholder="0"
-          value={manualMinutes || ''}
-          onChange={e => setManualMinutes(Number(e.target.value) || 0)}
-          style={{ width: '60px', textAlign: 'center', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px', color: 'var(--text-primary)', fontSize: '12px', outline: 'none' }}
-        />
-        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>m</span>
+    <div className="manual-time-container">
+      <div className="manual-time-header">
+        <ClockCircleOutlined className="header-icon" />
+        <span>{t('tasks.panel.add_manual_time')}</span>
       </div>
-      <Input
-        placeholder="Ghi chú..."
-        value={manualDesc}
-        onChange={e => setManualDesc(e.target.value)}
-        size="small"
-      />
-      <Button
-        type="primary"
-        size="small"
-        onClick={handleAddManual}
-        style={{ width: '100%', fontSize: '12px' }}
-      >
-        Lưu
-      </Button>
+
+      <div className="manual-time-section">
+        <span className="section-label">{t('tasks.panel.time')}</span>
+        <div className="manual-time-duration-grid">
+          <div className="manual-time-duration-card">
+            <input
+              type="number"
+              min={0}
+              placeholder="0"
+              value={manualHours || ''}
+              onChange={e => setManualHours(Math.max(0, Number(e.target.value) || 0))}
+            />
+            <span className="duration-unit">h</span>
+          </div>
+          <div className="manual-time-duration-card">
+            <input
+              type="number"
+              min={0}
+              max={59}
+              placeholder="0"
+              value={manualMinutes || ''}
+              onChange={e => setManualMinutes(Math.max(0, Math.min(59, Number(e.target.value) || 0)))}
+            />
+            <span className="duration-unit">m</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="manual-time-section">
+        <span className="section-label">{t('tasks.panel.start_time')}</span>
+        <div className="manual-time-datepicker">
+          <DatePicker
+            showTime
+            format="YYYY-MM-DD HH:mm"
+            value={manualDate}
+            onChange={setManualDate}
+            placeholder={t('tasks.panel.start_time')}
+            style={{ width: '100%' }}
+          />
+        </div>
+      </div>
+
+      <div className="manual-time-section">
+        <span className="section-label">{t('tasks.panel.time_tracking_note_placeholder')}</span>
+        <Input.TextArea
+          rows={2}
+          placeholder={t('tasks.panel.time_tracking_note_placeholder')}
+          value={manualDesc}
+          onChange={e => setManualDesc(e.target.value)}
+          className="manual-time-textarea"
+        />
+      </div>
+
+      <div className="manual-time-actions">
+        <button className="btn-cancel" onClick={() => setShowManualAdd(false)}>
+          {t('tasks.panel.cancel')}
+        </button>
+        <button className="btn-save" onClick={handleAddManual}>
+          {t('tasks.panel.save_short')}
+        </button>
+      </div>
     </div>
   );
 
@@ -494,7 +893,7 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(120, 120, 120, 0.05)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '4px 12px', width: 'fit-content' }}>
       {/* Play/Stop Trigger */}
       {running ? (
-        <Tooltip title="Dừng tính giờ">
+        <Tooltip title={t('tasks.panel.stop_timer')}>
           <button
             onClick={handleStop}
             disabled={disabled}
@@ -504,7 +903,7 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
           </button>
         </Tooltip>
       ) : (
-        <Tooltip title="Bắt đầu tính giờ">
+        <Tooltip title={t('tasks.panel.start_timer')}>
           <button
             onClick={handleStart}
             disabled={disabled}
@@ -519,13 +918,14 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
 
       {/* Time Display & Add trigger linked to Popover */}
       <Popover
-        trigger="click"
-        open={showManualAdd}
-        onOpenChange={setShowManualAdd}
+        trigger={disabled ? [] as any : "click"}
+        open={disabled ? false : showManualAdd}
+        onOpenChange={(open) => !disabled && setShowManualAdd(open)}
         placement="bottomLeft"
         content={manualAddContent}
+        overlayClassName="manual-time-popover"
       >
-        <div style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', cursor: disabled ? 'not-allowed' : 'pointer' }}>
           {running ? (
             <span style={{ fontSize: '12px', color: '#ef4444', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
               <span className="timer-dot-pulse" style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />
@@ -536,8 +936,8 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
               {myFormatDuration(totalTracked)}
             </span>
           ) : (
-            <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 600 }}>
-              Thêm thời gian
+            <span style={{ fontSize: '12px', color: disabled ? 'var(--text-secondary)' : 'var(--primary)', fontWeight: 600 }}>
+              {t('tasks.panel.add_time')}
             </span>
           )}
         </div>
@@ -547,7 +947,8 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
 };
 
 const MyTasksPage: React.FC = () => {
-  const { t, lang } = useTranslation();
+  const { t, lang, locale } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const isTaskDone = (t: Task) => {
     const projectStatuses = t.project?.statuses || [];
@@ -568,7 +969,10 @@ const MyTasksPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Filters & Grouping
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(() => searchParams.get('filter') || 'all');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
+  const [projectFilter, setProjectFilter] = useState<number[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [groupBy, setGroupBy] = useState('priority');
   const [viewMode, setViewMode] = useState<'list' | 'board' | 'calendar'>('list');
@@ -591,8 +995,11 @@ const MyTasksPage: React.FC = () => {
   const [deadlineModalOpen, setDeadlineModalOpen] = useState(false);
   const [newDeadlineDate, setNewDeadlineDate] = useState('');
 
+  // Manual time logging states
+  const [logTimeTaskId, setLogTimeTaskId] = useState<number | null>(null);
+
   // Drag & drop
-  const [draggedTask, setDraggedTask] = useState<number | null>(null);
+  const draggedTaskRef = useRef<number | null>(null);
 
   // Slide-in Task Detail Panel State
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -824,7 +1231,7 @@ const MyTasksPage: React.FC = () => {
     </div>
   );
 
-  const [searchParams] = useSearchParams();
+  // searchParams is declared at the top of the component
 
   // Initial Load
   useEffect(() => {
@@ -888,6 +1295,27 @@ const MyTasksPage: React.FC = () => {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    const filterParam = searchParams.get('filter');
+    setFilter(filterParam || 'all');
+  }, [searchParams]);
+
+  useLayoutEffect(() => {
+    // Restore display styles of original cards that React reused/reconciled
+    const hiddenCards = document.querySelectorAll('.drag-original-hidden');
+    hiddenCards.forEach(el => {
+      (el as HTMLElement).style.display = '';
+      el.classList.remove('drag-original-hidden');
+    });
+
+    // Remove temporary clone placeholders
+    const clones = document.querySelectorAll('.drag-clone-placeholder');
+    clones.forEach(el => el.remove());
+
+    // Clear all drag highlighting classes from columns/groups
+    cleanupDragClasses();
+  }, [taskList]);
+
   const refreshTasks = useCallback(async () => {
     if (!me?.id) return;
     try {
@@ -918,6 +1346,13 @@ const MyTasksPage: React.FC = () => {
   // Change filter tab and refresh data from API
   const handleFilterChange = (newFilter: string) => {
     setFilter(newFilter);
+    const nextParams = new URLSearchParams(searchParams);
+    if (newFilter && newFilter !== 'all') {
+      nextParams.set('filter', newFilter);
+    } else {
+      nextParams.delete('filter');
+    }
+    setSearchParams(nextParams, { replace: true });
     refreshTasks();
   };
 
@@ -934,13 +1369,34 @@ const MyTasksPage: React.FC = () => {
     if (!dateStr) return '';
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return dateStr;
-    const day = date.getDate();
-    const month = date.getMonth() + 1;
-    if (lang === 'vi') {
-      return `${day} Th${month}`;
+    return date.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+  };
+
+  const formatTaskDateRange = (startDateStr?: string, dueDateStr?: string) => {
+    if (!startDateStr && !dueDateStr) {
+      return <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>{t('tasks.no_deadline' as any)}</span>;
     }
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return `${months[month - 1]} ${day}`;
+
+    const formatSingle = (dateStr: string) => {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleString(locale, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+    };
+
+    if (startDateStr && dueDateStr) {
+      return `${formatSingle(startDateStr)} - ${formatSingle(dueDateStr)}`;
+    }
+    if (startDateStr) {
+      const prefix = lang === 'vi' ? 'Bắt đầu' : lang === 'ja' ? '開始' : 'Start';
+      return `${prefix}: ${formatSingle(startDateStr)}`;
+    }
+    return formatSingle(dueDateStr!);
   };
 
   const isToday = (dateStr?: string) => {
@@ -958,10 +1414,9 @@ const MyTasksPage: React.FC = () => {
     } else if (status === 'done') {
       return false;
     }
-    const normalized = dateStr.substring(0, 10);
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    return normalized < todayStr;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    return d.getTime() < Date.now();
   };
 
   const checkIsThisWeek = (dateStr?: string) => {
@@ -1039,12 +1494,6 @@ const MyTasksPage: React.FC = () => {
     const task = taskList.find(t => t.id === id);
     if (!task) return;
 
-    // Check if transition to 'done' is allowed
-    if (!allowedTransition(task.status, 'done')) {
-      message.error('Không thể nhảy vọt trạng thái. Quy trình bắt buộc: To Do -> In Progress -> Review -> Done');
-      return;
-    }
-
     try {
       const res = await api.updateTaskStatus(id, { status: 'done' });
       if (res.success) {
@@ -1056,6 +1505,23 @@ const MyTasksPage: React.FC = () => {
       }
     } catch (err: any) {
       message.error(err.response?.data?.message || t('tasks.toast.mark_done_err' as any));
+    }
+  };
+
+  const handleToggleWatchTask = async (id: number | string) => {
+    try {
+      const res = await api.toggleWatchTask(id);
+      if (res.success) {
+        setTaskList(prev => prev.map(t => t.id === id ? { ...t, watcher_ids: res.watcher_ids } : t));
+        if (selectedTask && selectedTask.id === id) {
+          setSelectedTask(prev => prev ? { ...prev, watcher_ids: res.watcher_ids } : null);
+        }
+        message.success(res.watched ? 'Đang theo dõi công việc' : 'Đã bỏ theo dõi công việc');
+        refreshTasks();
+      }
+    } catch (err) {
+      console.error('Failed to toggle watch status', err);
+      message.error('Không thể cập nhật trạng thái theo dõi');
     }
   };
 
@@ -1135,9 +1601,55 @@ const MyTasksPage: React.FC = () => {
     }
   };
 
-  // Drag & drop
+  const cleanupDragClasses = () => {
+    console.log('[DragDnD MyTasks] cleanupDragClasses executing...');
+    const draggedCards = document.querySelectorAll('.project-detail__task-card.dragging, .my-tasks__task-row.dragging');
+    console.log('[DragDnD MyTasks] Found dragged cards:', draggedCards.length);
+    draggedCards.forEach(el => el.classList.remove('dragging'));
+
+    const colElements = document.querySelectorAll('.project-detail__column');
+    console.log('[DragDnD MyTasks] Found columns to clean:', colElements.length);
+    colElements.forEach(el => {
+      const dataStatus = el.getAttribute('data-status');
+      const hasDragActive = el.classList.contains('drag-active');
+      const hasDropAllowed = el.classList.contains('drop-allowed');
+      if (hasDragActive || hasDropAllowed) {
+        console.log(`[DragDnD MyTasks] Cleaning column [${dataStatus}]: had drag-active = ${hasDragActive}, drop-allowed = ${hasDropAllowed}`);
+      }
+      el.classList.remove('drag-active', 'column-self', 'drop-allowed', 'drop-disallowed');
+    });
+  };
+
   const handleDragStart = (e: React.DragEvent, id: number) => {
-    setDraggedTask(id);
+    draggedTaskRef.current = id;
+    e.dataTransfer.effectAllowed = 'move';
+
+    // Add dragging class to the dragged element after the drag image is captured
+    const cardEl = e.currentTarget as HTMLElement;
+    setTimeout(() => {
+      cardEl.classList.add('dragging');
+    }, 0);
+
+    const task = taskList.find(t => t.id === id);
+    if (task) {
+      // Highlight columns
+      const colElements = document.querySelectorAll('.project-detail__column');
+      colElements.forEach(el => {
+        const colKey = el.getAttribute('data-status');
+        if (!colKey) return;
+        el.classList.add('drag-active');
+        if (colKey === task.status) {
+          el.classList.add('column-self');
+        } else {
+          el.classList.add('drop-allowed');
+        }
+      });
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    draggedTaskRef.current = null;
+    cleanupDragClasses();
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1146,14 +1658,24 @@ const MyTasksPage: React.FC = () => {
 
   const handleDrop = async (e: React.DragEvent, newStatus: 'todo' | 'in_progress' | 'review' | 'done') => {
     e.preventDefault();
-    if (draggedTask === null) return;
+    const taskId = draggedTaskRef.current;
+    console.log('[DragDnD MyTasks] handleDrop called. taskId:', taskId, 'newStatus:', newStatus);
+    if (taskId === null) {
+      console.warn('[DragDnD MyTasks] handleDrop: taskId is null, aborting');
+      return;
+    }
 
-    const task = taskList.find(t => t.id === draggedTask);
-    if (!task) return;
+    const task = taskList.find(t => String(t.id) === String(taskId));
+    console.log('[DragDnD MyTasks] task:', task);
+    if (!task) {
+      console.warn('[DragDnD MyTasks] handleDrop: task is null/undefined, aborting');
+      return;
+    }
 
     if (!canEditTask(task)) {
       message.error(t('project_detail.toast.no_edit_permission' as any) || 'Bạn không có quyền chỉnh sửa công việc này!');
-      setDraggedTask(null);
+      cleanupDragClasses();
+      draggedTaskRef.current = null;
       return;
     }
 
@@ -1175,17 +1697,92 @@ const MyTasksPage: React.FC = () => {
       }
     }
 
-    try {
-      const res = await api.updateTaskStatus(draggedTask, { status: resolvedStatus as any });
-      if (res.success) {
-        message.success(t('tasks.toast.status_updated' as any));
-        setTaskList(prev => prev.map(t => t.id === draggedTask ? { ...t, status: resolvedStatus } : t));
-      }
-    } catch (err: any) {
-      message.error(err.response?.data?.message || t('tasks.toast.status_err' as any));
-    } finally {
-      setDraggedTask(null);
+    if (task.status === resolvedStatus) {
+      cleanupDragClasses();
+      draggedTaskRef.current = null;
+      return;
     }
+
+    // Clone card and hide original to avoid React "removeChild" crashes
+    const cardEl = document.querySelector(`.project-detail__task-card[data-task-id="${taskId}"]`) as HTMLElement;
+    if (cardEl) {
+      const clone = cardEl.cloneNode(true) as HTMLElement;
+      clone.classList.add('drag-clone-placeholder');
+
+      // Hide original card and mark it with a class for later visibility restoration
+      cardEl.style.display = 'none';
+      cardEl.classList.add('drag-original-hidden');
+
+      const draggedIndex = taskList.findIndex(t => String(t.id) === String(taskId));
+
+      const targetColBody = document.querySelector(`.project-detail__column--${newStatus} .project-detail__column-body`) as HTMLElement;
+      if (targetColBody) {
+        // Find all existing cards in this column
+        const cards = Array.from(targetColBody.querySelectorAll('.project-detail__task-card')) as HTMLElement[];
+        const existingCards = cards.filter(el => !el.classList.contains('drag-clone-placeholder'));
+
+        let insertBeforeEl: HTMLElement | null = null;
+        for (const card of existingCards) {
+          const cardTaskId = card.getAttribute('data-task-id');
+          if (cardTaskId) {
+            const cardIndex = taskList.findIndex(t => String(t.id) === String(cardTaskId));
+            if (cardIndex > draggedIndex) {
+              insertBeforeEl = card;
+              break;
+            }
+          }
+        }
+
+        if (insertBeforeEl) {
+          targetColBody.insertBefore(clone, insertBeforeEl);
+        } else {
+          const controlEl = targetColBody.querySelector(':scope > :not(.project-detail__task-card):not(.drag-clone-placeholder)');
+          if (controlEl) {
+            targetColBody.insertBefore(clone, controlEl);
+          } else {
+            targetColBody.appendChild(clone);
+          }
+        }
+      }
+    }
+
+    cleanupDragClasses();
+    draggedTaskRef.current = null;
+
+    // Defer state update using setTimeout to let the browser paint the clone immediately!
+    setTimeout(async () => {
+      console.log('[DragDnD MyTasks] Defer execution starts inside setTimeout');
+      cleanupDragClasses();
+      // Optimistic Update
+      const prevTaskList = [...taskList];
+      console.log('[DragDnD MyTasks] Triggering optimistic update setTaskList for taskId:', taskId);
+      setTaskList((prev) => {
+        const next = prev.map((t) => {
+          if (String(t.id) === String(taskId)) {
+            console.log('[DragDnD MyTasks] Optimistic match! Task ID:', t.id, 'status changed from:', t.status, 'to:', resolvedStatus);
+            return { ...t, status: resolvedStatus };
+          }
+          return t;
+        });
+        return next;
+      });
+
+      try {
+        console.log('[DragDnD MyTasks] Calling api.updateTaskStatus for taskId:', taskId, 'to resolvedStatus:', resolvedStatus);
+        const res = await api.updateTaskStatus(taskId, { status: resolvedStatus as any });
+        console.log('[DragDnD MyTasks] API response:', res);
+        if (res.success) {
+          message.success(t('tasks.toast.status_updated' as any));
+        } else {
+          console.warn('[DragDnD MyTasks] API success is false, reverting taskList');
+          setTaskList(prevTaskList);
+        }
+      } catch (err: any) {
+        console.error('[DragDnD MyTasks] API error, reverting taskList:', err);
+        setTaskList(prevTaskList);
+        message.error(err.response?.data?.message || t('tasks.toast.status_err' as any));
+      }
+    }, 50);
   };
 
   // Task Details Panel open & load
@@ -1247,16 +1844,16 @@ const MyTasksPage: React.FC = () => {
         project_id: selectedTask.project_id,
         title: subtaskTitle.trim(),
         parent_task_id: selectedTask.id,
-        status: 'todo',
+        status: selectedTask?.project?.statuses?.[0]?.id || 'todo',
         priority: subtaskPriority,
         assignee_id: subtaskAssigneeId,
       });
       if (res.success) {
-        message.success(lang === 'vi' ? 'Đã thêm công việc con' : 'Subtask added successfully');
+        message.success(t('tasks.detail_toast.subtask_added'));
         setSubtaskTitle('');
         setSubtaskAssigneeId(undefined);
         setSubtaskPriority('medium');
-        
+
         // Refresh details of the parent task
         const taskRes = await api.getTask(selectedTask.id);
         if (taskRes.success) {
@@ -1270,7 +1867,7 @@ const MyTasksPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      message.error(lang === 'vi' ? 'Không thể thêm công việc con' : 'Failed to add subtask');
+      message.error(t('tasks.detail_toast.subtask_add_err'));
     }
   };
 
@@ -1284,8 +1881,8 @@ const MyTasksPage: React.FC = () => {
     try {
       const res = await api.updateTask(st.id, { status: newStatus });
       if (res.success) {
-        message.success(lang === 'vi' ? 'Đã cập nhật trạng thái' : 'Status updated');
-        
+        message.success(t('tasks.detail_toast.status_updated'));
+
         // Refresh parent task details
         const taskRes = await api.getTask(selectedTask.id);
         if (taskRes.success) {
@@ -1299,7 +1896,7 @@ const MyTasksPage: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      message.error(lang === 'vi' ? 'Không thể cập nhật trạng thái' : 'Failed to update status');
+      message.error(t('tasks.detail_toast.status_update_err'));
     }
   };
 
@@ -1501,7 +2098,16 @@ const MyTasksPage: React.FC = () => {
       if (!matchesTitle && !matchesId) return false;
     }
 
-    // 2. Filter Option
+    // 2. Type Filter
+    if (!(typeFilter === 'all' || t.type === typeFilter || (!t.type && typeFilter === 'task'))) return false;
+
+    // 3. Priority Filter
+    if (priorityFilter.length > 0 && !priorityFilter.includes(t.priority)) return false;
+
+    // 4. Project Filter
+    if (projectFilter.length > 0 && !projectFilter.includes(t.project_id)) return false;
+
+    // 5. Status/Date Filter
     if (filter === 'all') return true;
     if (filter === 'active') return isTaskActive(t);
     if (filter === 'overdue') return checkIsOverdue(t.due_date, t.status, t);
@@ -1586,7 +2192,7 @@ const MyTasksPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '400px' }}>
-        <Spin size="large" tip={t('tasks.loading' as any)} />
+        <Spin size="large" description={t('tasks.loading' as any)} />
       </div>
     );
   }
@@ -1609,40 +2215,98 @@ const MyTasksPage: React.FC = () => {
       </div>
 
       <div className="my-tasks__toolbar">
-        <div className="my-tasks__quick-filters" style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-          <Input
+        <div className="my-tasks__quick-filters" style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+          {/* Search */}
+          <DebouncedSearchInput
             placeholder={t('projects.search_tasks_placeholder' as any) || "Tìm kiếm công việc..."}
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={setSearchQuery}
             style={{ width: '260px', borderRadius: '8px' }}
-            allowClear
-            prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
           />
-          <select
-            className="my-tasks__group-select"
-            value={filter}
-            onChange={(e) => handleFilterChange(e.target.value)}
-            style={{ width: '220px' }}
-          >
-            <option value="all">{(t('tasks.filter.all') || 'Tất cả')} ({counts.all})</option>
-            <option value="active">{(t('tasks.filter.active') || 'Đang thực hiện')} ({counts.active})</option>
-            <option value="today">{(t('tasks.filter.today' as any) || 'Hôm nay')} ({counts.today})</option>
-            <option value="this_week">{(t('tasks.filter.this_week' as any) || 'Tuần này')} ({counts.this_week})</option>
-            <option value="overdue">{(t('tasks.filter.overdue') || 'Quá hạn')} ({counts.overdue})</option>
-            <option value="done">{(t('tasks.filter.done') || 'Đã xong')} ({counts.done})</option>
-            <option value="no_date">{(t('tasks.filter.no_date' as any) || 'Không thời hạn')} ({counts.no_date})</option>
-          </select>
-        </div>
-        <div className="my-tasks__view-options">
-          {viewMode === 'list' && (
-            <select className="my-tasks__group-select" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
-              <option value="priority">{t('tasks.group.priority')}</option>
-              <option value="status">{t('tasks.group.status')}</option>
-              <option value="project">{t('tasks.group.project')}</option>
-              <option value="due_date">{t('tasks.group.due_date' as any)}</option>
-            </select>
-          )}
 
+          {/* ── Filter Button – Jira-style 2-column panel ── */}
+          <MyTasksFilterPopover
+            taskList={taskList}
+            counts={counts}
+            t={t}
+            filter={filter}
+            typeFilter={typeFilter}
+            priorityFilter={priorityFilter}
+            projectFilter={projectFilter}
+            setFilter={setFilter}
+            setTypeFilter={setTypeFilter}
+            setPriorityFilter={setPriorityFilter}
+            setProjectFilter={setProjectFilter}
+            handleFilterChange={handleFilterChange}
+          />
+
+          {/* ── Group Button – Jira-style ── */}
+          {viewMode === 'list' && (() => {
+            const groupOptions = [
+              { value: 'priority', label: t('tasks.group.priority') },
+              { value: 'status', label: t('tasks.group.status') },
+              { value: 'project', label: t('tasks.group.project') },
+              { value: 'due_date', label: t('tasks.group.due_date' as any) },
+            ] as const;
+
+            const groupPanel = (
+              <div style={{ width: 220, borderRadius: '10px', overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+                <div style={{ padding: '10px 0' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 16px 10px' }}>
+                    {t('tasks.group.label' as any) || 'Gom nhóm theo'}
+                  </div>
+                  {groupOptions.map(g => (
+                    <div
+                      key={g.value}
+                      onClick={() => setGroupBy(g.value)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        padding: '8px 16px', cursor: 'pointer',
+                        background: groupBy === g.value ? 'rgba(99,102,241,0.08)' : 'transparent',
+                        transition: 'background 0.12s',
+                      }}
+                      className="status-item-hover"
+                    >
+                      <span style={{
+                        width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0,
+                        border: groupBy === g.value ? '2px solid var(--primary)' : '2px solid var(--border-color)',
+                        background: groupBy === g.value ? 'var(--primary)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 0.12s',
+                      }}>
+                        {groupBy === g.value && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                      </span>
+                      <span style={{ fontSize: '13px', fontWeight: groupBy === g.value ? 600 : 400, color: 'var(--text-primary)' }}>{g.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+
+            return (
+              <Popover
+                trigger="click"
+                placement="bottomLeft"
+                overlayStyle={{ padding: 0 }}
+                overlayInnerStyle={{ padding: 0, borderRadius: '10px', overflow: 'hidden' }}
+                content={groupPanel}
+              >
+                <button style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '6px 13px', borderRadius: '8px', cursor: 'pointer',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-card)', color: 'var(--text-secondary)',
+                  fontSize: '13px', fontWeight: 500, outline: 'none', transition: 'all 0.15s',
+                }}>
+                  <GroupOutlined style={{ fontSize: '13px' }} />
+                  {t('tasks.group.label' as any) || 'Gom nhóm'}
+                </button>
+              </Popover>
+            );
+          })()}
+        </div>
+
+        <div className="my-tasks__view-options">
           <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
             <button
               className={`panel-btn ${viewMode === 'list' ? 'active' : ''}`}
@@ -1707,6 +2371,7 @@ const MyTasksPage: React.FC = () => {
                       const today = isToday(task.due_date);
                       const statusObj = getFallbackStatusObj(task);
                       const isClosed = isTaskDone(task);
+                      const projectStatuses = task.project?.statuses || [];
 
                       return (
                         <div key={task.id} className="my-tasks__task-row" onClick={() => handleSelectTask(task)}>
@@ -1717,13 +2382,42 @@ const MyTasksPage: React.FC = () => {
                               borderColor: statusObj.color,
                               backgroundColor: isClosed ? statusObj.color : 'transparent',
                               color: isClosed ? 'white' : 'transparent',
-                              cursor: isClosed ? 'default' : 'pointer'
+                              cursor: isClosed ? 'default' : 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 0
                             }}
                           >
-                            {isClosed ? <CheckOutlined /> : ''}
+                            {isClosed ? (
+                              <CheckOutlined style={{ fontSize: '10px' }} />
+                            ) : (
+                              (() => {
+                                const statusesList = projectStatuses.length > 0 ? projectStatuses : [
+                                  { id: 'backlog', type: 'not_started' },
+                                  { id: 'todo', type: 'not_started' },
+                                  { id: 'in_progress', type: 'active' },
+                                  { id: 'review', type: 'active' },
+                                  { id: 'done', type: 'closed' }
+                                ];
+                                const currentIdx = statusesList.findIndex((s: any) => s.id === statusObj.id);
+                                const percentage = statusesList.length > 0 ? ((currentIdx + 1) / statusesList.length) * 100 : 25;
+                                return (
+                                  <div style={{
+                                    width: '10px',
+                                    height: '10px',
+                                    borderRadius: '50%',
+                                    background: `conic-gradient(${statusObj.color} 0% ${percentage}%, transparent ${percentage}% 100%)`
+                                  }} />
+                                );
+                              })()
+                            )}
                           </div>
                           <div className="my-tasks__task-info">
-                            <div className="title">{task.title}</div>
+                            <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                              {task.title}
+                            </div>
                             <div className="subtitle">
                               <span className="task-id">#{task.id}</span>
                               <span className="project-tag" style={{ '--dot-color': task.project?.color || '#6b7084' } as React.CSSProperties}>
@@ -1746,23 +2440,101 @@ const MyTasksPage: React.FC = () => {
                             </span>
                           </div>
                           <div className={`my-tasks__task-date ${overdue ? 'overdue' : ''} ${today ? 'today' : ''}`}>
-                            {task.due_date ? formatDate(task.due_date) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>{t('tasks.no_deadline' as any)}</span>}
+                            {formatTaskDateRange(task.start_date, task.due_date)}
                           </div>
-                          <div className="my-tasks__task-assignee" style={{ background: 'var(--primary)' }}>
-                            {task.assignee ? (task.assignee.photo ? <img src={task.assignee.photo} alt={task.assignee.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : getInitials(task.assignee.name)) : 'U'}
-                          </div>
+                          {task.assignee ? (
+                            <div className="my-tasks__task-assignee" style={{ background: 'var(--primary)' }}>
+                              {task.assignee.photo ? <img src={task.assignee.photo} alt={task.assignee.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : getInitials(task.assignee.name)}
+                            </div>
+                          ) : (
+                            <div className="my-tasks__task-assignee" style={{ border: '1px dashed var(--text-muted, #9ca0b0)', background: 'transparent' }}>
+                              <UserOutlined style={{ color: 'var(--text-muted, #9ca0b0)', fontSize: '10px' }} />
+                            </div>
+                          )}
                           <div className="my-tasks__task-actions" onClick={(e) => e.stopPropagation()}>
                             {(() => {
                               const editPerm = canEditTask(task);
                               const deletePerm = canDeleteTask(task);
-                              const menuItems = [];
+                              const menuItems: any[] = [];
+
+                              menuItems.push({
+                                key: 'details',
+                                label: (
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <InfoCircleOutlined style={{ fontSize: '13px' }} />
+                                    {t('tasks.panel.view_details')}
+                                  </span>
+                                ),
+                                onClick: () => setSelectedTask(task)
+                              });
+
+                              const isWatching = me?.id && task.watcher_ids?.includes(me.id);
+                              if (Number(task.assignee_id) !== Number(me?.id)) {
+                                menuItems.push({
+                                  key: 'toggle_watch',
+                                  label: (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      {isWatching ? (
+                                        <EyeInvisibleOutlined style={{ fontSize: '13px' }} />
+                                      ) : (
+                                        <EyeOutlined style={{ fontSize: '13px' }} />
+                                      )}
+                                      {isWatching ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
+                                    </span>
+                                  ),
+                                  onClick: () => handleToggleWatchTask(task.id)
+                                });
+                              }
+
                               if (editPerm) {
-                                menuItems.push({ key: 'done', label: t('tasks.action.mark_done' as any), onClick: () => handleMarkDone(task.id) });
-                                menuItems.push({ key: 'reassign', label: t('tasks.action.reassign' as any), onClick: () => handleReassignOpen(task.id, task.assignee_id, task.project_id) });
-                                menuItems.push({ key: 'deadline', label: t('tasks.action.set_deadline' as any), onClick: () => handleDeadlineOpen(task.id, task.due_date) });
+                                if (!isTaskDone(task)) {
+                                  menuItems.push({
+                                    key: 'done',
+                                    label: (
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <CheckCircleOutlined style={{ fontSize: '13px' }} />
+                                        {t('tasks.action.mark_done' as any)}
+                                      </span>
+                                    ),
+                                    onClick: () => handleMarkDone(task.id)
+                                  });
+                                  menuItems.push({
+                                    key: 'logtime',
+                                    label: (
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <ClockCircleOutlined style={{ fontSize: '13px' }} />
+                                        {t('tasks.panel.log_time')}
+                                      </span>
+                                    ),
+                                    onClick: () => setLogTimeTaskId(task.id)
+                                  });
+                                }
+                                menuItems.push({
+                                  key: 'reassign',
+                                  label: (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      <UserOutlined style={{ fontSize: '13px' }} />
+                                      {t('tasks.action.reassign' as any)}
+                                    </span>
+                                  ),
+                                  onClick: () => handleReassignOpen(task.id, task.assignee_id, task.project_id)
+                                });
                               }
                               if (deletePerm) {
-                                menuItems.push({ key: 'delete', label: t('tasks.action.delete'), danger: true, onClick: () => handleDeleteTask(task.id) });
+                                if (menuItems.length > 0) {
+                                  menuItems.push({ type: 'divider' });
+                                }
+                                menuItems.push({
+                                  key: 'delete',
+                                  label: (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      <DeleteOutlined style={{ fontSize: '13px' }} />
+                                      {t('tasks.action.delete')}
+                                    </span>
+                                  ),
+                                  danger: true,
+                                  onClick: () => handleDeleteTask(task.id)
+                                });
                               }
                               if (menuItems.length === 0) return null;
                               return (
@@ -1801,6 +2573,7 @@ const MyTasksPage: React.FC = () => {
               <div
                 key={col.key}
                 className={`project-detail__column project-detail__column--${col.key}`}
+                data-status={col.key}
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, col.key)}
               >
@@ -1822,17 +2595,21 @@ const MyTasksPage: React.FC = () => {
                   {colTasks.map((task) => (
                     <div
                       key={task.id}
-                      className={`project-detail__task-card ${draggedTask === task.id ? 'dragging' : ''}`}
+                      className="project-detail__task-card"
+                      data-task-id={task.id}
                       draggable
                       onDragStart={(e) => handleDragStart(e, task.id)}
-                      onDragEnd={() => setDraggedTask(null)}
+                      onDragEnd={handleDragEnd}
                       onClick={() => handleSelectTask(task)}
                     >
                       <div className="project-detail__task-card-top">
                         <span className="project-detail__task-card-id">#{task.id}</span>
                         <div className={`project-detail__task-card-priority project-detail__task-card-priority--${task.priority}`} />
                       </div>
-                      <div className="project-detail__task-card-title">{task.title}</div>
+                      <div className="project-detail__task-card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                        {task.title}
+                      </div>
                       <div className="project-detail__task-card-bottom">
                         <div className="project-detail__task-card-meta">
                           {task.due_date && <span className="project-detail__task-card-date">{formatDate(task.due_date)}</span>}
@@ -1891,13 +2668,43 @@ const MyTasksPage: React.FC = () => {
             showSearch
             style={{ width: '100%' }}
             placeholder={t('tasks.modal.reassign_placeholder' as any)}
-            optionFilterProp="children"
+            optionLabelProp="label"
             value={newAssigneeId}
             onChange={(val) => setNewAssigneeId(val)}
             allowClear
+            filterOption={(input, option) =>
+              String(option?.title ?? '').toLowerCase().includes(input.toLowerCase())
+            }
           >
             {projectMembers.map(u => (
-              <Select.Option key={u.id} value={u.id}>{u.name} ({u.email})</Select.Option>
+              <Select.Option key={u.id} value={u.id} label={u.name} title={`${u.name} ${u.email}`}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: '#6366f1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                    fontWeight: 600,
+                    fontSize: '11px',
+                    overflow: 'hidden',
+                    flexShrink: 0
+                  }}>
+                    {u.photo ? (
+                      <img src={u.photo} alt={u.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      getInitials(u.name)
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.3' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>{u.name}</span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{u.email}</span>
+                  </div>
+                </div>
+              </Select.Option>
             ))}
           </Select>
         </div>
@@ -1921,6 +2728,21 @@ const MyTasksPage: React.FC = () => {
           />
         </div>
       </Modal>
+
+      {/* Manual Time Logging Modal for Specific Task */}
+      {(() => {
+        const logTimeTask = taskList.find(t => t.id === logTimeTaskId);
+        return (
+          <ManualTimeLogModal
+            isOpen={logTimeTaskId !== null}
+            onClose={() => setLogTimeTaskId(null)}
+            onSuccess={refreshTasks}
+            tasks={logTimeTask ? [logTimeTask] : []}
+            defaultTaskId={logTimeTaskId}
+            lockTaskSelection={true}
+          />
+        );
+      })()}
     </div>
   );
 };

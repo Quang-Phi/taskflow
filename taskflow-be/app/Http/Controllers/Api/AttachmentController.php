@@ -34,9 +34,10 @@ class AttachmentController extends Controller
             $originalName = $file->getClientOriginalName();
             $filename = time() . '_' . Str::random(8) . '_' . str_replace(' ', '_', $originalName);
             
-            // Store file under public storage folder
-            $path = $file->storeAs('task_attachments', $filename, 'public');
-            $filePath = '/storage/' . $path;
+            // Store file under configured storage folder or S3
+            $disk = config('filesystems.default', 'public');
+            $path = $file->storeAs('task_attachments', $filename, $disk);
+            $filePath = $disk === 's3' ? Storage::disk('s3')->url($path) : '/storage/' . $path;
 
             $attachment = TaskAttachment::create([
                 'task_id' => $task->id,
@@ -45,6 +46,13 @@ class AttachmentController extends Controller
                 'file_path' => $filePath,
                 'file_size' => $file->getSize(),
                 'file_type' => $file->getClientMimeType(),
+            ]);
+
+            \App\Models\TaskActivity::create([
+                'task_id' => $task->id,
+                'user_id' => $user->id,
+                'action' => 'added_attachment',
+                'details' => "Attached file \"{$originalName}\""
             ]);
 
             return response()->json([
@@ -58,6 +66,44 @@ class AttachmentController extends Controller
             'success' => false,
             'message' => 'No file provided'
         ], 400);
+    }
+
+    public function update(Request $request, $id): JsonResponse
+    {
+        $attachment = TaskAttachment::find($id);
+        if (!$attachment) {
+            return response()->json(['success' => false, 'message' => 'Attachment not found'], 404);
+        }
+
+        $task = $attachment->task;
+        $project = $task->project;
+        $user = $request->user();
+        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'file_name' => 'required|string|max:255',
+        ]);
+
+        $oldName = $attachment->file_name;
+        $newName = $request->input('file_name');
+        
+        $attachment->file_name = $newName;
+        $attachment->save();
+
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'renamed_attachment',
+            'details' => "Renamed attachment \"{$oldName}\" to \"{$newName}\""
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Attachment renamed successfully',
+            'data' => $attachment->load('user')
+        ]);
     }
 
     public function destroy(Request $request, $id): JsonResponse
@@ -75,12 +121,30 @@ class AttachmentController extends Controller
         }
 
         // Delete from physical storage
-        $relativePath = str_replace('/storage/', '', $attachment->file_path);
-        if (Storage::disk('public')->exists($relativePath)) {
-            Storage::disk('public')->delete($relativePath);
+        $filePath = $attachment->file_path;
+        if (str_starts_with($filePath, 'http://') || str_starts_with($filePath, 'https://')) {
+            if (preg_match('/(task_attachments\/[^\?]+)/', $filePath, $matches)) {
+                $s3Key = $matches[1];
+                if (Storage::disk('s3')->exists($s3Key)) {
+                    Storage::disk('s3')->delete($s3Key);
+                }
+            }
+        } else {
+            $relativePath = str_replace('/storage/', '', $filePath);
+            if (Storage::disk('public')->exists($relativePath)) {
+                Storage::disk('public')->delete($relativePath);
+            }
         }
 
+        $fileName = $attachment->file_name;
         $attachment->delete();
+
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'deleted_attachment',
+            'details' => "Deleted attachment \"{$fileName}\""
+        ]);
 
         return response()->json([
             'success' => true,

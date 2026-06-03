@@ -176,6 +176,7 @@
     &-header {
       @include flex-between;
       margin-bottom: 12px;
+      padding-right: 120px; // Avoid overlapping with absolutely positioned status tag and action buttons
     }
 
     &-title-row {
@@ -202,7 +203,8 @@
       font-size: $font-size-md;
       font-weight: 600;
       color: $text-primary;
-      @include text-ellipsis;
+      white-space: normal;
+      word-break: break-word;
     }
 
     &-id {
@@ -229,25 +231,30 @@
       width: 28px;
       height: 28px;
       @include flex-center;
-      background: none;
-      border: none;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid $border-color;
       cursor: pointer;
       border-radius: $radius-sm;
       transition: all $transition-fast;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 
       &.edit-btn {
         color: #eab308;
         &:hover {
-          background: rgba(234, 179, 8, 0.1);
+          background: rgba(234, 179, 8, 0.15);
+          border-color: rgba(234, 179, 8, 0.3);
           color: #f59e0b;
+          transform: translateY(-1px);
         }
       }
 
       &.delete-btn {
         color: #ef4444;
         &:hover {
-          background: rgba(239, 68, 68, 0.1);
+          background: rgba(239, 68, 68, 0.15);
+          border-color: rgba(239, 68, 68, 0.3);
           color: #dc2626;
+          transform: translateY(-1px);
         }
       }
     }
@@ -780,3 +787,34 @@
     }
   }
 }
+
+// Custom member selector popover list & avatar delete badge hover styles
+.selected-avatar-item {
+  position: relative;
+  transition: all 0.2s ease-in-out;
+  
+  .avatar-delete-icon {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.6);
+    transition: all 0.15s ease-in-out;
+  }
+
+  &:hover {
+    transform: translateY(-3px) scale(1.1);
+    z-index: 100 !important; // bring hovered avatar to the front
+    
+    .avatar-delete-icon {
+      opacity: 1;
+      pointer-events: auto;
+      transform: scale(1);
+    }
+  }
+}
+
+.member-selector-item {
+  &:hover {
+    background-color: rgba(99, 102, 241, 0.05);
+  }
+}
+

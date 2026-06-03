@@ -25,6 +25,10 @@ class AiController extends Controller
      */
     public function generateChecklist(Request $request, $taskId): JsonResponse
     {
+        @set_time_limit(120);
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
         $task = Task::find($taskId);
         if (!$task) {
             return response()->json(['success' => false, 'message' => 'Task not found'], 404);
@@ -36,21 +40,37 @@ class AiController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 
-        $request->validate([
-            'prompt' => 'nullable|string|max:1000',
-        ]);
-
         $additionalPrompt = $request->input('prompt');
 
-        // Call OpenAI service
-        $items = $this->openAiService->generateChecklist($task->title, $task->description, $additionalPrompt);
+        $items = $request->input('items');
+        if (is_array($items)) {
+            $items = array_filter(array_map('strval', $items));
+        } else {
+            $items = [];
+        }
 
         if (empty($items)) {
-            return response()->json(['success' => false, 'message' => 'No checklist items generated'], 422);
+            // Call OpenAI service
+            $items = $this->openAiService->generateChecklist($task->title, $task->description, $additionalPrompt);
+            if (empty($items)) {
+                return response()->json(['success' => false, 'message' => 'No checklist items generated'], 422);
+            }
+        }
+
+        $preview = filter_var($request->input('preview', false), FILTER_VALIDATE_BOOLEAN);
+        if ($preview) {
+            return response()->json([
+                'success' => true,
+                'data' => $items
+            ]);
         }
 
         $lang = $request->header('X-Language', 'vi');
-        $checklistTitle = $lang === 'en' ? '✨ AI Suggested Checklist' : '✨ Checklist gợi ý từ AI';
+        $checklistTitle = match ($lang) {
+            'en' => '✨ AI Suggested Checklist',
+            'ja' => '✨ AIが提案したチェックリスト',
+            default => '✨ Checklist gợi ý từ AI',
+        };
 
         // Write to database
         $checklist = DB::transaction(function () use ($task, $items, $checklistTitle) {
@@ -86,6 +106,10 @@ class AiController extends Controller
      */
     public function chat(Request $request, $taskId): JsonResponse
     {
+        @set_time_limit(120);
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
         $task = Task::with(['project', 'assignee', 'comments.user'])->find($taskId);
         if (!$task) {
             return response()->json(['success' => false, 'message' => 'Task not found'], 404);
@@ -135,6 +159,10 @@ class AiController extends Controller
      */
     public function globalChat(Request $request): JsonResponse
     {
+        @set_time_limit(180);
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
         $request->validate([
             'messages' => 'required|array',
             'messages.*.role' => 'required|string|in:user,ai',
@@ -152,6 +180,160 @@ class AiController extends Controller
             'reply' => $result['reply'],
             'actions' => $result['actions'] ?? [],
             'events' => $result['events'] ?? []
+        ]);
+    }
+
+    /**
+     * POST /api/tasks/{id}/ai/subtasks
+     */
+    public function generateSubtasks(Request $request, $taskId): JsonResponse
+    {
+        @set_time_limit(120);
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        $task = Task::find($taskId);
+        if (!$task) {
+            return response()->json(['success' => false, 'message' => 'Task not found'], 404);
+        }
+
+        $project = $task->project;
+        $user = $request->user();
+        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        $additionalPrompt = $request->input('prompt');
+
+        $titles = $request->input('subtasks');
+        if (is_array($titles)) {
+            $titles = array_filter(array_map('strval', $titles));
+        } else {
+            $titles = [];
+        }
+
+        if (empty($titles)) {
+            // Call OpenAI service
+            $titles = $this->openAiService->generateSubtasks($task->title, $task->description, $additionalPrompt);
+            if (empty($titles)) {
+                return response()->json(['success' => false, 'message' => 'No subtasks generated'], 422);
+            }
+        }
+
+        $preview = filter_var($request->input('preview', false), FILTER_VALIDATE_BOOLEAN);
+        if ($preview) {
+            return response()->json([
+                'success' => true,
+                'data' => $titles
+            ]);
+        }
+
+        $defaultStatus = $project->statuses[0]['id'] ?? 'todo';
+        $createdSubtasks = [];
+
+        DB::transaction(function () use ($task, $titles, $defaultStatus, $user, &$createdSubtasks) {
+            $maxPosition = Task::where('project_id', $task->project_id)
+                ->where('status', $defaultStatus)
+                ->max('position') ?? 0;
+
+            foreach ($titles as $idx => $title) {
+                $subtask = Task::create([
+                    'project_id' => $task->project_id,
+                    'title' => trim($title),
+                    'description' => null,
+                    'status' => $defaultStatus,
+                    'priority' => 'medium',
+                    'assignee_id' => null,
+                    'creator_id' => $user->id,
+                    'parent_task_id' => $task->id,
+                    'position' => $maxPosition + $idx + 1,
+                ]);
+
+                \App\Models\TaskActivity::create([
+                    'task_id' => $subtask->id,
+                    'user_id' => $user->id,
+                    'action' => 'created',
+                    'details' => 'Tạo tự động bằng AI gợi ý.'
+                ]);
+
+                $createdSubtasks[] = $subtask;
+            }
+        });
+
+        // Broadcast task update
+        $updatedTask = Task::with(['assignee', 'creator', 'labels', 'subtasks', 'comments.user', 'checklists.items.assignee', 'attachments'])->find($taskId);
+        $taskArray = $updatedTask->toArray();
+        if (isset($taskArray['project'])) {
+            unset($taskArray['project']);
+        }
+        event(new \App\Events\TaskUpdated((int)$task->project_id, 'updated', $taskArray));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'AI subtasks generated successfully',
+            'data' => $updatedTask->subtasks
+        ]);
+    }
+
+    /**
+     * POST /api/tasks/{id}/ai/description
+     */
+    public function generateDescription(Request $request, $taskId): JsonResponse
+    {
+        @set_time_limit(120);
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        $task = Task::find($taskId);
+        if (!$task) {
+            return response()->json(['success' => false, 'message' => 'Task not found'], 404);
+        }
+
+        $project = $task->project;
+        $user = $request->user();
+        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        $additionalPrompt = $request->input('prompt');
+
+        $description = $request->input('description');
+        if ($description === null) {
+            // Call OpenAI service
+            $description = $this->openAiService->generateDescription($task->title, $additionalPrompt);
+        }
+
+        $preview = filter_var($request->input('preview', false), FILTER_VALIDATE_BOOLEAN);
+        if ($preview) {
+            return response()->json([
+                'success' => true,
+                'data' => $description
+            ]);
+        }
+
+        // Update task description
+        $task->description = $description;
+        $task->save();
+
+        \App\Models\TaskActivity::create([
+            'task_id' => $task->id,
+            'user_id' => $user->id,
+            'action' => 'updated_description',
+            'details' => 'Cập nhật mô tả tự động bằng AI.'
+        ]);
+
+        // Broadcast task update
+        $updatedTask = Task::with(['assignee', 'creator', 'labels', 'subtasks', 'comments.user', 'checklists.items.assignee', 'attachments'])->find($taskId);
+        $taskArray = $updatedTask->toArray();
+        if (isset($taskArray['project'])) {
+            unset($taskArray['project']);
+        }
+        event(new \App\Events\TaskUpdated((int)$task->project_id, 'updated', $taskArray));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'AI description generated successfully',
+            'data' => $description
         ]);
     }
 }

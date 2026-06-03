@@ -17,6 +17,7 @@ import {
   ClockCircleOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
+import { renderProjectIcon } from '../projects/ProjectIconPicker';
 import { useTranslation } from '../../utils/i18n';
 import './Sidebar.scss';
 
@@ -182,10 +183,19 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onCollapse }) => {
                     className={`sidebar__project-item ${location.pathname === `/projects/${project.id}` ? 'active' : ''}`}
                     onClick={() => navigate(`/projects/${project.id}`)}
                   >
-                    <span
-                      className="sidebar__project-dot"
-                      style={{ backgroundColor: project.color }}
-                    />
+                    <div className="sidebar__project-icon-wrapper" style={{
+                      background: project.icon && project.icon.startsWith('data:image/') ? 'transparent' : project.color,
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      flexShrink: 0
+                    }}>
+                      {renderProjectIcon(project.icon, project.color, project.name, 14, { color: '#ffffff', fontSize: '7px' })}
+                    </div>
                     <span className="sidebar__project-name">{project.name}</span>
                     <span className="sidebar__project-badge">{activeTasks}</span>
                   </div>

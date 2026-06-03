@@ -84,7 +84,7 @@ const SettingsPage: React.FC = () => {
     else if (newTheme === 'dark') themeLabel = t('settings.appearance.dark');
     else themeLabel = t('settings.appearance.system');
 
-    message.success(lang === 'vi' ? `Đã chuyển giao diện sang: ${themeLabel}` : `Theme changed to: ${themeLabel}`);
+    message.success(t('settings.toast.theme_changed', { label: themeLabel }));
 
     try {
       await api.updateSettings({ theme: newTheme });
@@ -215,6 +215,7 @@ const SettingsPage: React.FC = () => {
                   <select value={language} onChange={(e) => setLanguageState(e.target.value as Language)}>
                     <option value="vi">Tiếng Việt</option>
                     <option value="en">English</option>
+                    <option value="ja">日本語 (Japanese)</option>
                   </select>
                 </div>
               </div>

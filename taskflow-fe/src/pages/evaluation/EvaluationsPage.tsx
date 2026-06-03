@@ -17,7 +17,6 @@ interface EvalData {
   completed_tasks: number;
   on_time_tasks: number;
   on_time_rate: number;
-  scores: { quality: number; responsibility: number; communication: number; creativity: number; discipline: number };
   total_score: number;
   comment: string | null;
   status: 'draft' | 'published';
@@ -28,12 +27,12 @@ interface EvalData {
   }>;
 }
 
-const getRating = (score: number, isVi: boolean) => {
-  if (score >= 9) return { label: '⭐ Excellent', labelVi: '⭐ Xuất sắc', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
-  if (score >= 7) return { label: '✅ Good', labelVi: '✅ Tốt', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' };
-  if (score >= 5) return { label: '🔵 Fair', labelVi: '🔵 Khá', color: '#3b82f6', bg: 'rgba(59,130,246,0.1)' };
-  if (score >= 3) return { label: '🟡 Average', labelVi: '🟡 Trung bình', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
-  return { label: '🔴 Poor', labelVi: '🔴 Yếu', color: '#ef4444', bg: 'rgba(239,68,68,0.1)' };
+const getRating = (score: number, t: any) => {
+  if (score >= 9) return { emoji: '⭐', label: t('eval.rating.excellent'), color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
+  if (score >= 7) return { emoji: '✅', label: t('eval.rating.good'), color: '#22c55e', bg: 'rgba(34,197,94,0.1)' };
+  if (score >= 5) return { emoji: '🔵', label: t('eval.rating.fair'), color: '#3b82f6', bg: 'rgba(59,130,246,0.1)' };
+  if (score >= 3) return { emoji: '🟡', label: t('eval.rating.average'), color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
+  return { emoji: '🔴', label: t('eval.rating.poor'), color: '#ef4444', bg: 'rgba(239,68,68,0.1)' };
 };
 
 const getBarColor = (score: number) => {
@@ -45,7 +44,6 @@ const getBarColor = (score: number) => {
 
 const EvaluationsPage: React.FC = () => {
   const { t, lang } = useTranslation();
-  const isVi = lang === 'vi';
 
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [evaluations, setEvaluations] = useState<EvalData[]>([]);
@@ -54,44 +52,62 @@ const EvaluationsPage: React.FC = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const sentinelRef = React.useRef<HTMLDivElement | null>(null);
 
   // Drawer state
   const [selected, setSelected] = useState<EvalData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [editScores, setEditScores] = useState<Record<string, number>>({});
   const [editComment, setEditComment] = useState('');
 
-  const criteriaLabels: Record<string, string> = {
-    quality: isVi ? 'Chất lượng công việc' : 'Quality of Work',
-    responsibility: isVi ? 'Tinh thần trách nhiệm' : 'Responsibility',
-    communication: isVi ? 'Giao tiếp & phối hợp' : 'Communication & Collab',
-    creativity: isVi ? 'Sáng tạo & đề xuất' : 'Creativity & Initiative',
-    discipline: isVi ? 'Chấp hành quy định' : 'Discipline & Compliance',
-  };
-
-  const fetchEvaluations = useCallback(async (period?: string, status?: string) => {
+  const fetchEvaluations = useCallback(async (pageNum: number = 1, isReset: boolean = true) => {
     try {
-      setLoading(true);
-      const params: any = {};
-      if (period) params.period = period;
-      if (status && status !== 'all') params.status = status;
+      if (isReset) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
+      const params: any = {
+        page: pageNum,
+        per_page: 10,
+      };
+      if (selectedPeriod) params.period = selectedPeriod;
+      if (statusFilter && statusFilter !== 'all') params.status = statusFilter;
+      
       const res = await api.getEvaluations(params);
       if (res?.success) {
-        setEvaluations(res.data || []);
+        const fetchedData = res.data || [];
+        if (isReset) {
+          setEvaluations(fetchedData);
+        } else {
+          setEvaluations(prev => {
+            const existingIds = new Set(prev.map(e => e.id));
+            const newItems = fetchedData.filter((e: any) => !existingIds.has(e.id));
+            return [...prev, ...newItems];
+          });
+        }
         setSummary(res.summary);
         setPeriods(res.periods || []);
         if (!selectedPeriod && res.current_period) {
           setSelectedPeriod(res.current_period);
+        }
+        if (res.pagination) {
+          setHasMore(res.pagination.has_more);
+        } else {
+          setHasMore(fetchedData.length === 10);
         }
       }
     } catch (err) {
       console.error('Evaluations load error:', err);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [selectedPeriod]);
+  }, [selectedPeriod, statusFilter]);
 
   useEffect(() => {
     const fetchMe = async () => {
@@ -108,8 +124,42 @@ const EvaluationsPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    fetchEvaluations(selectedPeriod, statusFilter);
-  }, [selectedPeriod, statusFilter, fetchEvaluations]);
+    setPage(1);
+    setHasMore(true);
+    fetchEvaluations(1, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPeriod, statusFilter]);
+
+  useEffect(() => {
+    if (page > 1) {
+      fetchEvaluations(page, false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+
+  // Intersection Observer for infinite scrolling
+  useEffect(() => {
+    if (!hasMore || loading || loadingMore) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        setPage(prev => prev + 1);
+      }
+    }, {
+      rootMargin: '150px',
+    });
+
+    const currentSentinel = sentinelRef.current;
+    if (currentSentinel) {
+      observer.observe(currentSentinel);
+    }
+
+    return () => {
+      if (currentSentinel) {
+        observer.unobserve(currentSentinel);
+      }
+    };
+  }, [hasMore, loading, loadingMore]);
 
   const handleGenerate = async () => {
     if (!selectedPeriod) return;
@@ -117,8 +167,10 @@ const EvaluationsPage: React.FC = () => {
       setGenerating(true);
       const res = await api.generateEvaluations(selectedPeriod);
       if (res?.success) {
-        message.success(isVi ? `Đã tạo ${res.created} đánh giá` : `Generated ${res.created} evaluations`);
-        fetchEvaluations(selectedPeriod, statusFilter);
+        message.success(t('eval.generate_success', { count: res.created }));
+        setPage(1);
+        setHasMore(true);
+        fetchEvaluations(1, true);
       }
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Error generating evaluations');
@@ -134,7 +186,6 @@ const EvaluationsPage: React.FC = () => {
       const res = await api.getEvaluation(evalItem.id);
       if (res?.success) {
         setSelected(res.data);
-        setEditScores(res.data.scores);
         setEditComment(res.data.comment || '');
       }
     } catch (err) {
@@ -149,18 +200,15 @@ const EvaluationsPage: React.FC = () => {
     try {
       setSaving(true);
       const res = await api.updateEvaluation(selected.id, {
-        score_quality: editScores.quality,
-        score_responsibility: editScores.responsibility,
-        score_communication: editScores.communication,
-        score_creativity: editScores.creativity,
-        score_discipline: editScores.discipline,
         comment: editComment,
         publish,
       });
       if (res?.success) {
         message.success(publish ? t('eval.toast.published') : t('eval.toast.draft_saved'));
         setSelected(null);
-        fetchEvaluations(selectedPeriod, statusFilter);
+        setPage(1);
+        setHasMore(true);
+        fetchEvaluations(1, true);
       }
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Error saving');
@@ -169,11 +217,7 @@ const EvaluationsPage: React.FC = () => {
     }
   };
 
-  const handleScoreChange = (key: string, value: number) => {
-    setEditScores(prev => ({ ...prev, [key]: Math.min(10, Math.max(0, value)) }));
-  };
-
-  const filtered = statusFilter === 'all' ? evaluations : evaluations.filter(e => e.status === statusFilter);
+  const filtered = evaluations;
 
   if (loading && evaluations.length === 0) {
     return (
@@ -191,9 +235,11 @@ const EvaluationsPage: React.FC = () => {
           <p>{t('eval.sub_title', { period: selectedPeriod })}</p>
         </div>
         {currentUser?.role !== 'employee' && (
-          <button className="evaluations-page__create-btn" onClick={handleGenerate} disabled={generating}>
-            <PlusOutlined /> {generating ? (isVi ? 'Đang tạo...' : 'Generating...') : t('eval.new_period')}
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button className="evaluations-page__create-btn" onClick={handleGenerate} disabled={generating}>
+              <PlusOutlined /> {generating ? t('eval.generating') : t('eval.new_period')}
+            </button>
+          </div>
         )}
       </div>
 
@@ -231,24 +277,24 @@ const EvaluationsPage: React.FC = () => {
         </div>
         {filtered.length === 0 ? (
           <div style={{ padding: '60px', textAlign: 'center' }}>
-            <Empty description={isVi ? 'Chưa có đánh giá. Nhấn "Tạo đánh giá" để bắt đầu.' : 'No evaluations yet. Click "Generate" to start.'} />
+            <Empty description={t('eval.empty')} />
           </div>
         ) : (
           filtered.map((e) => {
-            const rating = getRating(e.total_score, isVi);
+            const rating = getRating(e.total_score, t);
             return (
               <div key={e.id} className="evaluations-page__table-row" onClick={() => handleSelectEmployee(e)}>
                 <div className="evaluations-page__emp-info">
                   <div className="avatar" style={{ background: e.employee_color }}>{e.employee_avatar}</div>
                   <div className="info">
                     <div className="name">{e.employee_name}</div>
-                    <div className="dept">{e.employee_department || (isVi ? 'Nhân viên' : 'Employee')}</div>
+                    <div className="dept">{e.employee_department || t('eval.dept.employee')}</div>
                   </div>
                 </div>
                 <div className="evaluations-page__task-stat">{e.completed_tasks}<span className="sub">/{e.total_tasks}</span></div>
                 <div className={`evaluations-page__ontime ${e.on_time_rate >= 80 ? 'good' : e.on_time_rate >= 60 ? 'average' : 'poor'}`}>{e.on_time_rate}%</div>
                 <div className="evaluations-page__score" style={{ color: getBarColor(e.total_score) }}>{e.total_score}</div>
-                <div className="evaluations-page__rating"><span style={{ background: rating.bg, color: rating.color }}>{isVi ? rating.labelVi : rating.label}</span></div>
+                <div className="evaluations-page__rating"><span style={{ background: rating.bg, color: rating.color }}>{rating.emoji} {rating.label}</span></div>
                 <div className="evaluations-page__eval-status">
                   <span className={e.status}>{e.status === 'draft' ? t('eval.filter.draft') : t('eval.filter.published')}</span>
                 </div>
@@ -258,6 +304,30 @@ const EvaluationsPage: React.FC = () => {
           })
         )}
       </div>
+
+      {/* Infinite Scroll Sentinel */}
+      {hasMore && (
+        <div 
+          ref={sentinelRef} 
+          className="infinite-scroll-sentinel" 
+          style={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            padding: '24px 0', 
+            minHeight: '60px' 
+          }}
+        >
+          {loadingMore && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#6366f1' }}>
+              <Spin size="small" />
+              <span style={{ fontSize: '13px', fontWeight: 500 }}>
+                {t('eval.loading_more')}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {selected && (
         <>
@@ -310,33 +380,7 @@ const EvaluationsPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Criteria */}
-                  <div className="evaluations-page__section">
-                    <h3><StarOutlined className="icon" /> {t('eval.drawer.criteria')}</h3>
-                    {Object.entries(editScores).map(([key, val]) => (
-                      <div key={key} className="evaluations-page__criteria-item">
-                        <div className="evaluations-page__criteria-item-header">
-                          <span className="label">{criteriaLabels[key] || key}</span>
-                          {selected.status === 'draft' ? (
-                            <input
-                              type="number"
-                              min={0}
-                              max={10}
-                              value={val}
-                              onChange={(e) => handleScoreChange(key, parseFloat(e.target.value) || 0)}
-                              className="score-input"
-                              style={{ width: 50, textAlign: 'center', background: 'var(--bg-input)', border: '1px solid var(--divider)', borderRadius: 4, color: getBarColor(val), fontWeight: 600, fontSize: 13 }}
-                            />
-                          ) : (
-                            <span className="score" style={{ color: getBarColor(val) }}>{val}/10</span>
-                          )}
-                        </div>
-                        <div className="evaluations-page__criteria-item-bar">
-                          <div className="evaluations-page__criteria-item-bar-fill" style={{ width: `${val * 10}%`, background: getBarColor(val) }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+
 
                   {/* Total Score */}
                   <div className="evaluations-page__section">
@@ -344,8 +388,8 @@ const EvaluationsPage: React.FC = () => {
                     <div className="evaluations-page__total-score">
                       <div className="score">{selected.total_score}<span>/10</span></div>
                       {(() => {
-                        const r = getRating(selected.total_score, isVi);
-                        return <div className="rating" style={{ background: r.bg, color: r.color }}>{isVi ? r.labelVi : r.label}</div>;
+                        const r = getRating(selected.total_score, t);
+                        return <div className="rating" style={{ background: r.bg, color: r.color }}>{r.emoji} {r.label}</div>;
                       })()}
                     </div>
                   </div>
@@ -378,6 +422,8 @@ const EvaluationsPage: React.FC = () => {
           </div>
         </>
       )}
+
+
     </div>
   );
 };

@@ -110,6 +110,18 @@
   // ===== GROUP =====
   &__group {
     margin-bottom: 8px;
+    transition: opacity 0.2s, box-shadow 0.2s;
+
+    &.drag-active {
+      &.drop-disallowed {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      &.drop-allowed:not(.group-self) {
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        border-radius: 8px;
+      }
+    }
 
     &-header {
       @include flex-start;
@@ -163,7 +175,7 @@
   // ===== TASK ROW =====
   &__task-row {
     display: grid;
-    grid-template-columns: 32px 1fr 140px 100px 100px 80px 40px;
+    grid-template-columns: 32px 1fr 120px 100px 240px 60px 40px;
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
@@ -380,6 +392,23 @@
     h3 {
       color: $text-secondary;
       margin-bottom: 4px;
+    }
+  }
+}
+
+.project-detail {
+  .project-detail__column {
+    transition: opacity 0.2s, box-shadow 0.2s;
+
+    &.drag-active {
+      &.drop-disallowed {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      &.drop-allowed:not(.column-self) {
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        border-radius: 8px;
+      }
     }
   }
 }

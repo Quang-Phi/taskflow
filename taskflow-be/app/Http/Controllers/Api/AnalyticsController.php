@@ -19,8 +19,8 @@ class AnalyticsController extends Controller
      */
     public function data(Request $request): JsonResponse
     {
-        $user = $request->user();
-        if (!$user) {
+        $currentUser = $request->user();
+        if (!$currentUser) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized',
@@ -32,12 +32,12 @@ class AnalyticsController extends Controller
 
         // Get allowed project IDs for non-admin users
         $allowedProjectIds = [];
-        if ($user->role !== 'admin') {
+        if ($currentUser->role !== 'admin') {
             $allowedProjectIds = Project::whereNull('deleted_at')
-                ->where(function ($q) use ($user) {
-                    $q->where('created_by', $user->id)
-                      ->orWhereHas('members', function ($sub) use ($user) {
-                          $sub->where('user_id', $user->id);
+                ->where(function ($q) use ($currentUser) {
+                    $q->where('created_by', $currentUser->id)
+                      ->orWhereHas('members', function ($sub) use ($currentUser) {
+                          $sub->where('user_id', $currentUser->id);
                       });
                 })
                 ->pluck('id')
@@ -46,7 +46,7 @@ class AnalyticsController extends Controller
 
         // Base query builder (scoped to project if specified)
         $taskQuery = Task::whereNull('deleted_at');
-        if ($user->role !== 'admin') {
+        if ($currentUser->role !== 'admin') {
             if ($projectId && $projectId !== 'all') {
                 if (!in_array((int)$projectId, $allowedProjectIds)) {
                     return response()->json([
@@ -82,7 +82,7 @@ class AnalyticsController extends Controller
                 $doneCount++;
                 continue;
             }
-            if ($task->due_date !== null && Carbon::parse($task->due_date)->lt($now->copy()->startOfDay())) {
+            if ($task->due_date !== null && Carbon::parse($task->due_date)->lt($now)) {
                 $overdueCount++;
                 continue;
             }
@@ -247,7 +247,7 @@ class AnalyticsController extends Controller
         // 6. Projects list for filter dropdown
         // ──────────────────────────────────────────────
         $projectsQuery = Project::whereNull('deleted_at');
-        if ($user->role !== 'admin') {
+        if ($currentUser->role !== 'admin') {
             $projectsQuery->whereIn('id', $allowedProjectIds);
         }
         $projects = $projectsQuery->orderBy('name')->get(['id', 'name', 'color']);

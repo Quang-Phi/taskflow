@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Button, Input, Spin, message } from 'antd';
 import { CloseOutlined, SendOutlined, BulbOutlined, ThunderboltOutlined, CopyOutlined, HistoryOutlined } from '@ant-design/icons';
 import api from '../../services/api';
+import { useTranslation } from '../../utils/i18n';
 import './GlobalAiSidebar.scss';
 
 interface Message {
@@ -19,16 +20,22 @@ interface GlobalAiSidebarProps {
 const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'ai',
-      content: 'Xin chào! Tôi là Trợ lý AI toàn cầu của TaskFlow. Tôi có thể thực hiện mọi tác vụ quản trị như tạo dự án, tạo task/subtask, ghi nhận track time, phân công công việc, tìm kiếm lỗi hoặc tổng hợp dữ liệu thay bạn. Bạn muốn tôi giúp gì hôm nay?'
-    }
-  ]);
+  const { t } = useTranslation();
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
   const [actions, setActions] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Initialize welcome message with translated text
+  useEffect(() => {
+    setMessages([
+      {
+        role: 'ai',
+        content: t('ai.global.welcome' as any)
+      }
+    ]);
+  }, [t]);
 
   useEffect(() => {
     if (isOpen) {
@@ -77,11 +84,11 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
         if (response.events && response.events.length > 0) {
           response.events.forEach((ev: any) => {
             if (ev.type === 'project_created') {
-              message.success(`Đã tự động chuyển hướng đến dự án: ${ev.name || ''}`);
+              message.success(t('ai.global.event_project' as any, { name: ev.name || '' }));
               navigate(`/projects/${ev.id}`);
               window.dispatchEvent(new Event('projects-changed'));
             } else if (ev.type === 'task_created') {
-              message.success(`Đã tự động mở chi tiết công việc: ${ev.title || ''}`);
+              message.success(t('ai.global.event_task' as any, { title: ev.title || '' }));
               if (location.pathname === '/my-tasks') {
                 navigate(`/my-tasks?task_id=${ev.id}`);
               } else {
@@ -94,19 +101,18 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
           });
         }
       } else {
-        message.error(response.message || 'Lỗi xử lý yêu cầu.');
+        message.error(response.message || t('ai.global.error_process' as any));
       }
     } catch (err: any) {
       console.error(err);
-      message.error('Không thể kết nối đến máy chủ AI.');
+      message.error(t('ai.global.error_connect' as any));
     } finally {
       setLoading(false);
     }
   };
 
-  // Predefined ClickUp feature prompts
-  const runFeature = (featureTitle: string, promptText: string) => {
-    handleSendMessage(promptText);
+  const runFeature = (promptKey: string) => {
+    handleSendMessage(t(promptKey as any));
   };
 
   function renderMarkdown(text: string) {
@@ -213,7 +219,7 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
         <div className="global-ai-sidebar__header">
           <div className="header-title">
             <span className="sparkles-icon">✨</span>
-            <span className="brain-text">Brain AI Assistant</span>
+            <span className="brain-text">{t('ai.global.title' as any)}</span>
           </div>
           <button className="close-btn" onClick={onClose}>
             <CloseOutlined />
@@ -224,42 +230,42 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
         <div className="global-ai-sidebar__body">
           {messages.length === 1 && (
             <div className="welcome-screen">
-              <div className="welcome-screen__subtitle">Ask about your Workspace</div>
+              <div className="welcome-screen__subtitle">{t('ai.global.ask_workspace' as any)}</div>
               <div className="suggested-prompts">
-                <div className="prompt-chip" onClick={() => handleSendMessage('Có công việc nào quá hạn trong hệ thống không?')}>
-                  <BulbOutlined /> Có công việc nào quá hạn không?
+                <div className="prompt-chip" onClick={() => handleSendMessage(t('ai.global.prompt1_send' as any))}>
+                  <BulbOutlined /> {t('ai.global.prompt1_label' as any)}
                 </div>
-                <div className="prompt-chip" onClick={() => handleSendMessage('Những dự án nào hiện tại đang hoạt động?')}>
-                  <BulbOutlined /> Những dự án nào đang hoạt động?
+                <div className="prompt-chip" onClick={() => handleSendMessage(t('ai.global.prompt2_send' as any))}>
+                  <BulbOutlined /> {t('ai.global.prompt2_label' as any)}
                 </div>
-                <div className="prompt-chip" onClick={() => handleSendMessage('Hôm nay tôi đã log bao nhiêu thời gian?')}>
-                  <BulbOutlined /> Xem log track time hôm nay của tôi
+                <div className="prompt-chip" onClick={() => handleSendMessage(t('ai.global.prompt3_send' as any))}>
+                  <BulbOutlined /> {t('ai.global.prompt3_label' as any)}
                 </div>
               </div>
 
-              <div className="welcome-screen__subtitle">Features</div>
+              <div className="welcome-screen__subtitle">{t('ai.global.features' as any)}</div>
               <div className="features-grid">
-                <div className="feature-card" onClick={() => runFeature('Executive Summary', 'Hãy tổng hợp báo cáo tiến độ tóm tắt cho tất cả các dự án.')}>
+                <div className="feature-card" onClick={() => runFeature('ai.global.feat_summary_prompt')}>
                   <div className="feature-card__icon summary-icon"><ThunderboltOutlined /></div>
                   <div className="feature-card__content">
-                    <div className="feature-card__title">Executive Summary <span className="badge">New</span></div>
-                    <div className="feature-card__desc">Choose from 25+ reporting tools.</div>
+                    <div className="feature-card__title">{t('ai.global.feat_summary_title' as any)} <span className="badge">{t('ai.global.badge_new' as any)}</span></div>
+                    <div className="feature-card__desc">{t('ai.global.feat_summary_desc' as any)}</div>
                   </div>
                 </div>
 
-                <div className="feature-card" onClick={() => runFeature('Project Update', 'Lập kế hoạch báo cáo tiến độ hoạt động gần nhất.')}>
+                <div className="feature-card" onClick={() => runFeature('ai.global.feat_update_prompt')}>
                   <div className="feature-card__icon update-icon"><HistoryOutlined /></div>
                   <div className="feature-card__content">
-                    <div className="feature-card__title">Project Update <span className="badge">New</span></div>
-                    <div className="feature-card__desc">Time-based project status update.</div>
+                    <div className="feature-card__title">{t('ai.global.feat_update_title' as any)} <span className="badge">{t('ai.global.badge_new' as any)}</span></div>
+                    <div className="feature-card__desc">{t('ai.global.feat_update_desc' as any)}</div>
                   </div>
                 </div>
 
-                <div className="feature-card" onClick={() => runFeature('Find stuck tasks', 'Hãy tìm các task bị kẹt trong hệ thống và đưa ra đề xuất xử lý.')}>
+                <div className="feature-card" onClick={() => runFeature('ai.global.feat_stuck_prompt')}>
                   <div className="feature-card__icon stuck-icon"><CopyOutlined /></div>
                   <div className="feature-card__content">
-                    <div className="feature-card__title">Find tasks that are stuck <span className="badge">New</span></div>
-                    <div className="feature-card__desc">Quickly locate and resolve stagnant tasks.</div>
+                    <div className="feature-card__title">{t('ai.global.feat_stuck_title' as any)} <span className="badge">{t('ai.global.badge_new' as any)}</span></div>
+                    <div className="feature-card__desc">{t('ai.global.feat_stuck_desc' as any)}</div>
                   </div>
                 </div>
               </div>
@@ -272,7 +278,7 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
                 {msg.role === 'ai' ? (
                   <span className="ai-name">✨ Brain</span>
                 ) : (
-                  <span className="user-name">Bạn</span>
+                  <span className="user-name">{t('ai.global.user_label' as any)}</span>
                 )}
               </div>
               <div className="message-content">
@@ -283,7 +289,7 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
 
           {loading && (
             <div className="chat-message ai loading">
-              <span className="ai-name">✨ Brain đang suy nghĩ...</span>
+              <span className="ai-name">✨ {t('ai.global.loading' as any)}</span>
               <div className="loading-spinner">
                 <Spin size="small" />
               </div>
@@ -293,7 +299,7 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
           {/* Follow-up actions */}
           {actions.length > 0 && (
             <div className="follow-up-section">
-              <div className="follow-up-title">Follow ups</div>
+              <div className="follow-up-title">{t('ai.global.follow_ups' as any)}</div>
               <div className="follow-up-buttons">
                 {actions.map((act, i) => (
                   <button key={i} className="follow-up-btn" onClick={() => handleSendMessage(act)}>
@@ -319,7 +325,7 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
                 handleSendMessage();
               }
             }}
-            placeholder="Tell AI what to do next..."
+            placeholder={t('ai.global.placeholder' as any)}
             disabled={loading}
           />
           <div className="footer-actions">

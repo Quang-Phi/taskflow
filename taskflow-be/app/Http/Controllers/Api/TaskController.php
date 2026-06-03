@@ -17,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class TaskController extends Controller
 {
@@ -86,6 +87,7 @@ class TaskController extends Controller
             'description' => 'nullable|string',
             'status' => 'nullable|string',
             'priority' => 'nullable|in:urgent,high,medium,low',
+            'type' => 'nullable|in:task,bug',
             'assignee_id' => 'nullable|exists:users,id',
             'estimated_hours' => 'nullable|integer|min:0',
             'actual_hours' => 'nullable|integer|min:0',
@@ -155,6 +157,7 @@ class TaskController extends Controller
             'description' => $request->input('description'),
             'status' => $status,
             'priority' => $request->input('priority', 'medium'),
+            'type' => $request->input('type', 'task'),
             'assignee_id' => $request->input('assignee_id'),
             'creator_id' => $request->user()->id,
             'estimated_hours' => $est,
@@ -246,6 +249,7 @@ class TaskController extends Controller
         return response()->json([
             'success' => true,
             'data' => $task,
+            'server_time' => now()->toIso8601String(),
         ]);
     }
 
@@ -291,6 +295,7 @@ class TaskController extends Controller
             'description' => 'nullable|string',
             'status' => 'nullable|string',
             'priority' => 'nullable|in:urgent,high,medium,low',
+            'type' => 'nullable|in:task,bug',
             'assignee_id' => 'nullable|exists:users,id',
             'estimated_hours' => 'nullable|integer|min:0',
             'actual_hours' => 'nullable|integer|min:0',
@@ -319,6 +324,14 @@ class TaskController extends Controller
 
         $newStatus = $request->input('status');
 
+        // Workflow transition validation when status is changing
+        if ($request->has('status') && $newStatus !== $task->status) {
+            $workflowError = $this->checkWorkflowTransition($task, $newStatus, $user);
+            if ($workflowError) {
+                return $workflowError;
+            }
+        }
+
         $oldTitle = $task->title;
         $oldStatus = $task->status;
         $oldAssigneeId = $task->assignee_id;
@@ -334,6 +347,7 @@ class TaskController extends Controller
             'description',
             'status',
             'priority',
+            'type',
             'assignee_id',
             'estimated_hours',
             'actual_hours',
@@ -382,6 +396,63 @@ class TaskController extends Controller
             } elseif (!$newIsClosed && $oldIsClosed) {
                 $updates['completed_at'] = null;
             }
+
+            // Apply workflow post-action rules
+            $workflow = $project->workflow;
+            if (($workflow['mode'] ?? 'unrestricted') === 'restricted') {
+                $transitions = $workflow['transitions'] ?? [];
+                $globalTransitions = $workflow['global_transitions'] ?? [];
+                $matchedTransition = null;
+
+                foreach ($transitions as $t) {
+                    if (($t['from'] ?? '') === $task->status && ($t['to'] ?? '') === $newStatus) {
+                        $matchedTransition = $t;
+                        break;
+                    }
+                }
+
+                if (!$matchedTransition) {
+                    foreach ($globalTransitions as $gt) {
+                        if (($gt['to'] ?? '') === $newStatus) {
+                            $matchedTransition = $gt;
+                            break;
+                        }
+                    }
+                }
+
+                if ($matchedTransition && !empty($matchedTransition['rules'])) {
+                    foreach ($matchedTransition['rules'] as $rule) {
+                        $ruleType = $rule['type'] ?? '';
+                        if ($ruleType === 'assign_user') {
+                            if (($rule['config']['to'] ?? '') === 'current_user') {
+                                $updates['assignee_id'] = $user->id;
+                            } elseif (($rule['config']['to'] ?? '') === 'clear') {
+                                $updates['assignee_id'] = null;
+                            }
+                        } elseif ($ruleType === 'update_field') {
+                            $field = $rule['config']['field'] ?? null;
+                            $value = $rule['config']['value'] ?? null;
+                            if ($field) {
+                                if (in_array($field, ['priority', 'title', 'description'])) {
+                                    $updates[$field] = $value;
+                                } elseif ($field === 'assignee_id') {
+                                    $updates['assignee_id'] = $value && (int)$value > 0 ? (int)$value : null;
+                                } elseif ($field === 'creator_id') {
+                                    $updates['creator_id'] = $value && (int)$value > 0 ? (int)$value : null;
+                                } elseif ($field === 'start_date') {
+                                    $updates['start_date'] = $value ?: null;
+                                } elseif ($field === 'labels') {
+                                    if ($value) {
+                                        $task->labels()->sync([$value]);
+                                    } else {
+                                        $task->labels()->detach();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         $task->update($updates);
@@ -429,6 +500,26 @@ class TaskController extends Controller
         }
 
         if ($task->assignee_id !== $oldAssigneeId) {
+            // Stop any running timer for the old assignee on this task
+            if ($oldAssigneeId) {
+                $runningEntry = TimeEntry::where('task_id', $task->id)
+                    ->where('user_id', $oldAssigneeId)
+                    ->whereNull('ended_at')
+                    ->first();
+                if ($runningEntry) {
+                    $runningEntry->ended_at = now();
+                    $runningEntry->duration = abs($runningEntry->ended_at->diffInSeconds($runningEntry->started_at));
+                    $runningEntry->save();
+
+                    // Log activity
+                    $durationStr = $this->formatDuration($runningEntry->duration);
+                    $this->logActivity($task->id, $userId, 'stopped_timer', "Stopped timer due to task reassignment. Logged {$durationStr}.");
+
+                    // Broadcast update
+                    event(new TimeTrackingUpdated((int)$task->project_id, (int)$oldAssigneeId, 'stopped', $runningEntry->toArray()));
+                }
+            }
+
             $oldAssigneeName = null;
             if ($oldAssigneeId) {
                 $oldAssignee = User::find($oldAssigneeId);
@@ -600,9 +691,17 @@ class TaskController extends Controller
         $newStatus = $request->input('status');
         $newPosition = $request->input('position', 0);
 
+        // Workflow transition validation
+        if ($newStatus !== $task->status) {
+            $workflowError = $this->checkWorkflowTransition($task, $newStatus, $user);
+            if ($workflowError) {
+                return $workflowError;
+            }
+        }
+
         $oldStatus = $task->status;
 
-        DB::transaction(function () use ($task, $project, $newStatus, $newPosition) {
+        DB::transaction(function () use ($task, $project, $newStatus, $newPosition, $user) {
             // Shift positions of other tasks in the target column
             Task::where('project_id', $task->project_id)
                 ->where('status', $newStatus)
@@ -638,10 +737,69 @@ class TaskController extends Controller
                 $updates['completed_at'] = null;
             }
 
+            // Apply workflow post-action rules
+            $workflow = $project->workflow;
+            if (($workflow['mode'] ?? 'unrestricted') === 'restricted') {
+                $transitions = $workflow['transitions'] ?? [];
+                $globalTransitions = $workflow['global_transitions'] ?? [];
+                $matchedTransition = null;
+
+                foreach ($transitions as $t) {
+                    if (($t['from'] ?? '') === $task->status && ($t['to'] ?? '') === $newStatus) {
+                        $matchedTransition = $t;
+                        break;
+                    }
+                }
+
+                if (!$matchedTransition) {
+                    foreach ($globalTransitions as $gt) {
+                        if (($gt['to'] ?? '') === $newStatus) {
+                            $matchedTransition = $gt;
+                            break;
+                        }
+                    }
+                }
+
+                if ($matchedTransition && !empty($matchedTransition['rules'])) {
+                    foreach ($matchedTransition['rules'] as $rule) {
+                        $ruleType = $rule['type'] ?? '';
+                        if ($ruleType === 'assign_user') {
+                            if (($rule['config']['to'] ?? '') === 'current_user') {
+                                $updates['assignee_id'] = $user->id;
+                            } elseif (($rule['config']['to'] ?? '') === 'clear') {
+                                $updates['assignee_id'] = null;
+                            }
+                        } elseif ($ruleType === 'update_field') {
+                            $field = $rule['config']['field'] ?? null;
+                            $value = $rule['config']['value'] ?? null;
+                            if ($field) {
+                                if (in_array($field, ['priority', 'title', 'description'])) {
+                                    $updates[$field] = $value;
+                                } elseif ($field === 'assignee_id') {
+                                    $updates['assignee_id'] = $value && (int)$value > 0 ? (int)$value : null;
+                                } elseif ($field === 'creator_id') {
+                                    $updates['creator_id'] = $value && (int)$value > 0 ? (int)$value : null;
+                                } elseif ($field === 'start_date') {
+                                    $updates['start_date'] = $value ?: null;
+                                } elseif ($field === 'labels') {
+                                    if ($value) {
+                                        $task->labels()->sync([$value]);
+                                    } else {
+                                        $task->labels()->detach();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             $task->update($updates);
         });
 
-        $this->logActivity($task->id, $request->user()->id, 'updated_status', "Changed status from '{$oldStatus}' to '{$newStatus}'");
+        if ($newStatus !== $oldStatus) {
+            $this->logActivity($task->id, $request->user()->id, 'updated_status', "Changed status from '{$oldStatus}' to '{$newStatus}'");
+        }
 
         Log::info("User ID {$request->user()->id} ({$request->user()->name}) updated Task ID {$task->id} status/position to {$newStatus}/{$newPosition}");
 
@@ -690,8 +848,9 @@ class TaskController extends Controller
         if ($request->hasFile('attachment')) {
             $file = $request->file('attachment');
             $filename = time() . '_' . $file->getClientOriginalName();
-            $path = $file->storeAs('task_attachments', $filename, 'public');
-            $attachmentPath = '/storage/' . $path; // Public url link
+            $disk = config('filesystems.default', 'public');
+            $path = $file->storeAs('task_attachments', $filename, $disk);
+            $attachmentPath = $disk === 's3' ? Storage::disk('s3')->url($path) : '/storage/' . $path;
         }
 
         $comment = TaskComment::create([
@@ -828,23 +987,195 @@ class TaskController extends Controller
         return false;
     }
 
-    /**
-     * Help validate sequential transitions.
-     */
-    private function validateStatusTransition($oldStatus, $newStatus): bool
+    private function checkWorkflowTransition(Task $task, string $newStatus, $user): ?JsonResponse
     {
-        if ($oldStatus === $newStatus) {
-            return true;
+        $project = $task->project;
+        $workflow = $project->workflow;
+
+        $transitions = $workflow['transitions'] ?? [];
+        $globalTransitions = $workflow['global_transitions'] ?? [];
+
+        if (($workflow['mode'] ?? 'unrestricted') !== 'restricted' || (empty($transitions) && empty($globalTransitions))) {
+            return null; // Unrestricted mode or empty configurations allows all transitions
         }
 
-        $allowed = [
-            'todo' => ['in_progress'],
-            'in_progress' => ['review'],
-            'review' => ['done'],
-            'done' => [],
-        ];
+        $userProjectRole = DB::table('project_members')
+            ->where('project_id', $project->id)
+            ->where('user_id', $user->id)
+            ->value('role') ?? 'member';
 
-        return in_array($newStatus, $allowed[$oldStatus] ?? []);
+        $availableTransitions = $project->getAvailableTransitions(
+            $task->status,
+            $userProjectRole,
+            $user->role === 'admin',
+            $user->id
+        );
+
+        $allowedStatusIds = array_map(fn($t) => $t['to'], $availableTransitions);
+
+        $statusNames = collect($project->statuses)->pluck('name', 'id')->toArray();
+        $oldStatusName = $statusNames[$task->status] ?? $task->status;
+        $newStatusName = $statusNames[$newStatus] ?? $newStatus;
+
+        if (!in_array($newStatus, $allowedStatusIds)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Không thể chuyển trạng thái từ '{$oldStatusName}' sang '{$newStatusName}' theo quy tắc workflow của dự án.",
+                'workflow_error' => true,
+            ], 422);
+        }
+
+        // Get matched transition rules to evaluate validators
+        $transitions = $workflow['transitions'] ?? [];
+        $globalTransitions = $workflow['global_transitions'] ?? [];
+        
+        $matchedTransition = null;
+        foreach ($transitions as $t) {
+            if (($t['from'] ?? '') === $task->status && ($t['to'] ?? '') === $newStatus) {
+                $matchedTransition = $t;
+                break;
+            }
+        }
+        if (!$matchedTransition) {
+            foreach ($globalTransitions as $gt) {
+                if (($gt['to'] ?? '') === $newStatus) {
+                    $matchedTransition = $gt;
+                    break;
+                }
+            }
+        }
+
+        if ($matchedTransition && !empty($matchedTransition['rules'])) {
+            foreach ($matchedTransition['rules'] as $rule) {
+                $ruleType = $rule['type'] ?? '';
+                if ($ruleType === 'restrict_subtasks') {
+                    $requiredStatus = $rule['config']['status'] ?? 'done';
+                    // Check if all subtasks have this status
+                    $subtasksCount = Task::where('parent_task_id', $task->id)->count();
+                    if ($subtasksCount > 0) {
+                        $unfinishedCount = Task::where('parent_task_id', $task->id)
+                            ->where('status', '!=', $requiredStatus)
+                            ->count();
+                        if ($unfinishedCount > 0) {
+                            $requiredStatusName = $statusNames[$requiredStatus] ?? $requiredStatus;
+                            return response()->json([
+                                'success' => false,
+                                'message' => "Tất cả công việc con phải ở trạng thái '{$requiredStatusName}' trước khi chuyển đổi trạng thái công việc cha sang '{$newStatusName}'.",
+                                'workflow_error' => true,
+                            ], 422);
+                        }
+                    }
+                } elseif ($ruleType === 'restrict_field') {
+                    $field = $rule['config']['field'] ?? null;
+                    $value = $rule['config']['value'] ?? null;
+                    if ($field) {
+                        $isRestricted = false;
+                        if ($field === 'priority' && ($task->priority ?? '') !== $value) {
+                            $isRestricted = true;
+                        } elseif ($field === 'assignee_id') {
+                            $taskVal = $task->assignee_id ? (int)$task->assignee_id : 0;
+                            $reqVal = (int)$value;
+                            if ($taskVal !== $reqVal) {
+                                $isRestricted = true;
+                            }
+                        } elseif ($field === 'creator_id') {
+                            $taskVal = $task->creator_id ? (int)$task->creator_id : 0;
+                            $reqVal = (int)$value;
+                            if ($taskVal !== $reqVal) {
+                                $isRestricted = true;
+                            }
+                        } elseif ($field === 'title' && ($task->title ?? '') !== $value) {
+                            $isRestricted = true;
+                        } elseif ($field === 'description' && ($task->description ?? '') !== $value) {
+                            $isRestricted = true;
+                        } elseif ($field === 'start_date') {
+                            $taskDate = $task->start_date ? (is_string($task->start_date) ? substr($task->start_date, 0, 10) : $task->start_date->format('Y-m-d')) : '';
+                            $valDate = $value ? substr($value, 0, 10) : '';
+                            if ($taskDate !== $valDate) {
+                                $isRestricted = true;
+                            }
+                        } elseif ($field === 'labels') {
+                            $labelIds = $task->labels->pluck('id')->map('strval')->toArray();
+                            if (!in_array(strval($value), $labelIds)) {
+                                $isRestricted = true;
+                            }
+                        }
+                        if ($isRestricted) {
+                            $fieldLabel = [
+                                'priority' => 'Độ ưu tiên',
+                                'assignee_id' => 'Người thực hiện',
+                                'creator_id' => 'Người báo cáo',
+                                'title' => 'Tiêu đề',
+                                'description' => 'Mô tả',
+                                'start_date' => 'Ngày bắt đầu',
+                                'labels' => 'Nhãn'
+                            ][$field] ?? $field;
+
+                            // Lookup user name or label name if applicable
+                            $reqValName = $value;
+                            if ($field === 'assignee_id' || $field === 'creator_id') {
+                                if ((int)$value === 0) {
+                                    $reqValName = 'Trống (không gán)';
+                                } else {
+                                    $requiredUser = User::find($value);
+                                    $reqValName = $requiredUser ? $requiredUser->name : $value;
+                                }
+                            } elseif ($field === 'labels') {
+                                $requiredLabel = \App\Models\Label::find($value);
+                                $reqValName = $requiredLabel ? $requiredLabel->name : $value;
+                            } elseif ($field === 'priority') {
+                                $priorityLabels = [
+                                    'urgent' => 'Khẩn cấp',
+                                    'high' => 'Cao',
+                                    'medium' => 'Trung bình',
+                                    'low' => 'Thấp',
+                                ];
+                                $reqValName = $priorityLabels[$value] ?? $value;
+                            }
+
+                            return response()->json([
+                                'success' => false,
+                                'message' => "Trường '{$fieldLabel}' phải được thiết lập là '{$reqValName}' trước khi chuyển đổi sang trạng thái '{$newStatusName}'.",
+                                'workflow_error' => true,
+                            ], 422);
+                        }
+                    }
+                } elseif ($ruleType === 'restrict_role') {
+                    $type = $rule['config']['type'] ?? 'manager';
+                    $userIds = $rule['config']['userIds'] ?? [];
+                    
+                    $isAllowed = false;
+                    if ($user->role === 'admin' || (int)$project->created_by === (int)$user->id) {
+                        $isAllowed = true;
+                    } elseif ($type === 'manager') {
+                        $isAllowed = ($userProjectRole === 'manager');
+                    } elseif ($type === 'all') {
+                        $isAllowed = true;
+                    } elseif ($type === 'flexible') {
+                        $isAllowed = in_array((int)$user->id, array_map('intval', $userIds));
+                    }
+                    
+                    if (!$isAllowed) {
+                        $roleText = '';
+                        if ($type === 'manager') {
+                            $roleText = "chỉ dành cho Quản lý dự án (Manager)";
+                        } elseif ($type === 'flexible') {
+                            $allowedUsers = User::whereIn('id', $userIds)->pluck('name')->toArray();
+                            $roleText = "chỉ dành cho các thành viên: " . implode(', ', $allowedUsers);
+                        } else {
+                            $roleText = "bị hạn chế quyền hạn";
+                        }
+                        return response()->json([
+                            'success' => false,
+                            'message' => "Bạn không có quyền thực hiện chuyển đổi này (yêu cầu: {$roleText}).",
+                            'workflow_error' => true,
+                        ], 422);
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -967,6 +1298,14 @@ class TaskController extends Controller
         // Get updated reactions
         $reactions = $comment->reactions()->get();
 
+        if ($task) {
+            event(new TaskUpdated((int)$task->project_id, 'comment_reacted', [
+                'task_id' => (int)$task->id,
+                'comment_id' => (int)$comment->id,
+                'reactions' => $reactions->toArray()
+            ]));
+        }
+
         return response()->json([
             'success' => true,
             'message' => $message,
@@ -1035,6 +1374,35 @@ class TaskController extends Controller
         }
 
         $user = $request->user();
+        $project = $task->project;
+        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to track time on this task',
+            ], 403);
+        }
+
+        if (!$task->assignee_id) {
+            $lang = $request->header('X-Language', 'vi');
+            $msg = $lang === 'en'
+                ? 'Cannot track time on an unassigned task. Please assign the task first.'
+                : 'Không thể ghi nhận thời gian cho công việc chưa được gán cho ai. Vui lòng gán công việc trước.';
+            return response()->json([
+                'success' => false,
+                'message' => $msg,
+            ], 400);
+        }
+
+        if ((int)$task->assignee_id !== (int)$user->id) {
+            $lang = $request->header('X-Language', 'vi');
+            $msg = $lang === 'en'
+                ? 'You can only track time on tasks assigned to you.'
+                : 'Bạn chỉ có thể ghi nhận thời gian trên công việc được gán cho chính bạn.';
+            return response()->json([
+                'success' => false,
+                'message' => $msg,
+            ], 403);
+        }
 
         // Check if user already has a running timer on this task
         $running = TimeEntry::where('task_id', $id)
@@ -1084,6 +1452,7 @@ class TaskController extends Controller
         return response()->json([
             'success' => true,
             'data' => $entry,
+            'server_time' => now()->toIso8601String(),
         ]);
     }
 
@@ -1092,7 +1461,23 @@ class TaskController extends Controller
      */
     public function stopTimer(Request $request, $id): JsonResponse
     {
+        $task = Task::find($id);
+        if (!$task) {
+            return response()->json(['success' => false, 'message' => 'Task not found'], 404);
+        }
+
         $user = $request->user();
+
+        if ((int)$task->assignee_id !== (int)$user->id) {
+            $lang = $request->header('X-Language', 'vi');
+            $msg = $lang === 'en'
+                ? 'You can only stop timers on tasks assigned to you.'
+                : 'Bạn chỉ có thể dừng đếm giờ trên công việc được gán cho chính bạn.';
+            return response()->json([
+                'success' => false,
+                'message' => $msg,
+            ], 403);
+        }
 
         $entry = TimeEntry::where('task_id', $id)
             ->where('user_id', $user->id)
@@ -1122,6 +1507,7 @@ class TaskController extends Controller
         return response()->json([
             'success' => true,
             'data' => $entry,
+            'server_time' => now()->toIso8601String(),
         ]);
     }
 
@@ -1135,13 +1521,42 @@ class TaskController extends Controller
             return response()->json(['success' => false, 'message' => 'Task not found'], 404);
         }
 
+        $user = $request->user();
+        $project = $task->project;
+        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to track time on this task',
+            ], 403);
+        }
+
+        if (!$task->assignee_id) {
+            $lang = $request->header('X-Language', 'vi');
+            $msg = $lang === 'en'
+                ? 'Cannot track time on an unassigned task. Please assign the task first.'
+                : 'Không thể ghi nhận thời gian cho công việc chưa được gán cho ai. Vui lòng gán công việc trước.';
+            return response()->json([
+                'success' => false,
+                'message' => $msg,
+            ], 400);
+        }
+
+        if ((int)$task->assignee_id !== (int)$user->id) {
+            $lang = $request->header('X-Language', 'vi');
+            $msg = $lang === 'en'
+                ? 'You can only track time on tasks assigned to you.'
+                : 'Bạn chỉ có thể ghi nhận thời gian trên công việc được gán cho chính bạn.';
+            return response()->json([
+                'success' => false,
+                'message' => $msg,
+            ], 403);
+        }
+
         $request->validate([
             'duration' => 'required|integer|min:1', // seconds
             'description' => 'nullable|string|max:500',
             'started_at' => 'nullable|date',
         ]);
-
-        $user = $request->user();
         $startedAt = $request->input('started_at') ? new \Carbon\Carbon($request->input('started_at')) : now();
         $duration = $request->input('duration');
 
@@ -1164,6 +1579,7 @@ class TaskController extends Controller
         return response()->json([
             'success' => true,
             'data' => $entry,
+            'server_time' => now()->toIso8601String(),
         ]);
     }
 
@@ -1188,7 +1604,10 @@ class TaskController extends Controller
 
         $this->logActivity($taskId, $user->id, 'deleted_time', "Deleted time log {$durationStr}.");
 
-        return response()->json(['success' => true]);
+        return response()->json([
+            'success' => true,
+            'server_time' => now()->toIso8601String(),
+        ]);
     }
 
     /**
@@ -1205,6 +1624,7 @@ class TaskController extends Controller
         return response()->json([
             'success' => true,
             'data' => $running,
+            'server_time' => now()->toIso8601String(),
         ]);
     }
 

@@ -1,0 +1,219 @@
+@import '../../styles/variables';
+
+// ===== MANUAL LOG MODAL =====
+// This component is shared across pages; uses CSS variables for theme compatibility
+.timesheet-manual-log-modal {
+  .ant-modal-content {
+    background: var(--bg-modal) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 16px !important;
+    box-shadow: var(--shadow-lg) !important;
+  }
+
+  .ant-modal-header {
+    background: transparent !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    padding-bottom: 16px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .ant-modal-title {
+    color: var(--text-primary) !important;
+  }
+
+  .log-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+
+    span {
+      color: var(--text-primary);
+      -webkit-text-fill-color: unset;
+    }
+
+    .anticon {
+      color: $primary;
+      -webkit-text-fill-color: unset;
+    }
+  }
+
+  .manual-log-form {
+    padding: 8px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+
+    .form-item {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+
+      label {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        letter-spacing: -0.01em;
+      }
+
+      .locked-task-display {
+        padding: 10px 12px;
+        background: var(--bg-card-hover);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-weight: 500;
+        font-size: 13px;
+      }
+
+      // Overrides for Ant Design Select, DatePicker, InputNumber inside this modal
+      .ant-select-selector,
+      .ant-picker,
+      .ant-input,
+      .ant-input-number,
+      .ant-input-number-group-wrapper {
+        background: var(--bg-input) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 8px !important;
+        color: var(--text-primary) !important;
+        font-weight: 500;
+        transition: all 0.25s ease;
+
+        &:hover, &:focus, &-focused {
+          border-color: $primary !important;
+          box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+        }
+
+        .ant-select-selection-item,
+        .ant-picker-input > input,
+        .ant-input-number-input {
+          color: var(--text-primary) !important;
+          font-weight: 500 !important;
+        }
+
+        .ant-select-selection-placeholder,
+        .ant-picker-placeholder {
+          color: var(--text-muted) !important;
+        }
+      }
+
+      // Dropdown style override
+      .ant-select-dropdown {
+        background: var(--bg-dropdown) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 8px !important;
+        box-shadow: var(--shadow-dropdown) !important;
+      }
+
+      &.row-group {
+        display: flex;
+        flex-direction: row;
+        gap: 16px;
+
+        .sub-item {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+      }
+
+      &.duration-group {
+        .duration-inputs {
+          display: flex;
+          gap: 16px;
+
+          .input-group-new {
+            flex: 1;
+            max-width: 160px;
+
+            .ant-input-number-group-wrapper {
+              width: 100%;
+            }
+
+            .ant-input-number-group-addon {
+              background: var(--bg-card-hover) !important;
+              border: 1px solid var(--border-color) !important;
+              border-left: none !important;
+              border-radius: 0 8px 8px 0 !important;
+              color: var(--text-secondary);
+              font-size: 12px;
+              font-weight: 500;
+              padding: 0 12px;
+            }
+
+            .ant-input-number {
+              border-radius: 8px 0 0 8px !important;
+            }
+          }
+        }
+      }
+
+      .modal-form-textarea {
+        background: var(--bg-input) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 8px !important;
+        color: var(--text-primary) !important;
+        padding: 10px 12px;
+        outline: none;
+        font-family: inherit;
+        resize: none;
+        transition: all 0.25s ease;
+
+        &:hover, &:focus {
+          border-color: $primary !important;
+          box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+        }
+      }
+    }
+  }
+
+  .ant-modal-footer {
+    border-top: 1px solid var(--border-color) !important;
+    padding-top: 16px !important;
+    margin-top: 16px !important;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+
+    .ant-btn {
+      height: 38px;
+      border-radius: 8px;
+      font-weight: 600;
+      padding: 0 20px;
+      transition: all 0.2s ease;
+
+      &.ant-btn-default {
+        background: var(--bg-card-hover) !important;
+        border: 1px solid var(--border-color) !important;
+        color: var(--text-secondary) !important;
+
+        &:hover {
+          border-color: $primary !important;
+          color: $primary !important;
+          background: var(--primary-bg) !important;
+        }
+      }
+
+      &.ant-btn-primary {
+        background: $primary !important;
+        border: none !important;
+        color: #fff !important;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+
+        &:hover {
+          background: $primary-dark !important;
+          box-shadow: 0 4px 16px rgba(99, 102, 241, 0.45) !important;
+          transform: translateY(-1px);
+        }
+
+        &:active {
+          transform: translateY(0);
+        }
+      }
+    }
+  }
+}

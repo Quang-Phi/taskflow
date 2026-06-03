@@ -2,13 +2,16 @@
 @import 'variables';
 @import 'mixins';
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   height: 100%;
   font-family: $font-family;
   font-size: $font-size-base;
@@ -25,18 +28,31 @@ html, body {
 a {
   color: $primary-light;
   text-decoration: none;
+
   &:hover {
     color: $primary;
   }
 }
 
 // ===== ANT DESIGN DARK OVERRIDES =====
-.ant-btn-primary {
+.ant-btn-primary:not(.ant-btn-dangerous) {
   background: $primary !important;
   border-color: $primary !important;
+
   &:hover {
     background: $primary-dark !important;
     border-color: $primary-dark !important;
+  }
+}
+
+.ant-btn-primary.ant-btn-dangerous {
+  background: #ff4d4f !important;
+  border-color: #ff4d4f !important;
+  color: #fff !important;
+
+  &:hover {
+    background: #ff7875 !important;
+    border-color: #ff7875 !important;
   }
 }
 
@@ -46,7 +62,9 @@ a {
   background: $bg-input !important;
   border-color: $border-color !important;
   color: $text-primary !important;
-  &:hover, &:focus {
+
+  &:hover,
+  &:focus {
     border-color: $primary !important;
   }
 }
@@ -67,7 +85,8 @@ a {
 
 .ant-table {
   background: transparent !important;
-  .ant-table-thead > tr > th {
+
+  .ant-table-thead>tr>th {
     background: $bg-card !important;
     color: $text-secondary !important;
     border-bottom-color: $border-color !important;
@@ -76,11 +95,13 @@ a {
     letter-spacing: 0.5px;
     font-weight: 600;
   }
-  .ant-table-tbody > tr > td {
+
+  .ant-table-tbody>tr>td {
     border-bottom-color: $border-color !important;
     color: $text-primary;
   }
-  .ant-table-tbody > tr:hover > td {
+
+  .ant-table-tbody>tr:hover>td {
     background: $bg-card-hover !important;
   }
 }
@@ -89,8 +110,10 @@ a {
   background: $bg-dropdown !important;
   border: 1px solid $border-color;
   box-shadow: $shadow-dropdown;
+
   .ant-dropdown-menu-item {
     color: $text-primary !important;
+
     &:hover {
       background: $bg-card-hover !important;
     }
@@ -102,9 +125,224 @@ a {
 }
 
 // ===== UTILITY CLASSES =====
-.text-primary { color: $text-primary; }
-.text-secondary { color: $text-secondary; }
-.text-muted { color: $text-muted; }
-.text-success { color: $success; }
-.text-danger { color: $danger; }
-.text-warning { color: $warning; }
+.text-primary {
+  color: $text-primary;
+}
+
+.text-secondary {
+  color: $text-secondary;
+}
+
+.text-muted {
+  color: $text-muted;
+}
+
+.text-success {
+  color: $success;
+}
+
+.text-danger {
+  color: $danger;
+}
+
+.text-warning {
+  color: $warning;
+}
+
+// ===== REDESIGNED MANUAL TIME POPOVER (GLASSMORPHIC & SLEEK) =====
+.manual-time-popover {
+  .ant-popover-inner {
+    background: rgba(30, 32, 48, 0.85) !important;
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
+    border-radius: 12px !important;
+    padding: 12px !important;
+  }
+
+  .ant-popover-arrow-content {
+    background: rgba(30, 32, 48, 0.85) !important;
+  }
+}
+
+// Light theme adjustment for popover
+html[data-theme="light"] {
+  .manual-time-popover {
+    .ant-popover-inner {
+      background: rgba(255, 255, 255, 0.85) !important;
+      border: 1px solid rgba(0, 0, 0, 0.06) !important;
+      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08) !important;
+    }
+
+    .ant-popover-arrow-content {
+      background: rgba(255, 255, 255, 0.85) !important;
+    }
+  }
+}
+
+.manual-time-container {
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: $font-family;
+
+  .manual-time-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: $text-primary;
+    margin-bottom: 2px;
+
+    .header-icon {
+      color: $primary;
+      font-size: 15px;
+    }
+  }
+
+  .manual-time-section {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: $text-secondary;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  }
+
+  .manual-time-duration-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .manual-time-duration-card {
+    background: rgba(120, 120, 120, 0.08);
+    border: 1px solid $border-color;
+    border-radius: 6px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all $transition-fast;
+
+    &:hover,
+    &:focus-within {
+      border-color: $primary;
+      background: rgba(99, 102, 241, 0.05);
+    }
+
+    input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-size: 15px;
+      font-weight: 600;
+      color: $text-primary;
+      text-align: center;
+      padding: 0;
+
+      &::placeholder {
+        color: $text-muted;
+      }
+
+      /* Disable spinner */
+      &::-webkit-outer-spin-button,
+      &::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      &[type=number] {
+        -moz-appearance: textfield;
+      }
+    }
+
+    .duration-unit {
+      font-size: 12px;
+      font-weight: 500;
+      color: $text-muted;
+      margin-left: 4px;
+    }
+  }
+
+  .manual-time-datepicker {
+    width: 100%;
+
+    .ant-picker {
+      width: 100%;
+      border-radius: 6px !important;
+      padding: 5px 11px !important;
+    }
+  }
+
+  .manual-time-textarea {
+    border-radius: 6px !important;
+    background: rgba(120, 120, 120, 0.04) !important;
+    border: 1px solid $border-color !important;
+    color: $text-primary !important;
+    transition: all $transition-fast !important;
+
+    &:hover,
+    &:focus {
+      border-color: $primary !important;
+      background: rgba(99, 102, 241, 0.02) !important;
+      box-shadow: none !important;
+    }
+  }
+
+  .manual-time-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+
+    .btn-cancel {
+      border-radius: 6px;
+      font-size: 12px;
+      height: 28px;
+      padding: 2px 10px;
+      color: $text-secondary;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: all $transition-fast;
+
+      &:hover {
+        color: $text-primary;
+        background: rgba(255, 255, 255, 0.05);
+      }
+    }
+
+    .btn-save {
+      border-radius: 6px;
+      font-size: 12px;
+      height: 28px;
+      padding: 2px 14px;
+      font-weight: 500;
+      border: none;
+      background: linear-gradient(135deg, $primary 0%, $primary-dark 100%) !important;
+      color: $text-white !important;
+      box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3);
+      cursor: pointer;
+      transition: all $transition-fast;
+
+      &:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 14px rgba(99, 102, 241, 0.4);
+      }
+
+      &:active {
+        transform: translateY(0);
+      }
+    }
+  }
+}

@@ -204,4 +204,87 @@ class BitrixService
 
         return $allDepts;
     }
+
+    /**
+     * Fetch all users and departments from Bitrix and sync/upsert them into local users table.
+     */
+    public function syncUsers(): array
+    {
+        // 1. Fetch from Bitrix
+        $users = \Illuminate\Support\Facades\Cache::remember('bitrix_users_all', 1800, function () {
+            return $this->getUsers();
+        });
+
+        $departments = $this->getDepartments();
+
+        // 2. Fetch local users
+        $bitrixIds = array_filter(array_map(fn($u) => $u['ID'] ?? null, $users));
+        $localUsers = User::whereIn('id', $bitrixIds)->get()->keyBy('id');
+
+        $syncedUsers = [];
+
+        foreach ($users as $user) {
+            $bitrixId = $user['ID'] ?? null;
+            if (!$bitrixId) continue;
+
+            $localUser = $localUsers->get($bitrixId);
+            $deptIds = $user['UF_DEPARTMENT'] ?? [];
+
+            // Determine role dynamically based on Bitrix department heads
+            $role = 'employee';
+            if ((int)$bitrixId === 632) {
+                $role = 'admin';
+            } else if ($localUser && $localUser->role === 'admin') {
+                $role = 'admin';
+            } else {
+                foreach ($departments as $dept) {
+                    $headId = $dept['UF_HEAD'] ?? null;
+                    if ($headId && (int)$headId === (int)$bitrixId) {
+                        $role = 'manager';
+                        break;
+                    }
+                }
+            }
+
+            $isActive = in_array($user['ACTIVE'] ?? 'Y', ['Y', 1, '1', true], true);
+            if ($localUser) {
+                $needsSave = false;
+                if ($localUser->role !== $role) {
+                    $localUser->role = $role;
+                    $needsSave = true;
+                }
+                if ($localUser->department_ids !== $deptIds) {
+                    $localUser->department_ids = $deptIds;
+                    $needsSave = true;
+                }
+                if ($localUser->active !== $isActive) {
+                    $localUser->active = $isActive;
+                    $needsSave = true;
+                }
+                if ($needsSave) {
+                    $localUser->save();
+                }
+                $syncedUsers[] = $localUser;
+            } else {
+                $newUser = User::create([
+                    'id' => $bitrixId,
+                    'bitrix_id' => $bitrixId,
+                    'name' => trim(($user['LAST_NAME'] ?? '') . ' ' . ($user['NAME'] ?? '')),
+                    'first_name' => $user['NAME'] ?? '',
+                    'last_name' => $user['LAST_NAME'] ?? '',
+                    'email' => $user['EMAIL'] ?? '',
+                    'phone' => $user['PERSONAL_MOBILE'] ?? $user['PERSONAL_PHONE'] ?? '',
+                    'photo' => $user['PERSONAL_PHOTO'] ?? null,
+                    'department_ids' => $deptIds,
+                    'active' => $isActive,
+                    'work_position' => $user['WORK_POSITION'] ?? '',
+                    'role' => $role,
+                ]);
+                $syncedUsers[] = $newUser;
+            }
+        }
+
+        return $syncedUsers;
+    }
 }
+

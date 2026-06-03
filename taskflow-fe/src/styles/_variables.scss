@@ -20,7 +20,7 @@
   --bg-header: #1a1c27;
   --bg-card: #1e2030;
   --bg-card-hover: #252840;
-  --bg-input: #252840;
+  --bg-input: transparent;
   --bg-dropdown: #1e2030;
   --bg-modal: #1e2030;
   --bg-tooltip: #2a2d42;
@@ -34,7 +34,11 @@
   --text-tertiary: #6b7084;
   --text-muted: #505468;
   --text-white: #ffffff;
-  
+
+  --transition-normal: #475569;
+  --transition-hover: #cbd5e1;
+  --transition-selected: #3b82f6;
+
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -61,6 +65,10 @@ html[data-theme="light"] {
   --text-tertiary: #64748b;
   --text-muted: #94a3b8;
   --text-white: #0f172a;
+
+  --transition-normal: #cbd5e1;
+  --transition-hover: #1e293b;
+  --transition-selected: #3b82f6;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);

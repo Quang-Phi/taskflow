@@ -84,10 +84,13 @@ class ProjectController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'color' => 'nullable|string|max:7',
+            'icon' => 'nullable|string',
             'priority' => 'nullable|in:low,medium,high',
             'status' => 'nullable|in:planning,active,completed,on_hold',
             'start_date' => 'nullable|date',
             'end_date' => 'nullable|date',
+            'member_ids' => 'nullable|array',
+            'member_ids.*' => 'integer',
         ]);
 
         $user = $request->user();
@@ -97,6 +100,7 @@ class ProjectController extends Controller
                 'name' => $request->input('name'),
                 'description' => $request->input('description'),
                 'color' => $request->input('color', '#6366f1'),
+                'icon' => $request->input('icon'),
                 'priority' => $request->input('priority', 'medium'),
                 'status' => $request->input('status', 'active'),
                 'start_date' => $request->input('start_date'),
@@ -109,6 +113,21 @@ class ProjectController extends Controller
                 'role' => 'manager',
                 'joined_at' => now(),
             ]);
+
+            // Add other selected members
+            if ($request->has('member_ids')) {
+                $memberIds = array_diff(array_map('intval', (array) $request->input('member_ids')), [$user->id]);
+                if (!empty($memberIds)) {
+                    $syncData = [];
+                    foreach ($memberIds as $mId) {
+                        $syncData[$mId] = [
+                            'role' => 'member',
+                            'joined_at' => now(),
+                        ];
+                    }
+                    $proj->members()->attach($syncData);
+                }
+            }
 
             Log::info("User ID {$user->id} ({$user->name}) created Project ID {$proj->id} ({$proj->name})");
 
@@ -148,6 +167,7 @@ class ProjectController extends Controller
         return response()->json([
             'success' => true,
             'data' => $project,
+            'server_time' => now()->toIso8601String(),
         ]);
     }
 
@@ -183,6 +203,7 @@ class ProjectController extends Controller
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'color' => 'nullable|string|max:7',
+            'icon' => 'nullable|string',
             'priority' => 'nullable|in:low,medium,high',
             'status' => 'nullable|in:planning,active,completed,on_hold',
             'start_date' => 'nullable|date',
@@ -193,6 +214,7 @@ class ProjectController extends Controller
             'name',
             'description',
             'color',
+            'icon',
             'priority',
             'status',
             'start_date',
@@ -623,4 +645,241 @@ class ProjectController extends Controller
             'data' => $timeEntries,
         ]);
     }
+
+    /**
+     * GET /api/projects/{id}/workflow
+     * Returns the project's workflow configuration with available status list.
+     */
+    public function getWorkflow(Request $request, $id): JsonResponse
+    {
+        $project = Project::find($id);
+
+        if (!$project) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Project not found',
+            ], 404);
+        }
+
+        $user = $request->user();
+        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized access to this project',
+            ], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'workflow' => $project->workflow,
+                'statuses' => $project->statuses,
+            ],
+        ]);
+    }
+
+    /**
+     * PUT /api/projects/{id}/workflow
+     * Validates and saves the project's workflow configuration.
+     * Only manager/admin/creator can update.
+     */
+    public function updateWorkflow(Request $request, $id): JsonResponse
+    {
+        $project = Project::find($id);
+
+        if (!$project) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Project not found',
+            ], 404);
+        }
+
+        $user = $request->user();
+        $isProjectManager = $project->members()
+            ->where('user_id', $user->id)
+            ->where('project_members.role', 'manager')
+            ->exists();
+
+        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$isProjectManager) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to update project workflow',
+            ], 403);
+        }
+
+        $request->validate([
+            'mode' => 'required|string|in:unrestricted,restricted',
+            'transitions' => 'present|array',
+            'transitions.*.id' => 'required|string',
+            'transitions.*.name' => 'nullable|string',
+            'transitions.*.from' => 'required|string',
+            'transitions.*.to' => 'required|string',
+            'transitions.*.allowed_roles' => 'nullable|array',
+            'transitions.*.rules' => 'nullable|array',
+            'global_transitions' => 'present|array',
+            'global_transitions.*.id' => 'required|string',
+            'global_transitions.*.name' => 'nullable|string',
+            'global_transitions.*.to' => 'required|string',
+            'global_transitions.*.allowed_roles' => 'nullable|array',
+            'global_transitions.*.rules' => 'nullable|array',
+            'node_positions' => 'nullable|array',
+        ]);
+
+        // Validate that all from/to status IDs exist in project statuses
+        $projectStatusIds = array_column($project->statuses, 'id');
+        $invalidStatuses = [];
+
+        foreach ($request->input('transitions', []) as $transition) {
+            if (!in_array($transition['from'], $projectStatusIds)) {
+                $invalidStatuses[] = $transition['from'];
+            }
+            if (!in_array($transition['to'], $projectStatusIds)) {
+                $invalidStatuses[] = $transition['to'];
+            }
+        }
+
+        foreach ($request->input('global_transitions', []) as $globalTransition) {
+            if (!in_array($globalTransition['to'], $projectStatusIds)) {
+                $invalidStatuses[] = $globalTransition['to'];
+            }
+        }
+
+        if (!empty($invalidStatuses)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Some status IDs in transitions do not exist in the project statuses',
+                'invalid_statuses' => array_values(array_unique($invalidStatuses)),
+            ], 422);
+        }
+
+        $wfModel = $project->workflow()->firstOrCreate([], [
+            'mode' => $request->input('mode'),
+        ]);
+        $wfModel->update(['mode' => $request->input('mode')]);
+
+        DB::transaction(function () use ($request, $wfModel) {
+            // Delete old transitions and rules
+            $transitionIds = $wfModel->transitionsRelation()->pluck('id')->toArray();
+            \App\Models\WorkflowTransitionRule::whereIn('workflow_transition_id', $transitionIds)->delete();
+            $wfModel->transitionsRelation()->delete();
+
+            // Insert new regular transitions
+            foreach ($request->input('transitions', []) as $t) {
+                $createdTransition = $wfModel->transitionsRelation()->create([
+                    'transition_key' => $t['id'],
+                    'name' => $t['name'] ?? null,
+                    'from' => $t['from'],
+                    'to' => $t['to'],
+                    'allowed_roles' => $t['allowed_roles'] ?? [],
+                    'is_global' => false,
+                ]);
+
+                foreach ($t['rules'] ?? [] as $r) {
+                    $createdTransition->rulesRelation()->create([
+                        'type' => $r['type'],
+                        'config' => $r['config'] ?? [],
+                    ]);
+                }
+            }
+
+            // Insert new global transitions
+            foreach ($request->input('global_transitions', []) as $gt) {
+                $createdTransition = $wfModel->transitionsRelation()->create([
+                    'transition_key' => $gt['id'],
+                    'name' => $gt['name'] ?? null,
+                    'from' => null,
+                    'to' => $gt['to'],
+                    'allowed_roles' => $gt['allowed_roles'] ?? [],
+                    'is_global' => true,
+                ]);
+
+                foreach ($gt['rules'] ?? [] as $r) {
+                    $createdTransition->rulesRelation()->create([
+                        'type' => $r['type'],
+                        'config' => $r['config'] ?? [],
+                    ]);
+                }
+            }
+
+            // Save node positions
+            $wfModel->nodePositionsRelation()->delete();
+            foreach ($request->input('node_positions', []) as $statusId => $pos) {
+                $wfModel->nodePositionsRelation()->create([
+                    'status_id' => $statusId,
+                    'x' => $pos['x'] ?? 0,
+                    'y' => $pos['y'] ?? 0,
+                ]);
+            }
+        });
+
+        $project->load('workflow');
+
+        Log::info("User ID {$user->id} ({$user->name}) updated workflow for Project ID {$project->id}");
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Workflow updated successfully',
+            'data' => [
+                'workflow' => $project->workflow,
+                'statuses' => $project->statuses,
+            ],
+        ]);
+    }
+
+    /**
+     * GET /api/projects/{id}/transitions/{statusId}
+     * Returns list of allowed transitions from the given status for the current user.
+     * Used by frontend to know which columns to highlight during drag.
+     */
+    public function getAvailableTransitions(Request $request, $id, $statusId): JsonResponse
+    {
+        $project = Project::find($id);
+
+        if (!$project) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Project not found',
+            ], 404);
+        }
+
+        $user = $request->user();
+        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized access to this project',
+            ], 403);
+        }
+
+        // Validate that the statusId exists in project statuses
+        $projectStatusIds = array_column($project->statuses, 'id');
+        if (!in_array($statusId, $projectStatusIds)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Status not found in project',
+            ], 404);
+        }
+
+        $userProjectRole = DB::table('project_members')
+            ->where('project_id', $project->id)
+            ->where('user_id', $user->id)
+            ->value('role') ?? 'member';
+
+        $transitions = $project->getAvailableTransitions(
+            $statusId,
+            $userProjectRole,
+            $user->role === 'admin',
+            $user->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'from_status' => $statusId,
+                'transitions' => $transitions,
+                'allowed_status_ids' => array_values(array_unique(array_map(fn($t) => $t['to'], $transitions))),
+                'workflow_mode' => $project->workflow['mode'] ?? 'unrestricted',
+            ],
+        ]);
+    }
 }
+
