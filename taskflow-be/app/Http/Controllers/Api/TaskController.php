@@ -113,16 +113,25 @@ class TaskController extends Controller
         }
 
         $projectStatuses = $project->statuses;
-        $defaultStatusId = $projectStatuses[0]['id'] ?? 'todo';
-        $status = $request->input('status', $defaultStatusId);
+
+        // Workflow initial_status always wins for new tasks.
+        // If the workflow defines a starting point, ignore whatever status the FE sends.
+        $workflowInitialStatus = $project->workflow()->value('initial_status');
+        $firstStatusId = $projectStatuses[0]['id'] ?? 'todo';
+
+        if ($workflowInitialStatus) {
+            // Enforce workflow start status — FE has no say
+            $status = $workflowInitialStatus;
+        } else {
+            // No workflow rule — use whatever FE sent, fallback to first status
+            $status = $request->input('status', $firstStatusId);
+        }
 
         // Validate status exists in project
         $validStatusIds = array_column($projectStatuses, 'id');
-        if (!in_array($status, $validStatusIds) && $status !== $defaultStatusId) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Trạng thái không hợp lệ.',
-            ], 422);
+        if (!in_array($status, $validStatusIds)) {
+            // Fallback gracefully if initial_status is stale/invalid
+            $status = $firstStatusId;
         }
 
         // Determine position for new task
@@ -591,7 +600,32 @@ class TaskController extends Controller
 
         Log::info("User ID {$userId} ({$request->user()->name}) updated Task ID {$task->id} ({$task->title})");
 
-        event(new TaskUpdated((int)$task->project_id, 'updated', $task->toArray()));
+        $broadcastPayload = [
+            'id'           => (int) $task->id,
+            'project_id'   => (int) $task->project_id,
+            'title'        => $task->title,
+            'status'       => $task->status,
+            'priority'     => $task->priority,
+            'type'         => $task->type,
+            'assignee_id'  => $task->assignee_id,
+            'creator_id'   => $task->creator_id,
+            'start_date'   => $task->start_date,
+            'due_date'     => $task->due_date,
+            'completed_at' => $task->completed_at,
+            'position'     => $task->position,
+            'watcher_ids'  => $task->watcher_ids,
+            'assignee'     => $task->assignee ? [
+                'id'    => $task->assignee->id,
+                'name'  => $task->assignee->name,
+                'photo' => $task->assignee->photo,
+            ] : null,
+            'creator'      => $task->creator ? [
+                'id'    => $task->creator->id,
+                'name'  => $task->creator->name,
+                'photo' => $task->creator->photo,
+            ] : null,
+        ];
+        event(new TaskUpdated((int)$task->project_id, 'updated', $broadcastPayload));
 
         return response()->json([
             'success' => true,
@@ -804,7 +838,32 @@ class TaskController extends Controller
         Log::info("User ID {$request->user()->id} ({$request->user()->name}) updated Task ID {$task->id} status/position to {$newStatus}/{$newPosition}");
 
         $loadedTask = $task->load(['assignee', 'creator', 'labels']);
-        event(new TaskUpdated((int)$task->project_id, 'updated', $loadedTask->toArray()));
+        $broadcastPayload = [
+            'id'           => (int) $loadedTask->id,
+            'project_id'   => (int) $loadedTask->project_id,
+            'title'        => $loadedTask->title,
+            'status'       => $loadedTask->status,
+            'priority'     => $loadedTask->priority,
+            'type'         => $loadedTask->type,
+            'assignee_id'  => $loadedTask->assignee_id,
+            'creator_id'   => $loadedTask->creator_id,
+            'start_date'   => $loadedTask->start_date,
+            'due_date'     => $loadedTask->due_date,
+            'completed_at' => $loadedTask->completed_at,
+            'position'     => $loadedTask->position,
+            'watcher_ids'  => $loadedTask->watcher_ids,
+            'assignee'     => $loadedTask->assignee ? [
+                'id'    => $loadedTask->assignee->id,
+                'name'  => $loadedTask->assignee->name,
+                'photo' => $loadedTask->assignee->photo,
+            ] : null,
+            'creator'      => $loadedTask->creator ? [
+                'id'    => $loadedTask->creator->id,
+                'name'  => $loadedTask->creator->name,
+                'photo' => $loadedTask->creator->photo,
+            ] : null,
+        ];
+        event(new TaskUpdated((int)$task->project_id, 'updated', $broadcastPayload));
 
         return response()->json([
             'success' => true,

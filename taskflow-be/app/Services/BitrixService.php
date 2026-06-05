@@ -146,6 +146,7 @@ class BitrixService
         do {
             $response = $this->callApi('/rest/user.get.json', array_merge([
                 'start' => $start,
+                'ADMIN_MODE' => true,
             ], $filters));
 
             $data = $response->json();
@@ -171,6 +172,7 @@ class BitrixService
     {
         $response = $this->callApi('/rest/user.get.json', [
             'ID' => $userId,
+            'ADMIN_MODE' => true,
         ]);
 
         $data = $response->json();
@@ -210,8 +212,8 @@ class BitrixService
      */
     public function syncUsers(): array
     {
-        // 1. Fetch from Bitrix
-        $users = \Illuminate\Support\Facades\Cache::remember('bitrix_users_all', 1800, function () {
+        // 1. Fetch from Bitrix (use file cache to avoid MySQL max_allowed_packet limit for large payloads)
+        $users = \Illuminate\Support\Facades\Cache::store('file')->remember('bitrix_users_all', 1800, function () {
             return $this->getUsers();
         });
 

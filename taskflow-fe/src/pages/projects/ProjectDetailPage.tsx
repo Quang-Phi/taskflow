@@ -75,6 +75,7 @@ interface Task {
   time_entries?: any[];
   type?: string;
   labels?: any[];
+  position?: number;
 }
 
 // Priority config matching ClickUp style
@@ -992,6 +993,8 @@ const ProjectDetailPage: React.FC = () => {
   const [newTaskStartDate, setNewTaskStartDate] = useState('');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
   const draggedTaskRef = useRef<string | number | null>(null);
+  // Tracks the card currently hovered during drag and whether to insert before/after it
+  const dropIndicatorRef = useRef<{ taskId: string | number; position: 'before' | 'after' } | null>(null);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [selectedNewMembers, setSelectedNewMembers] = useState<number[]>([]);
 
@@ -1051,6 +1054,9 @@ const ProjectDetailPage: React.FC = () => {
   const [workflowTransitions, setWorkflowTransitions] = useState<any[]>([]);
   const [workflowGlobalTransitions, setWorkflowGlobalTransitions] = useState<any[]>([]);
   const [workflowMode, setWorkflowMode] = useState<'unrestricted' | 'restricted'>('unrestricted');
+
+  // Derived: initial status from workflow config (null = unrestricted, any column allowed)
+  const workflowInitialStatus: string | null = workflowConfig?.initial_status || null;
 
   // Helper: get allowed target status IDs from a given status for current user
   const getAllowedTargetStatuses = (fromStatusId: string): string[] => {
@@ -1761,7 +1767,7 @@ const ProjectDetailPage: React.FC = () => {
   const boardTasksByStatus = useMemo(() => {
     const map: Record<string, Task[]> = {};
     columns.forEach((col: any) => {
-      map[col.key] = tasks.filter((t) => {
+      const filtered = tasks.filter((t) => {
         if (String(t.status) !== String(col.key) || t.parent_task_id) return false;
 
         // Show parent if it matches filters or has a subtask that matches filters
@@ -1770,12 +1776,16 @@ const ProjectDetailPage: React.FC = () => {
 
         return false;
       });
+      // Sort by position so manual order is respected
+      map[col.key] = [...filtered].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     });
     return map;
   }, [tasks, filterSearch, filterMyTasks, filterAssigneeId, filterAssignees, filterUnassigned, filterStatuses, filterPriorities, filterTypes, me, columns]);
 
   const listTasksGrouped = useMemo(() => {
-    const filteredTasks = tasks.filter(taskMatchesFilters);
+    // Only show parent tasks (no parent_task_id) in the grouped view.
+    // Subtasks are shown inline under their parent via expand/collapse.
+    const filteredTasks = tasks.filter(t => !t.parent_task_id && taskMatchesFilters(t));
     const groups: Record<string, Task[]> = {};
     if (groupBy === 'priority') {
       ['urgent', 'high', 'medium', 'low'].forEach((p) => {
@@ -1786,7 +1796,9 @@ const ProjectDetailPage: React.FC = () => {
     } else if (groupBy === 'status') {
       const statusListKeys = columns.map((c: any) => c.key);
       statusListKeys.forEach((s: string) => {
-        groups[s] = filteredTasks.filter((t) => t.status === s);
+        const statusTasks = filteredTasks.filter((t) => t.status === s);
+        // Sort by position for manual ordering
+        groups[s] = [...statusTasks].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
       });
       const other = filteredTasks.filter((t) => !statusListKeys.includes(t.status));
       if (other.length > 0) groups['none'] = other;
@@ -1936,6 +1948,14 @@ const ProjectDetailPage: React.FC = () => {
     console.log('[DragDnD] Found dragged cards:', draggedCards.length);
     draggedCards.forEach(el => el.classList.remove('dragging'));
 
+    // Remove all drop indicator lines (board + list)
+    document.querySelectorAll(
+      '.project-detail__task-card.drop-before, .project-detail__task-card.drop-after, .my-tasks__task-row.drop-before, .my-tasks__task-row.drop-after'
+    ).forEach(el => {
+      el.classList.remove('drop-before', 'drop-after');
+    });
+    dropIndicatorRef.current = null;
+
     const colElements = document.querySelectorAll('.project-detail__column');
     console.log('[DragDnD] Found columns to clean:', colElements.length);
     colElements.forEach(el => {
@@ -2020,6 +2040,44 @@ const ProjectDetailPage: React.FC = () => {
     e.dataTransfer.dropEffect = 'move';
   };
 
+  // Called when dragging over a specific task card – shows the horizontal drop indicator
+  const handleCardDragOver = (e: React.DragEvent, overTaskId: string | number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+
+    const cardEl = e.currentTarget as HTMLElement;
+    const rect = cardEl.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const insertPosition: 'before' | 'after' = e.clientY < midY ? 'before' : 'after';
+
+    const prev = dropIndicatorRef.current;
+    // Avoid unnecessary DOM mutations
+    if (prev && prev.taskId === overTaskId && prev.position === insertPosition) return;
+
+    // Clear previous indicator
+    document.querySelectorAll('.project-detail__task-card.drop-before, .project-detail__task-card.drop-after').forEach(el => {
+      el.classList.remove('drop-before', 'drop-after');
+    });
+
+    // Skip showing indicator when hovering the dragged card itself
+    if (String(overTaskId) === String(draggedTaskRef.current)) {
+      dropIndicatorRef.current = null;
+      return;
+    }
+
+    cardEl.classList.add(insertPosition === 'before' ? 'drop-before' : 'drop-after');
+    dropIndicatorRef.current = { taskId: overTaskId, position: insertPosition };
+  };
+
+  const handleCardDragLeave = (e: React.DragEvent) => {
+    // Only clear if we're leaving the card/row entirely (not entering a child element)
+    const related = e.relatedTarget as HTMLElement | null;
+    const card = e.currentTarget as HTMLElement;
+    if (related && card.contains(related)) return;
+    card.classList.remove('drop-before', 'drop-after');
+  };
+
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault();
     const taskId = draggedTaskRef.current;
@@ -2036,8 +2094,12 @@ const ProjectDetailPage: React.FC = () => {
       return;
     }
 
-    if (String(taskToMove.status) === String(newStatus)) {
-      console.log('[DragDnD] Task status matches newStatus, cleaning and aborting');
+    // Allow same-status drops for reordering within the column
+    const isSameStatus = String(taskToMove.status) === String(newStatus);
+    const dropIndicator = dropIndicatorRef.current;
+
+    if (isSameStatus && !dropIndicator) {
+      console.log('[DragDnD] Task status matches newStatus and no drop indicator, cleaning and aborting');
       cleanupDragClasses();
       draggedTaskRef.current = null;
       return;
@@ -2161,6 +2223,19 @@ const ProjectDetailPage: React.FC = () => {
       }
     }
 
+    // Compute the target position index based on drop indicator
+    let targetPosition: number | undefined = undefined;
+    if (dropIndicator) {
+      // Use the correct task list depending on current view
+      const sourceTasks = viewMode === 'board'
+        ? (boardTasksByStatus[newStatus] || [])
+        : (listTasksGrouped[newStatus] || []);
+      const overIndex = sourceTasks.findIndex(t => String(t.id) === String(dropIndicator.taskId));
+      if (overIndex !== -1) {
+        targetPosition = dropIndicator.position === 'before' ? overIndex : overIndex + 1;
+      }
+    }
+
     cleanupDragClasses();
     draggedTaskRef.current = null;
 
@@ -2168,26 +2243,48 @@ const ProjectDetailPage: React.FC = () => {
     setTimeout(async () => {
       console.log('[DragDnD] Defer execution starts inside setTimeout');
       cleanupDragClasses();
-      // Optimistic Update
+      // Optimistic Update: reorder tasks array locally
       const prevTasks = [...tasks];
-      console.log('[DragDnD] Triggering optimistic update setTasks for taskId:', taskId);
+      console.log('[DragDnD] Triggering optimistic update setTasks for taskId:', taskId, 'to position:', targetPosition);
       setTasks((prev) => {
-        const next = prev.map((t) => {
+        let next = prev.map((t) => {
           if (String(t.id) === String(taskId)) {
-            console.log('[DragDnD] Optimistic match! Task ID:', t.id, 'status changed from:', t.status, 'to:', newStatus);
             return { ...t, status: newStatus as Task['status'] };
           }
           return t;
         });
+        // Reorder within status if position is specified
+        if (targetPosition !== undefined) {
+          const sameStatusTasks = next
+            .filter(t => String(t.status) === String(newStatus) && !t.parent_task_id)
+            .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+          // Remove dragged task from sorted list
+          const withoutDragged = sameStatusTasks.filter(t => String(t.id) !== String(taskId));
+          const draggedTask = next.find(t => String(t.id) === String(taskId));
+          if (draggedTask) {
+            // Insert at target position
+            const clampedPos = Math.min(targetPosition, withoutDragged.length);
+            withoutDragged.splice(clampedPos, 0, draggedTask);
+            // Assign sequential positions for optimistic render
+            withoutDragged.forEach((t, i) => {
+              const idx = next.findIndex(nt => String(nt.id) === String(t.id));
+              if (idx !== -1) next[idx] = { ...next[idx], position: i };
+            });
+          }
+        }
         return next;
       });
 
       try {
-        console.log('[DragDnD] Calling api.updateTaskStatus for taskId:', taskId, 'to newStatus:', newStatus);
-        const res = await api.updateTaskStatus(taskId, { status: newStatus as any });
+        console.log('[DragDnD] Calling api.updateTaskStatus for taskId:', taskId, 'to newStatus:', newStatus, 'position:', targetPosition);
+        const res = await api.updateTaskStatus(taskId, { status: newStatus as any, position: targetPosition });
         console.log('[DragDnD] API response:', res);
         if (res.success) {
-          message.success(t('project_detail.toast.status_updated'));
+          if (isSameStatus) {
+            // For reorder, no status change toast needed
+          } else {
+            message.success(t('project_detail.toast.status_updated'));
+          }
           const updatedTaskFromServer = res.data;
           if (updatedTaskFromServer) {
             console.log('[DragDnD] Updating tasks with server response:', updatedTaskFromServer);
@@ -2458,10 +2555,18 @@ const ProjectDetailPage: React.FC = () => {
         }
         // Also refresh the main board tasks
         fetchProjectData();
+      } else {
+        // API returned success:false (e.g. workflow blocked)
+        const errMsg = res.message || t('tasks.detail_toast.status_update_err');
+        message.error(errMsg);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      message.error(t('tasks.detail_toast.status_update_err'));
+      const apiMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        null;
+      message.error(apiMsg || t('tasks.detail_toast.status_update_err'));
     }
   };
 
@@ -3020,12 +3125,29 @@ const ProjectDetailPage: React.FC = () => {
           </div>
         </div>
         {canEditProject() && (
-          <div className="project-detail__header-right" style={{ display: 'flex', gap: '8px' }}>
-            <Button onClick={() => setShowManageStatusesModal(true)}>{t('projects.status.manage_btn')}</Button>
-            <Button onClick={() => setShowWorkflowEditor(true)} icon={<BranchesOutlined />}>
-              {t('workflow.edit_title')}
-            </Button>
-            <Button type="primary" onClick={() => setShowEditProjectModal(true)}>{t('project_detail.edit_btn')}</Button>
+          <div className="project-detail__header-right" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <Tooltip title={t('projects.status.manage_btn')} placement="bottom">
+              <Button
+                shape="circle"
+                icon={<SettingOutlined />}
+                onClick={() => setShowManageStatusesModal(true)}
+              />
+            </Tooltip>
+            <Tooltip title={t('workflow.edit_title')} placement="bottom">
+              <Button
+                shape="circle"
+                icon={<BranchesOutlined />}
+                onClick={() => setShowWorkflowEditor(true)}
+              />
+            </Tooltip>
+            <Tooltip title={t('project_detail.edit_btn')} placement="bottom">
+              <Button
+                shape="circle"
+                type="primary"
+                icon={<EditOutlined />}
+                onClick={() => setShowEditProjectModal(true)}
+              />
+            </Tooltip>
           </div>
         )}
       </div>
@@ -3052,6 +3174,7 @@ const ProjectDetailPage: React.FC = () => {
 
           {/* Filters & Search Toolbar */}
           <div
+            className="project-detail__filter-toolbar"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -3065,7 +3188,7 @@ const ProjectDetailPage: React.FC = () => {
               flexWrap: 'wrap'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '240px', flexWrap: 'wrap' }}>
+            <div className="project-detail__filter-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '240px', flexWrap: 'wrap' }}>
               <DebouncedSearchInput
                 placeholder={t('projects.search_tasks_placeholder')}
                 variant="filled"
@@ -3160,7 +3283,7 @@ const ProjectDetailPage: React.FC = () => {
               })()}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div className="project-detail__view-toggles" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
                 <button
                   className={`panel-btn ${viewMode === 'list' ? 'active' : ''}`}
@@ -3212,17 +3335,19 @@ const ProjectDetailPage: React.FC = () => {
                         <span className="status-label">{col.label}</span>
                         <span className="count">{colTasks.length}</span>
                       </div>
-                      <button className="add-btn" onClick={() => {
-                        setInlineCreate(col.key);
-                        setNewTaskTitle('');
-                        setNewTaskStatus(col.key);
-                        setNewTaskPriority('medium');
-                        setNewTaskAssignee(null);
-                        setNewTaskStartDate('');
-                        setNewTaskDueDate('');
-                      }}>
-                        <PlusOutlined />
-                      </button>
+                      {(!workflowInitialStatus || col.key === workflowInitialStatus) && (
+                        <button className="add-btn" onClick={() => {
+                          setInlineCreate(col.key);
+                          setNewTaskTitle('');
+                          setNewTaskStatus(col.key);
+                          setNewTaskPriority('medium');
+                          setNewTaskAssignee(null);
+                          setNewTaskStartDate('');
+                          setNewTaskDueDate('');
+                        }}>
+                          <PlusOutlined />
+                        </button>
+                      )}
                     </div>
 
                     <div className="project-detail__column-body">
@@ -3230,6 +3355,8 @@ const ProjectDetailPage: React.FC = () => {
                       {colTasks.map((task: Task) => (
                         <div key={task.id} className="project-detail__task-card" data-task-id={task.id}
                           draggable onDragStart={(e) => handleDragStart(e, task.id)} onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleCardDragOver(e, task.id)}
+                          onDragLeave={handleCardDragLeave}
                           onClick={() => handleSelectTask(task)}>
                           <div className="project-detail__task-card-top">
                             <span className="project-detail__task-card-id">#{task.id}</span>
@@ -3569,8 +3696,10 @@ const ProjectDetailPage: React.FC = () => {
                         );
                       })()}
 
-                      {/* Add card button - every column */}
+                      {/* Add card button — hidden for non-initial columns when WF restricted */}
                       {inlineCreate !== col.key && (
+                        !workflowInitialStatus || col.key === workflowInitialStatus
+                      ) && (
                         <div className="project-detail__add-card" onClick={() => {
                           setInlineCreate(col.key);
                           setNewTaskTitle('');
@@ -3658,216 +3787,280 @@ const ProjectDetailPage: React.FC = () => {
                             const projectStatuses = project?.statuses || [];
                             const taskEditable = canEditTask(task);
 
-                            return (
-                              <div
-                                key={task.id}
-                                className="my-tasks__task-row"
-                                data-task-id={task.id}
-                                onClick={() => handleSelectTask(task)}
-                                draggable={taskEditable}
-                                onDragStart={(e) => handleDragStart(e, task.id)}
-                                onDragEnd={handleDragEnd}
-                              >
-                                <div
-                                  className={`my-tasks__task-checkbox ${isClosed ? 'done' : ''}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (!taskEditable) {
-                                      message.error(t('project_detail.toast.no_edit_permission'));
-                                      return;
-                                    }
-                                    toggleStatus(task.id, task.status, task);
-                                  }}
-                                  style={{
-                                    borderColor: statusObj.color,
-                                    backgroundColor: isClosed ? statusObj.color : 'transparent',
-                                    color: isClosed ? 'white' : 'transparent',
-                                    cursor: taskEditable ? 'pointer' : 'not-allowed',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    padding: 0
-                                  }}
-                                >
-                                  {isClosed ? (
-                                    <CheckOutlined style={{ fontSize: '10px' }} />
-                                  ) : (
-                                    (() => {
-                                      const statusesList = projectStatuses.length > 0 ? projectStatuses : [
-                                        { id: 'todo', type: 'not_started' },
-                                        { id: 'in_progress', type: 'active' },
-                                        { id: 'review', type: 'active' },
-                                        { id: 'done', type: 'closed' }
-                                      ];
-                                      const currentIdx = statusesList.findIndex((s: any) => s.id === statusObj.id);
-                                      const percentage = statusesList.length > 0 ? ((currentIdx + 1) / statusesList.length) * 100 : 25;
-                                      return (
-                                        <div style={{
-                                          width: '10px',
-                                          height: '10px',
-                                          borderRadius: '50%',
-                                          background: `conic-gradient(${statusObj.color} 0% ${percentage}%, transparent ${percentage}% 100%)`
-                                        }} />
-                                      );
-                                    })()
-                                  )}
-                                </div>
-                                <div className="my-tasks__task-info">
-                                  <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <TaskTypeBadge type={task.type || 'task'} size="icon" />
-                                    {task.title}
-                                  </div>
-                                  <div className="subtitle">
-                                    <span className="task-id">#{task.id}</span>
-                                    <span className="project-tag" style={{ '--dot-color': priorityColors[task.priority] || '#6b7084' } as React.CSSProperties}>
-                                      {priorityLabels[task.priority] || t('tasks.priority.none')}
+                            // ── Subtask section for list view ────────────────────────────────
+                            const getRecursiveSubtasksFlat = (parentId: number): Task[] => {
+                              const children = tasks.filter(t => Number(t.parent_task_id) === Number(parentId));
+                              let all: Task[] = [...children];
+                              for (const child of children) all = [...all, ...getRecursiveSubtasksFlat(Number(child.id))];
+                              return all;
+                            };
+                            const directSubtasksOfTask = tasks.filter(t => Number(t.parent_task_id) === Number(task.id));
+                            const allSubtasksFlat = directSubtasksOfTask.length > 0 ? getRecursiveSubtasksFlat(Number(task.id)) : [];
+                            const finalStatusIdForList = getFinalStatusId(project?.statuses || []);
+                            const firstStatusIdForList = getFirstStatusId(project?.statuses || []);
+                            const doneSubtaskCount = allSubtasksFlat.filter(st => st.status === finalStatusIdForList).length;
+                            const isListTaskExpanded = !!expandedTasks[Number(task.id)];
+
+                            const renderSubtaskRowInList = (st: Task, depth = 0): React.ReactNode => {
+                              const stStatusObj = getFallbackStatusObj(st);
+                              const stIsDone = st.status === finalStatusIdForList;
+                              const stEditable = canEditTask(st);
+                              const stChildren = tasks.filter(c => Number(c.parent_task_id) === Number(st.id));
+                              return (
+                                <React.Fragment key={st.id}>
+                                  <div
+                                    className="my-tasks__subtask-list-row"
+                                    style={{ marginLeft: `${32 + depth * 20}px` }}
+                                    onClick={() => handleSelectTask(st)}
+                                  >
+                                    <div
+                                      className={`my-tasks__task-checkbox ${stIsDone ? 'done' : ''}`}
+                                      style={{ borderColor: stStatusObj.color, backgroundColor: stIsDone ? stStatusObj.color : 'transparent', color: stIsDone ? 'white' : 'transparent', cursor: stEditable ? 'pointer' : 'not-allowed', display:'flex',alignItems:'center',justifyContent:'center',padding:0,flexShrink:0 }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!stEditable) return;
+                                        const newSt = stIsDone ? firstStatusIdForList : finalStatusIdForList;
+                                        api.updateTask(st.id, { status: newSt }).then(r => { if (r.success) fetchProjectData(true); });
+                                      }}
+                                    >
+                                      {stIsDone ? <CheckOutlined style={{ fontSize: '9px' }} /> : (
+                                        <div style={{ width: '9px', height: '9px', borderRadius: '50%', background: `conic-gradient(${stStatusObj.color} 0% 60%, transparent 60% 100%)` }} />
+                                      )}
+                                    </div>
+                                    <div style={{ minWidth: 0, flex: 1 }}>
+                                      <div style={{ fontSize: '13px', fontWeight: 500, color: stIsDone ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: stIsDone ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display:'flex', alignItems:'center', gap:'5px' }}>
+                                        <TaskTypeBadge type={st.type || 'task'} size="icon" />
+                                        {st.title}
+                                      </div>
+                                      <div style={{ fontSize:'11px', color:'var(--text-muted)', marginTop:'1px' }}>#{st.id}</div>
+                                    </div>
+                                    <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '4px', background: `${stStatusObj.color}1c`, color: stStatusObj.color, border: `1px solid ${stStatusObj.color}2b`, whiteSpace:'nowrap', flexShrink: 0 }}>
+                                      {stStatusObj.name}
                                     </span>
-                                    {task.parent_task_id && (
-                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
-                                        <SubtaskIcon />
-                                        {t('tasks.subtask_of')} #{task.parent_task_id}
-                                      </span>
+                                    {st.assignee ? (
+                                      <div className="my-tasks__task-assignee" style={{ background: 'var(--primary)', flexShrink: 0 }}>
+                                        {st.assignee.photo ? <img src={st.assignee.photo} alt={st.assignee.name} style={{ width:'100%',height:'100%',borderRadius:'50%' }} /> : getInitials(st.assignee.name)}
+                                      </div>
+                                    ) : (
+                                      <div className="my-tasks__task-assignee" style={{ border: '1px dashed var(--text-muted)', background: 'transparent', flexShrink: 0 }}>
+                                        <UserOutlined style={{ color: 'var(--text-muted)', fontSize: '10px' }} />
+                                      </div>
                                     )}
                                   </div>
-                                </div>
-                                <div className="my-tasks__task-labels">
-                                  {task.labels?.map((l: any, i: number) => (
-                                    <span key={i} className="label" style={{ background: l.bg, color: l.color }}>
-                                      {l.name}
-                                    </span>
-                                  ))}
-                                </div>
-                                <div className="my-tasks__task-status">
-                                  <span
+                                  {stChildren.length > 0 && isListTaskExpanded && stChildren.map(c => renderSubtaskRowInList(c, depth + 1))}
+                                </React.Fragment>
+                              );
+                            };
+                            // ─────────────────────────────────────────────────────────────────
+
+                            return (
+                              <React.Fragment key={task.id}>
+                                <div
+                                  className="my-tasks__task-row"
+                                  data-task-id={task.id}
+                                  onClick={() => handleSelectTask(task)}
+                                  draggable={taskEditable}
+                                  onDragStart={(e) => handleDragStart(e, task.id)}
+                                  onDragEnd={handleDragEnd}
+                                  onDragOver={groupBy === 'status' ? (e) => handleCardDragOver(e, task.id) : undefined}
+                                  onDragLeave={groupBy === 'status' ? handleCardDragLeave : undefined}
+                                >
+                                  <div
+                                    className={`my-tasks__task-checkbox ${isClosed ? 'done' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!taskEditable) {
+                                        message.error(t('project_detail.toast.no_edit_permission'));
+                                        return;
+                                      }
+                                      toggleStatus(task.id, task.status, task);
+                                    }}
                                     style={{
-                                      background: `${statusObj.color}1c`,
-                                      color: statusObj.color,
-                                      border: `1px solid ${statusObj.color}2b`
+                                      borderColor: statusObj.color,
+                                      backgroundColor: isClosed ? statusObj.color : 'transparent',
+                                      color: isClosed ? 'white' : 'transparent',
+                                      cursor: taskEditable ? 'pointer' : 'not-allowed',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      padding: 0
                                     }}
                                   >
-                                    {statusObj.name}
-                                  </span>
-                                </div>
-                                <div className={`my-tasks__task-date ${overdue ? 'overdue' : ''} ${today ? 'today' : ''}`}>
-                                  {task.start_date || task.due_date ? (
-                                    task.start_date && task.due_date ? (
-                                      `${formatDateTimeShort(task.start_date)} - ${formatDateTimeShort(task.due_date)}`
-                                    ) : task.start_date ? (
-                                      `${t('tasks.start_date')} ${formatDateTimeShort(task.start_date)}`
+                                    {isClosed ? (
+                                      <CheckOutlined style={{ fontSize: '10px' }} />
                                     ) : (
-                                      `${t('tasks.panel.deadline')} ${formatDateTimeShort(task.due_date)}`
-                                    )
-                                  ) : (
-                                    <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>{t('tasks.no_deadline')}</span>
-                                  )}
-                                </div>
-                                {task.assignee ? (
-                                  <div className="my-tasks__task-assignee" style={{ background: 'var(--primary)' }}>
-                                    {task.assignee.photo ? (
-                                      <img src={task.assignee.photo} alt={task.assignee.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
-                                    ) : (
-                                      getInitials(task.assignee.name)
+                                      (() => {
+                                        const statusesList = projectStatuses.length > 0 ? projectStatuses : [
+                                          { id: 'todo', type: 'not_started' },
+                                          { id: 'in_progress', type: 'active' },
+                                          { id: 'review', type: 'active' },
+                                          { id: 'done', type: 'closed' }
+                                        ];
+                                        const currentIdx = statusesList.findIndex((s: any) => s.id === statusObj.id);
+                                        const percentage = statusesList.length > 0 ? ((currentIdx + 1) / statusesList.length) * 100 : 25;
+                                        return (
+                                          <div style={{
+                                            width: '10px',
+                                            height: '10px',
+                                            borderRadius: '50%',
+                                            background: `conic-gradient(${statusObj.color} 0% ${percentage}%, transparent ${percentage}% 100%)`
+                                          }} />
+                                        );
+                                      })()
                                     )}
                                   </div>
-                                ) : (
-                                  <div className="my-tasks__task-assignee" style={{ border: '1px dashed var(--text-muted, #9ca0b0)', background: 'transparent' }}>
-                                    <UserOutlined style={{ color: 'var(--text-muted, #9ca0b0)', fontSize: '10px' }} />
+                                  <div className="my-tasks__task-info">
+                                    <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                      <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                                      {task.title}
+                                    </div>
+                                    <div className="subtitle">
+                                      <span className="task-id">#{task.id}</span>
+                                      <span className="project-tag" style={{ '--dot-color': priorityColors[task.priority] || '#6b7084' } as React.CSSProperties}>
+                                        {priorityLabels[task.priority] || t('tasks.priority.none')}
+                                      </span>
+                                    </div>
                                   </div>
-                                )}
-                                <div className="my-tasks__task-actions" onClick={(e) => e.stopPropagation()}>
-                                  {(() => {
-                                    const editPerm = canEditTask(task);
-                                    const deletePerm = canDeleteTask(task);
-                                    const menuItems: any[] = [];
+                                  <div className="my-tasks__task-labels">
+                                    {task.labels?.map((l: any, i: number) => (
+                                      <span key={i} className="label" style={{ background: l.bg, color: l.color }}>
+                                        {l.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  <div className="my-tasks__task-status">
+                                    <span
+                                      style={{
+                                        background: `${statusObj.color}1c`,
+                                        color: statusObj.color,
+                                        border: `1px solid ${statusObj.color}2b`
+                                      }}
+                                    >
+                                      {statusObj.name}
+                                    </span>
+                                  </div>
+                                  <div className={`my-tasks__task-date ${overdue ? 'overdue' : ''} ${today ? 'today' : ''}`}>
+                                    {task.start_date || task.due_date ? (
+                                      task.start_date && task.due_date ? (
+                                        `${formatDateTimeShort(task.start_date)} - ${formatDateTimeShort(task.due_date)}`
+                                      ) : task.start_date ? (
+                                        `${t('tasks.start_date')} ${formatDateTimeShort(task.start_date)}`
+                                      ) : (
+                                        `${t('tasks.panel.deadline')} ${formatDateTimeShort(task.due_date)}`
+                                      )
+                                    ) : (
+                                      <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>{t('tasks.no_deadline')}</span>
+                                    )}
+                                  </div>
+                                  {task.assignee ? (
+                                    <div className="my-tasks__task-assignee" style={{ background: 'var(--primary)' }}>
+                                      {task.assignee.photo ? (
+                                        <img src={task.assignee.photo} alt={task.assignee.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+                                      ) : (
+                                        getInitials(task.assignee.name)
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="my-tasks__task-assignee" style={{ border: '1px dashed var(--text-muted, #9ca0b0)', background: 'transparent' }}>
+                                      <UserOutlined style={{ color: 'var(--text-muted, #9ca0b0)', fontSize: '10px' }} />
+                                    </div>
+                                  )}
+                                  <div className="my-tasks__task-actions" onClick={(e) => e.stopPropagation()}>
+                                    {(() => {
+                                      const editPerm = canEditTask(task);
+                                      const deletePerm = canDeleteTask(task);
+                                      const menuItems: any[] = [];
 
-                                    menuItems.push({
-                                      key: 'details',
-                                      label: (
-                                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                          <InfoCircleOutlined style={{ fontSize: '13px' }} />
-                                          {t('tasks.panel.view_details')}
-                                        </span>
-                                      ),
-                                      onClick: () => setSelectedTask(task)
-                                    });
-
-                                    const isWatching = me?.id && task.watcher_ids?.includes(me.id);
-                                    if (Number(task.assignee_id) !== Number(me?.id)) {
                                       menuItems.push({
-                                        key: 'toggle_watch',
+                                        key: 'details',
                                         label: (
                                           <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            {isWatching ? (
-                                              <EyeInvisibleOutlined style={{ fontSize: '13px' }} />
-                                            ) : (
-                                              <EyeOutlined style={{ fontSize: '13px' }} />
-                                            )}
-                                            {isWatching
-                                              ? t('tasks.panel.unwatch')
-                                              : t('tasks.panel.watch')}
+                                            <InfoCircleOutlined style={{ fontSize: '13px' }} />
+                                            {t('tasks.panel.view_details')}
                                           </span>
                                         ),
-                                        onClick: () => handleToggleWatchTask(task.id)
+                                        onClick: () => setSelectedTask(task)
                                       });
-                                    }
 
-                                    if (editPerm) {
-                                      if (!isClosed) {
+                                      const isWatching = me?.id && task.watcher_ids?.includes(me.id);
+                                      if (Number(task.assignee_id) !== Number(me?.id)) {
                                         menuItems.push({
-                                          key: 'done',
+                                          key: 'toggle_watch',
                                           label: (
                                             <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                              <CheckCircleOutlined style={{ fontSize: '13px' }} />
-                                              {t('tasks.action.mark_done')}
+                                              {isWatching ? (
+                                                <EyeInvisibleOutlined style={{ fontSize: '13px' }} />
+                                              ) : (
+                                                <EyeOutlined style={{ fontSize: '13px' }} />
+                                              )}
+                                              {isWatching ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
                                             </span>
                                           ),
-                                          onClick: () => handleMarkDone(task.id)
+                                          onClick: () => handleToggleWatchTask(task.id)
                                         });
+                                      }
+
+                                      if (editPerm) {
                                         menuItems.push({
-                                          key: 'logtime',
+                                          key: 'add_subtask',
                                           label: (
                                             <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                              <ClockCircleOutlined style={{ fontSize: '13px' }} />
-                                              {t('tasks.panel.log_time')}
+                                              <PlusOutlined style={{ fontSize: '13px' }} />
+                                              {t('tasks.panel.add_subtask')}
                                             </span>
                                           ),
-                                          onClick: () => {
-                                            setLogTimeTask(Number(task.id));
-                                            setShowLogTimeModal(true);
-                                          }
+                                          onClick: () => setSelectedTask(task)
                                         });
                                       }
-                                    }
-                                    if (deletePerm) {
-                                      if (menuItems.length > 0) {
-                                        menuItems.push({ type: 'divider' });
+
+                                      if (deletePerm) {
+                                        menuItems.push({
+                                          key: 'delete',
+                                          label: (
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)' }}>
+                                              <DeleteOutlined style={{ fontSize: '13px' }} />
+                                              {t('tasks.panel.delete')}
+                                            </span>
+                                          ),
+                                          danger: true,
+                                          onClick: () => handleDeleteTask(task.id)
+                                        });
                                       }
-                                      menuItems.push({
-                                        key: 'delete',
-                                        label: (
-                                          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            <DeleteOutlined style={{ fontSize: '13px' }} />
-                                            {t('tasks.action.delete')}
-                                          </span>
-                                        ),
-                                        danger: true,
-                                        onClick: () => handleDeleteTask(task.id)
-                                      });
-                                    }
-                                    if (menuItems.length === 0) return null;
-                                    return (
-                                      <Dropdown
-                                        menu={{ items: menuItems }}
-                                        trigger={['click']}
-                                      >
-                                        <button onClick={(e) => e.stopPropagation()}><MoreOutlined /></button>
-                                      </Dropdown>
-                                    );
-                                  })()}
+                                      if (menuItems.length === 0) return null;
+                                      return (
+                                        <Dropdown
+                                          menu={{ items: menuItems }}
+                                          trigger={['click']}
+                                        >
+                                          <button onClick={(e) => e.stopPropagation()}><MoreOutlined /></button>
+                                        </Dropdown>
+                                      );
+                                    })()}
+                                  </div>
                                 </div>
-                              </div>
+
+                                {/* ── Subtask expand toggle & rows ─────────────────────────── */}
+                                {allSubtasksFlat.length > 0 && (
+                                  <>
+                                    <div
+                                      className="my-tasks__subtask-toggle"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setExpandedTasks(prev => ({ ...prev, [Number(task.id)]: !prev[Number(task.id)] }));
+                                      }}
+                                    >
+                                      <SubtaskIcon />
+                                      <span>{t('project_detail.subtask_title_with_count', { done: doneSubtaskCount, total: allSubtasksFlat.length })}</span>
+                                      <RightOutlined className={`chevron ${isListTaskExpanded ? 'expanded' : ''}`} style={{ fontSize: '9px', marginLeft: '2px' }} />
+                                    </div>
+                                    {isListTaskExpanded && directSubtasksOfTask.map(st => renderSubtaskRowInList(st))}
+                                  </>
+                                )}
+                                {/* ──────────────────────────────────────────────────────────── */}
+                              </React.Fragment>
                             );
                           })}
+
 
                           {/* ClickUp-style Inline Create Bar for List View */}
                           {inlineCreate === key && (() => {
@@ -4010,13 +4203,15 @@ const ProjectDetailPage: React.FC = () => {
                             );
                           })()}
 
-                          {/* Add card button - bottom of group */}
+                          {/* Add card button — hidden for non-initial groups when WF restricted + grouped by status */}
                           {inlineCreate !== key && (
+                            groupBy !== 'status' || !workflowInitialStatus || key === workflowInitialStatus
+                          ) && (
                             <div
                               onClick={() => {
                                 setInlineCreate(key);
                                 setNewTaskTitle('');
-                                setNewTaskStatus(groupBy === 'status' ? key : 'todo');
+                                setNewTaskStatus(groupBy === 'status' ? key : (workflowInitialStatus || project?.statuses?.[0]?.id || 'todo'));
                                 setNewTaskPriority(groupBy === 'priority' ? key : 'medium');
                                 setNewTaskAssignee(null);
                                 setNewTaskStartDate('');
@@ -4610,8 +4805,9 @@ const ProjectDetailPage: React.FC = () => {
           project={project}
           onClose={() => setShowWorkflowEditor(false)}
           onSaved={() => {
-            fetchProjectData();
-            fetchWorkflow();
+            // Only refresh workflow cache silently — do NOT call fetchProjectData()
+            // which would re-mount the entire page and close the drawer
+            if (typeof fetchWorkflow === 'function') fetchWorkflow();
           }}
         />
       )}

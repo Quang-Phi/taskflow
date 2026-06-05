@@ -30,9 +30,9 @@
   --divider: #222539;
 
   --text-primary: #e8eaed;
-  --text-secondary: #9ca0b0;
-  --text-tertiary: #6b7084;
-  --text-muted: #505468;
+  --text-secondary: #b0b5c8;   /* was #9ca0b0 — more visible */
+  --text-tertiary: #8b91a8;   /* was #6b7084 — +40% brighter */
+  --text-muted: #72788f;      /* was #505468 — nearly doubled contrast */
   --text-white: #ffffff;
 
   --transition-normal: #475569;
@@ -127,6 +127,13 @@ $font-size-3xl: 24px;
 $sidebar-width: 240px;
 $sidebar-collapsed: 60px;
 $header-height: 52px;
+
+// ===== RESPONSIVE BREAKPOINTS =====
+$bp-xs:  480px;   // Small phones
+$bp-sm:  640px;   // Phones
+$bp-md:  768px;   // Tablets portrait  ← main mobile breakpoint
+$bp-lg:  1024px;  // Tablets landscape / small laptops
+$bp-xl:  1280px;  // Laptops
 
 // ===== BORDER RADIUS =====
 $radius-sm: 4px;

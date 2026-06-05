@@ -81,6 +81,11 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const [isAddingTransition, setIsAddingTransition] = useState(false);
   const [addingTransitionFromId, setAddingTransitionFromId] = useState<string | null>(null);
 
+  // Canvas display controls
+  const [showTransitionLabels, setShowTransitionLabels] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+
   // Rules Modal States
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
   const [rulesModalTargetId, setRulesModalTargetId] = useState<string | null>(null);
@@ -102,7 +107,10 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           setTransitions(wf.transitions || []);
           setGlobalTransitions(wf.global_transitions || []);
 
-          const dbInitialStatus = wf.initial_status || project.statuses[0]?.id || '';
+          // Use the saved initial status; only fallback to first status if none set
+          const dbInitialStatus = wf.initial_status
+            ? String(wf.initial_status)
+            : (project.statuses[0]?.id ? String(project.statuses[0].id) : '');
           setInitialStatusId(dbInitialStatus);
 
           // Build or reuse node coordinates
@@ -448,10 +456,20 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         global_transitions: globalTransitions
       };
 
-      await api.updateWorkflow(project.id, payload);
+      const res = await api.updateWorkflow(project.id, payload);
       message.success(t('workflow.save_success'));
+
+      // Update state from server response — no reload, drawer stays open
+      const savedWf = res.data?.data?.workflow;
+      if (savedWf) {
+        if (savedWf.initial_status) setInitialStatusId(String(savedWf.initial_status));
+        if (savedWf.transitions) setTransitions(savedWf.transitions);
+        if (savedWf.global_transitions) setGlobalTransitions(savedWf.global_transitions);
+        if (savedWf.node_positions) setNodePositions(savedWf.node_positions);
+      }
+
+      // Notify parent that workflow changed (e.g., to refresh project data outside)
       onSaved();
-      onClose();
     } catch (err: any) {
       console.error(err);
       message.error(err.response?.data?.message || t('workflow.save_error'));
@@ -483,6 +501,32 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       />
 
       <div className="workflow-workspace">
+        {/* Canvas Controls Bar — floats bottom-left over the canvas */}
+        <div className="workflow-canvas-controls">
+          <button
+            className="wf-ctrl-btn wf-help-btn"
+            onClick={() => setShowHelpModal(true)}
+            title={t('workflow.help.title') || 'Hướng dẫn sử dụng'}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
+              {/* ? mark via path */}
+              <path d="M6.5 6.2a1.5 1.5 0 012.8.8c0 .8-.8 1.2-1.3 1.7V9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              <circle cx="8" cy="11.5" r="0.7" fill="currentColor"/>
+            </svg>
+          </button>
+
+          <label className="wf-ctrl-label">
+            <input
+              type="checkbox"
+              checked={showTransitionLabels}
+              onChange={e => setShowTransitionLabels(e.target.checked)}
+              style={{ accentColor: '#6366f1', width: 14, height: 14, cursor: 'pointer' }}
+            />
+            <span>{t('workflow.show_labels') || 'Hiển thị nhãn transition'}</span>
+          </label>
+        </div>
+
         {loading ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-body)' }}>
             <Spin size="large" description={t('workflow.toast.loading_diagram')} />
@@ -502,6 +546,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             isAddingTransition={isAddingTransition}
             addingTransitionFromId={addingTransitionFromId}
             onAddTransitionSelect={handleAddTransitionSelect}
+            showTransitionLabels={showTransitionLabels}
             t={t}
           />
         )}
@@ -536,6 +581,8 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           t={t}
           onSelectNode={handleSelectNode}
           onSelectTransition={handleSelectTransition}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
         />
       </div>
 
@@ -558,6 +605,149 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         }
         editRuleIndex={editRuleIndex}
       />
+
+      {/* Help Modal */}
+      {showHelpModal && (
+        <div className="wf-help-modal-overlay" onClick={() => setShowHelpModal(false)}>
+          <div className="wf-help-modal" onClick={e => e.stopPropagation()}>
+            <div className="wf-help-modal__header">
+              <h3>{t('workflow.help.title') || 'Cách sử dụng sơ đồ Workflow'}</h3>
+              <button className="wf-help-modal__close" onClick={() => setShowHelpModal(false)}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M2 2L14 14M14 2L2 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
+            <div className="wf-help-modal__body">
+              {[
+                {
+                  // Add status: rectangle node + plus badge
+                  icon: (
+                    <svg width="48" height="36" viewBox="0 0 48 36" fill="none">
+                      <rect x="4" y="9" width="36" height="18" rx="5" fill="rgba(99,102,241,0.12)" stroke="#6366f1" strokeWidth="1.5"/>
+                      <rect x="10" y="15" width="18" height="2.5" rx="1.2" fill="#6366f1" opacity="0.6"/>
+                      <rect x="10" y="20" width="12" height="2.5" rx="1.2" fill="#6366f1" opacity="0.35"/>
+                      <circle cx="40" cy="9" r="6" fill="#6366f1"/>
+                      <path d="M40 6v6M37 9h6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/>
+                    </svg>
+                  ),
+                  title: t('workflow.help.add_status.title'),
+                  desc: t('workflow.help.add_status.desc')
+                },
+                {
+                  // 1. Add transition via toolbar
+                  icon: (
+                    <svg width="48" height="36" viewBox="0 0 48 36" fill="none">
+                      {/* Toolbar button */}
+                      <rect x="11" y="2" width="26" height="12" rx="3" fill="rgba(99,102,241,0.15)" stroke="#6366f1" strokeWidth="1.3"/>
+                      <path d="M17 8h4M25 8h4" stroke="#6366f1" strokeWidth="1.3" strokeLinecap="round"/>
+                      <path d="M22 6l2 2-2 2" stroke="#6366f1" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                      {/* Arrow from node A to node B */}
+                      <rect x="1" y="20" width="16" height="13" rx="3" fill="rgba(99,102,241,0.1)" stroke="#6366f1" strokeWidth="1"/>
+                      <rect x="31" y="20" width="16" height="13" rx="3" fill="rgba(16,185,129,0.1)" stroke="#10b981" strokeWidth="1"/>
+                      <path d="M17 26.5H31" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round"/>
+                      <path d="M28 23.5L32 26.5l-4 3" stroke="#6366f1" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                      {/* Step numbers */}
+                      <circle cx="9" cy="26.5" r="4" fill="#6366f1"/>
+                      <rect x="7.5" y="25" width="3" height="3" rx="0.5" fill="white" opacity="0.9"/>
+                      <circle cx="39" cy="26.5" r="4" fill="#10b981"/>
+                      <rect x="37.5" y="25" width="3" height="3" rx="0.5" fill="white" opacity="0.9"/>
+                    </svg>
+                  ),
+                  title: t('workflow.help.add_transition.title'),
+                  desc: t('workflow.help.add_transition.desc')
+                },
+                {
+                  // 2. Preset / quick-create
+                  icon: (
+                    <svg width="48" height="36" viewBox="0 0 48 36" fill="none">
+                      {/* Lightning bolt = preset */}
+                      <circle cx="24" cy="18" r="14" fill="rgba(245,158,11,0.1)" stroke="#f59e0b" strokeWidth="1.3"/>
+                      <path d="M26 8l-6 10h6l-2 10 8-12h-6l2-8z" fill="#f59e0b" opacity="0.85"/>
+                    </svg>
+                  ),
+                  title: t('workflow.help.preset.title'),
+                  desc: t('workflow.help.preset.desc')
+                },
+                {
+                  // 3. Click to inspect
+                  icon: (
+                    <svg width="48" height="36" viewBox="0 0 48 36" fill="none">
+                      <rect x="8" y="9" width="32" height="18" rx="5" fill="rgba(99,102,241,0.08)" stroke="#6366f1" strokeWidth="2"/>
+                      <rect x="6" y="7" width="36" height="22" rx="6" stroke="#6366f1" strokeWidth="0.8" strokeDasharray="3 2" opacity="0.5"/>
+                      {/* Cursor pointer */}
+                      <path d="M27 20l4 8 2-2 3 3 2-2-3-3 2-2-10-4z" fill="#6366f1" opacity="0.8" stroke="#6366f1" strokeWidth="0.5" strokeLinejoin="round"/>
+                    </svg>
+                  ),
+                  title: t('workflow.help.edit.title'),
+                  desc: t('workflow.help.edit.desc')
+                },
+                {
+                  // 4. Drag to move
+                  icon: (
+                    <svg width="48" height="36" viewBox="0 0 48 36" fill="none">
+                      <rect x="13" y="11" width="22" height="14" rx="4" fill="rgba(245,158,11,0.12)" stroke="#f59e0b" strokeWidth="1.5"/>
+                      <path d="M24 7l-2.5 3.5h5L24 7z" fill="#f59e0b"/>
+                      <path d="M24 29l-2.5-3.5h5L24 29z" fill="#f59e0b"/>
+                      <path d="M7 18l3.5-2.5v5L7 18z" fill="#f59e0b"/>
+                      <path d="M41 18l-3.5-2.5v5L41 18z" fill="#f59e0b"/>
+                      <circle cx="24" cy="18" r="2" fill="#f59e0b" opacity="0.6"/>
+                    </svg>
+                  ),
+                  title: t('workflow.help.move.title'),
+                  desc: t('workflow.help.move.desc')
+                },
+                {
+                  // 5. Global transition from sidebar
+                  icon: (
+                    <svg width="48" height="36" viewBox="0 0 48 36" fill="none">
+                      <rect x="1" y="3" width="12" height="10" rx="3" fill="rgba(99,102,241,0.12)" stroke="#6366f1" strokeWidth="1"/>
+                      <rect x="1" y="23" width="12" height="10" rx="3" fill="rgba(99,102,241,0.12)" stroke="#6366f1" strokeWidth="1"/>
+                      <rect x="15" y="13" width="12" height="10" rx="3" fill="rgba(99,102,241,0.12)" stroke="#6366f1" strokeWidth="1"/>
+                      <path d="M13 8L32 18" stroke="#6366f1" strokeWidth="1" strokeDasharray="2 1.5" opacity="0.7"/>
+                      <path d="M13 28L32 18" stroke="#6366f1" strokeWidth="1" strokeDasharray="2 1.5" opacity="0.7"/>
+                      <path d="M27 18H32" stroke="#6366f1" strokeWidth="1" opacity="0.7"/>
+                      <rect x="32" y="11" width="15" height="14" rx="4" fill="rgba(16,185,129,0.15)" stroke="#10b981" strokeWidth="1.5"/>
+                      <path d="M39.5 14l1.2 3h3l-2.4 1.8 1 3-2.8-1.8-2.8 1.8 1-3L36.3 17h3l1.2-3z" fill="#10b981" opacity="0.85"/>
+                    </svg>
+                  ),
+                  title: t('workflow.help.global.title'),
+                  desc: t('workflow.help.global.desc')
+                },
+                {
+                  // 6. Rules from transition sidebar
+                  icon: (
+                    <svg width="48" height="36" viewBox="0 0 48 36" fill="none">
+                      <rect x="1" y="11" width="14" height="14" rx="4" fill="rgba(99,102,241,0.12)" stroke="#6366f1" strokeWidth="1.3"/>
+                      <rect x="33" y="11" width="14" height="14" rx="4" fill="rgba(99,102,241,0.12)" stroke="#6366f1" strokeWidth="1.3"/>
+                      <path d="M15 18H33" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round"/>
+                      <path d="M29.5 14.5L34 18l-4.5 3.5" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                      <rect x="19" y="13" width="10" height="10" rx="3" fill="rgba(239,68,68,0.15)" stroke="#ef4444" strokeWidth="1.2"/>
+                      <path d="M22 18v-2a2 2 0 014 0v2" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round" fill="none"/>
+                      <rect x="21.5" y="18" width="5" height="3.5" rx="1.2" fill="#ef4444" opacity="0.7"/>
+                    </svg>
+                  ),
+                  title: t('workflow.help.rules.title'),
+                  desc: t('workflow.help.rules.desc')
+                },
+              ].map((item, i) => (
+                <div className="wf-help-item" key={i}>
+                  <div className="wf-help-item__icon">{item.icon}</div>
+                  <div className="wf-help-item__content">
+                    <div className="wf-help-item__title">{item.title}</div>
+                    <div className="wf-help-item__desc">{item.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="wf-help-modal__footer">
+              <button className="wf-help-close-btn" onClick={() => setShowHelpModal(false)}>
+                {t('common.close') || 'Đóng'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

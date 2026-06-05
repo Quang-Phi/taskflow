@@ -565,3 +565,99 @@ Trang quản lý cấu hình cá nhân và thiết lập chung của hệ thốn
 | --------- | ------------------ |
 | `Cmd+K` | Mở global search  |
 | `Esc`   | Đóng modal/panel |
+
+---
+
+## 14. WORKFLOW EDITOR (Trình chỉnh sửa quy trình)
+
+Cho phép Manager/Admin thiết lập **quy trình chuyển trạng thái (workflow)** của từng dự án trực quan trên sơ đồ kéo thả. Truy cập từ trang chi tiết dự án → nút **"Manage Statuses"** ở đầu trang → vào `/projects/:id/workflow`.
+
+### 14.1 Thanh công cụ (Toolbar)
+
+Thanh ngang đầu trang gồm:
+
+- **Nút quay lại (←)**: Thoát về trang chi tiết dự án, hủy thay đổi chưa lưu.
+- **Tiêu đề**: "Thiết lập Workflow" + tên dự án.
+- **⇌ Thêm Transition**: Bật/tắt chế độ vẽ transition. Khi bật, click vào node nguồn rồi click node đích để tạo liên kết chuyển trạng thái.
+- **⚡ Tạo nhanh (Preset)**: Dropdown 4 tùy chọn tạo hàng loạt:
+  - **Tất cả (All)**: Tạo transition giữa mọi cặp trạng thái (2 chiều).
+  - **Chỉ tiến (Linear)**: Tạo theo thứ tự tuyến tính từ trái sang phải.
+  - **Tiến + Lùi (Linear Back)**: Tuyến tính 2 chiều.
+  - **Xóa hết (Clear)**: Xóa toàn bộ transition hiện có.
+- **Hủy bỏ**: Thoát không lưu.
+- **💾 Lưu Workflow**: Lưu toàn bộ thay đổi (vị trí node, transitions, global transitions).
+
+### 14.2 Canvas (Sơ đồ kéo thả)
+
+Vùng canvas trung tâm hiển thị sơ đồ workflow tương tác:
+
+- **Node trạng thái**: Mỗi trạng thái (status) của dự án là một node hình chữ nhật, hiển thị badge phân nhóm (NOT_STARTED / ACTIVE / CLOSED) và tên trạng thái. Node "BẮT ĐẦU" (Start) là điểm xuất phát đặc biệt hình tròn.
+- **Kéo thả node**: Giữ và kéo bất kỳ node nào để thay đổi vị trí trên canvas, tự động lưu tọa độ.
+- **Đường transition (mũi tên)**: Các mũi tên kết nối giữa các node thể hiện đường đi hợp lệ. Transition 2 chiều (A↔B) dùng chung 1 đường có mũi tên cả 2 đầu.
+- **Pan (kéo canvas)**: Click giữ nền canvas và kéo để di chuyển toàn bộ sơ đồ.
+- **Highlight khi hover/chọn**:
+  - Hover hoặc click vào một node → tất cả transition nối với node đó sáng lên (màu hover).
+  - Transition 2 chiều được highlight cả 2 mũi tên khi node được kích hoạt.
+- **Badge số transition**: Góc trên phải mỗi node hiển thị số lượng transition kết nối.
+- **Xóa**: Chọn một node hoặc transition rồi nhấn `Delete` để xóa.
+
+### 14.3 Controls bar (Thanh điều khiển)
+
+Thanh nổi góc dưới trái canvas:
+
+- **Nút ? (Hướng dẫn)**: Mở modal hướng dẫn 6 mục giải thích cách dùng sơ đồ.
+- **☑ Hiển thị nhãn transition**: Checkbox bật/tắt hiển thị tên transition trên các đường mũi tên.
+
+### 14.4 Sidebar thuộc tính (Properties Sidebar)
+
+Panel bên phải, collapse/expand bằng nút tròn dính vào viền trái sidebar:
+
+#### Trạng thái chưa chọn (Empty state)
+- Hiển thị biểu tượng và hướng dẫn: "Click vào một trạng thái hoặc transition trên sơ đồ để xem chi tiết".
+
+#### Khi chọn node trạng thái
+- **Tên trạng thái**: Hiển thị tên và dot màu.
+- **Phân nhóm**: Badge loại (NOT_STARTED / ACTIVE / CLOSED).
+- **Thiết lập**: Checkbox "Khởi tạo công việc từ trạng thái này" – đặt làm trạng thái mặc định khi tạo task mới.
+- **Danh sách Transitions**: Liệt kê tất cả transition đi ra từ node, hiển thị `[Từ] → [Đến]`. Click một transition → sidebar chuyển sang xem transition đó.
+- **Nút "+ Thêm Global Transition"**: Tạo global transition đến node này.
+- **Danh sách Global Transitions**: Liệt kê các global transition hiện có, cho phép xóa từng cái.
+
+#### Khi chọn transition (mũi tên)
+- **Breadcrumb**: Tên node cha → quay lại xem node khi click.
+- **Tên transition**: Ô nhập tên (tự động lưu khi blur).
+- **Phân quyền (Allowed Roles)**: Multi-select vai trò được phép thực hiện transition này (nếu để trống = tất cả).
+- **Quy tắc (Rules)**: Danh sách các ràng buộc khi thực hiện transition:
+  - **Restrict transition**: Ẩn transition khi điều kiện không thỏa (theo vai trò).
+  - **Validate details**: Yêu cầu các trường bắt buộc phải điền trước khi chuyển.
+  - **Perform actions**: Tự động gán người, thêm nhãn, đặt trường khi transition hoàn thành.
+  - Mỗi rule có thể thêm nhiều điều kiện con, sắp xếp thứ tự, bật/tắt.
+- **Nút "Xóa Transition"**: Xóa transition hiện tại.
+
+#### Khi chọn global transition
+- Tương tự transition thường nhưng trường **From** là "Bất kỳ" (Any).
+
+### 14.5 Modal Hướng dẫn (Help Modal)
+
+Mở khi nhấn nút "?" ở controls bar. 6 mục hướng dẫn với icon SVG minh họa:
+
+1. **Thêm Transition**: Nhấn "⇌ Thêm Transition" trên toolbar → click node nguồn → click node đích.
+2. **Tạo nhanh (Preset)**: Dropdown "⚡ Tạo nhanh" để tạo hàng loạt transition theo kiểu đã chọn.
+3. **Xem chi tiết & chỉnh sửa**: Click node hoặc mũi tên → mở sidebar phải.
+4. **Di chuyển trạng thái**: Kéo thả node đến vị trí bất kỳ trên canvas.
+5. **Global Transition**: Vào sidebar node → "+ Thêm Global Transition" để cho phép chuyển từ bất kỳ đâu đến node này.
+6. **Quy tắc chuyển trạng thái**: Click transition → mở rộng phần "Quy tắc" để thiết lập ràng buộc.
+
+### 14.6 Notification khi chuyển trạng thái (Workflow-aware)
+
+Khi user chuyển trạng thái task (qua Board, checkbox, hoặc Task Detail):
+- Hệ thống kiểm tra **workflow của dự án** để xác định transition nào hợp lệ từ trạng thái hiện tại.
+- Nếu transition có **quy tắc vi phạm** (thiếu trường, sai vai trò): Hiển thị thông báo cụ thể giải thích lý do bị chặn, không phải thông báo chung chung.
+- Nếu transition không tồn tại trong workflow: Thông báo trạng thái không thể chuyển trực tiếp.
+
+### 14.7 Lưu trữ dữ liệu
+
+Workflow được lưu trong trường `statuses` (json) của bảng `projects`, bao gồm:
+- Danh sách trạng thái (id, name, color, type, position trên canvas).
+- Danh sách transitions (id, from, to, name, allowed_roles, rules).
+- Danh sách global transitions (id, to, name, allowed_roles, rules).

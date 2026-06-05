@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo, startTransition } from 'react';
 import { Dropdown, Tooltip, message, Modal, Select, Button, Popconfirm, Spin, Popover, Input, DatePicker } from 'antd';
 import {
   CloseOutlined,
@@ -25,13 +25,21 @@ import {
   SmileOutlined,
   CheckSquareOutlined,
   SubnodeOutlined,
-  RobotOutlined,
+  LikeOutlined,
+  DislikeOutlined,
+  ReloadOutlined,
+  ArrowLeftOutlined,
+  CopyOutlined,
+  MoreOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { getEcho } from '../../services/echo';
 import { useTranslation } from '../../utils/i18n';
 import dayjs from 'dayjs';
 import './TaskDetailPanel.scss';
+import TaskTypeBadge from './TaskTypeBadge';
+import { useDeleteConfirm } from './DeleteConfirmModal';
 
 const EMOJI_CATEGORIES = [
   {
@@ -133,6 +141,7 @@ interface Task {
   custom_field_values?: any[];
   checklists?: any[];
   attachments?: any[];
+  type?: string;
 }
 
 interface TaskDetailPanelProps {
@@ -143,7 +152,6 @@ interface TaskDetailPanelProps {
   projectStatuses?: any[];
 }
 
-// Priority Config ClickUp Style
 const PRIORITIES = [
   { id: 'urgent', name: 'Khẩn cấp', nameEn: 'Urgent', color: '#ef4444', icon: '🚩' },
   { id: 'high', name: 'Cao', nameEn: 'High', color: '#f97316', icon: '🏁' },
@@ -161,13 +169,30 @@ const FlagIcon: React.FC<{ color: string; size?: number }> = ({ color, size = 14
   </svg>
 );
 
+// Helper to auto-resize textareas based on content
+const adjustTextareaHeight = (el: HTMLTextAreaElement | null) => {
+  if (el) {
+    el.style.height = 'auto';
+    // Add 4px buffer to prevent border-box subpixel overflow from triggering browser focus scroll
+    el.style.height = `${el.scrollHeight + 4}px`;
+    el.scrollTop = 0;
+    setTimeout(() => {
+      if (el) {
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight + 4}px`;
+        el.scrollTop = 0;
+      }
+    }, 0);
+  }
+};
+
 // Priority Picker Component
 const PriorityPicker: React.FC<{
   value: string;
   onChange: (val: string) => void;
   disabled?: boolean;
 }> = ({ value, onChange, disabled }) => {
-  const { t, lang } = useTranslation();
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const current = PRIORITIES.find(p => p.id === value) || PRIORITIES[2];
 
@@ -403,15 +428,28 @@ const TimeTracker: React.FC<{
   const [showManualAdd, setShowManualAdd] = useState(false);
   const [manualHours, setManualHours] = useState(0);
   const [manualMinutes, setManualMinutes] = useState(0);
+  const [manualDate, setManualDate] = useState<any>(null);
   const [manualDesc, setManualDesc] = useState('');
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (showManualAdd) {
+      setManualDate(dayjs());
+    } else {
+      setManualHours(0);
+      setManualMinutes(0);
+      setManualDesc('');
+      setManualDate(null);
+    }
+  }, [showManualAdd]);
 
   useEffect(() => {
     const runningEntry = timeEntries.find((e: any) => !e.ended_at);
     setRunning(runningEntry || null);
     if (runningEntry) {
       const started = new Date(runningEntry.started_at).getTime();
-      setElapsed(Math.round((Date.now() - started) / 1000));
+      const offset = Number(localStorage.getItem('taskflow_server_time_offset') || 0);
+      setElapsed(Math.max(0, Math.round((Date.now() + offset - started) / 1000)));
     }
   }, [timeEntries]);
 
@@ -419,7 +457,8 @@ const TimeTracker: React.FC<{
     if (running) {
       timerRef.current = setInterval(() => {
         const started = new Date(running.started_at).getTime();
-        setElapsed(Math.round((Date.now() - started) / 1000));
+        const offset = Number(localStorage.getItem('taskflow_server_time_offset') || 0);
+        setElapsed(Math.max(0, Math.round((Date.now() + offset - started) / 1000)));
       }, 1000);
     } else {
       setElapsed(0);
@@ -457,64 +496,104 @@ const TimeTracker: React.FC<{
 
   const handleAddManual = async () => {
     const totalSec = (manualHours * 3600) + (manualMinutes * 60);
-    if (totalSec <= 0) return;
+    if (totalSec <= 0) {
+      message.warning(t('tasks.panel.invalid_time'));
+      return;
+    }
     try {
-      await api.addManualTime(taskId, { duration: totalSec, description: manualDesc || undefined });
+      const payload: any = {
+        duration: totalSec,
+        description: manualDesc || undefined,
+      };
+      if (manualDate) {
+        payload.started_at = manualDate.toISOString();
+      }
+      await api.addManualTime(taskId, payload);
       setManualHours(0);
       setManualMinutes(0);
+      setManualDate(null);
       setManualDesc('');
       setShowManualAdd(false);
       window.dispatchEvent(new Event('timer-updated'));
       onUpdate(true);
       message.success(t('tasks.detail_toast.time_added'));
     } catch (err: any) {
-      message.error(t('tasks.detail_toast.time_add_err'));
+      message.error(err.response?.data?.message || t('tasks.detail_toast.time_add_err'));
     }
   };
 
   const manualAddContent = (
-    <div style={{ width: '220px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('tasks.panel.add_manual_time')}</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <input
-          type="number"
-          min={0}
-          placeholder="0"
-          value={manualHours || ''}
-          onChange={e => setManualHours(Number(e.target.value) || 0)}
-          style={{ width: '60px', textAlign: 'center', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px', color: 'var(--text-primary)', fontSize: '12px', outline: 'none' }}
-        />
-        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>h</span>
-        <input
-          type="number"
-          min={0}
-          max={59}
-          placeholder="0"
-          value={manualMinutes || ''}
-          onChange={e => setManualMinutes(Number(e.target.value) || 0)}
-          style={{ width: '60px', textAlign: 'center', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px', color: 'var(--text-primary)', fontSize: '12px', outline: 'none' }}
-        />
-        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>m</span>
+    <div className="manual-time-container">
+      <div className="manual-time-header">
+        <ClockCircleOutlined className="header-icon" />
+        <span>{t('tasks.panel.add_manual_time')}</span>
       </div>
-      <Input
-        placeholder={t('tasks.panel.time_tracking_note_placeholder')}
-        value={manualDesc}
-        onChange={e => setManualDesc(e.target.value)}
-        size="small"
-      />
-      <Button
-        type="primary"
-        size="small"
-        onClick={handleAddManual}
-        style={{ width: '100%', fontSize: '12px' }}
-      >
-        {t('tasks.panel.save')}
-      </Button>
+
+      <div className="manual-time-section">
+        <span className="section-label">{t('tasks.panel.time')}</span>
+        <div className="manual-time-duration-grid">
+          <div className="manual-time-duration-card">
+            <input
+              type="number"
+              min={0}
+              placeholder="0"
+              value={manualHours || ''}
+              onChange={e => setManualHours(Math.max(0, Number(e.target.value) || 0))}
+            />
+            <span className="duration-unit">h</span>
+          </div>
+          <div className="manual-time-duration-card">
+            <input
+              type="number"
+              min={0}
+              max={59}
+              placeholder="0"
+              value={manualMinutes || ''}
+              onChange={e => setManualMinutes(Math.max(0, Math.min(59, Number(e.target.value) || 0)))}
+            />
+            <span className="duration-unit">m</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="manual-time-section">
+        <span className="section-label">{t('tasks.panel.start_time')}</span>
+        <div className="manual-time-datepicker">
+          <DatePicker
+            showTime
+            format="YYYY-MM-DD HH:mm"
+            value={manualDate}
+            onChange={setManualDate}
+            placeholder={t('tasks.panel.start_time')}
+            style={{ width: '100%' }}
+          />
+        </div>
+      </div>
+
+      <div className="manual-time-section">
+        <span className="section-label">{t('tasks.panel.time_tracking_note_placeholder')}</span>
+        <Input.TextArea
+          rows={2}
+          placeholder={t('tasks.panel.time_tracking_note_placeholder')}
+          value={manualDesc}
+          onChange={e => setManualDesc(e.target.value)}
+          className="manual-time-textarea"
+        />
+      </div>
+
+      <div className="manual-time-actions">
+        <button className="btn-cancel" onClick={() => setShowManualAdd(false)}>
+          {t('tasks.panel.cancel')}
+        </button>
+        <button className="btn-save" onClick={handleAddManual}>
+          {t('tasks.panel.save_short')}
+        </button>
+      </div>
     </div>
   );
 
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(120, 120, 120, 0.05)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '4px 12px', width: 'fit-content' }}>
+    <div className="time-tracker-pill" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', borderRadius: '16px', padding: '4px 12px', width: 'fit-content' }}>
       {running ? (
         <Tooltip title={t('tasks.panel.stop_timer')}>
           <button
@@ -540,13 +619,14 @@ const TimeTracker: React.FC<{
       <span style={{ width: '1px', height: '12px', background: 'var(--border-color)' }} />
 
       <Popover
-        trigger="click"
-        open={showManualAdd}
-        onOpenChange={setShowManualAdd}
+        trigger={disabled ? [] as any : "click"}
+        open={disabled ? false : showManualAdd}
+        onOpenChange={(open) => !disabled && setShowManualAdd(open)}
         placement="bottomLeft"
         content={manualAddContent}
+        overlayClassName="manual-time-popover"
       >
-        <div style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', cursor: disabled ? 'not-allowed' : 'pointer' }}>
           {running ? (
             <span style={{ fontSize: '12px', color: '#ef4444', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
               <span className="timer-dot-pulse" style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />
@@ -557,7 +637,7 @@ const TimeTracker: React.FC<{
               {formatDuration(totalTracked, t)}
             </span>
           ) : (
-            <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 600 }}>
+            <span style={{ fontSize: '12px', color: disabled ? 'var(--text-secondary)' : 'var(--primary)', fontWeight: 600 }}>
               {t('tasks.panel.add_time')}
             </span>
           )}
@@ -575,12 +655,17 @@ const SubtaskTitleInput: React.FC<{
 }> = ({ subtask, disabled, onUpdate }) => {
   const { t } = useTranslation();
   const [title, setTitle] = useState(subtask.title);
+  const [isEditing, setIsEditing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setTitle(subtask.title);
   }, [subtask.title]);
 
+
+
   const handleBlur = async () => {
+    setIsEditing(false);
     if (title.trim() === '') {
       setTitle(subtask.title);
       return;
@@ -597,33 +682,263 @@ const SubtaskTitleInput: React.FC<{
     }
   };
 
+  if (isEditing && !disabled) {
+    return (
+      <textarea
+        ref={(el) => {
+          textareaRef.current = el;
+          if (el) {
+            adjustTextareaHeight(el);
+          }
+        }}
+        value={title}
+        onChange={(e) => {
+          setTitle(e.target.value);
+          adjustTextareaHeight(e.target);
+        }}
+        onFocus={(e) => {
+          adjustTextareaHeight(e.target);
+        }}
+        onBlur={handleBlur}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            (e.target as HTMLTextAreaElement).blur();
+          }
+        }}
+        autoFocus
+        style={{
+          flex: 1,
+          background: 'var(--bg-input, rgba(255, 255, 255, 0.05))',
+          border: '1px solid var(--primary-color, #6366f1)',
+          outline: 'none',
+          fontSize: '13px',
+          fontWeight: 500,
+          lineHeight: '1.4',
+          color: 'var(--text-primary)',
+          padding: '2px 4px',
+          borderRadius: '4px',
+          width: '100%',
+          resize: 'none',
+          fontFamily: 'inherit',
+          minHeight: '24px',
+          overflow: 'hidden',
+        }}
+        className="subtask-title-inline-input editing"
+      />
+    );
+  }
+
   return (
-    <input
-      type="text"
-      value={title}
-      disabled={disabled}
-      onChange={(e) => setTitle(e.target.value)}
-      onBlur={handleBlur}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          (e.target as HTMLInputElement).blur();
-        }
+    <span
+      onClick={() => {
+        if (!disabled) setIsEditing(true);
       }}
       style={{
         flex: 1,
-        background: 'transparent',
-        border: 'none',
-        outline: 'none',
         fontSize: '13px',
         fontWeight: 500,
         color: subtask.status === 'done' ? 'var(--text-muted)' : 'var(--text-primary)',
         textDecoration: subtask.status === 'done' ? 'line-through' : 'none',
-        padding: '2px 4px',
+        padding: '3px 5px',
         borderRadius: '4px',
         width: '100%',
+        cursor: disabled ? 'default' : 'pointer',
+        whiteSpace: 'normal',
+        wordBreak: 'break-word',
+        display: 'inline-block',
       }}
-      className="subtask-title-inline-input"
+      className="subtask-title-text-span"
+    >
+      {title}
+    </span>
+  );
+};
+
+// ─── Memoized ChecklistItemRow ───────────────────────────────────────────────
+// Uses local isChecked state for INSTANT visual feedback on checkbox click.
+// Parent's handleUpdateChecklistItem is called async in background.
+// This prevents the 200-380ms delay caused by full parent re-render.
+const ChecklistItemRow = React.memo(({
+  item,
+  checklist,
+  taskEditable,
+  members,
+  onUpdate,
+  onDelete,
+  onConvert,
+  t,
+  getInitials,
+}: {
+  item: any;
+  checklist: any;
+  taskEditable: boolean;
+  members: any[];
+  onUpdate: (itemId: number, checklistId: number, data: any) => void;
+  onDelete: (itemId: number, checklistId: number) => void;
+  onConvert: (itemId: number, checklistId: number, type: 'task' | 'subtask') => void;
+  t: (key: string, opts?: any) => any;
+  getInitials: (name: string) => string;
+}) => {
+  const [isChecked, setIsChecked] = React.useState(item.is_checked);
+  const assignedMember = members.find((m: any) => m.id === item.assignee_id);
+
+  // Sync with parent state when item prop changes (e.g. after API confirm)
+  React.useEffect(() => { setIsChecked(item.is_checked); }, [item.is_checked]);
+
+  const handleCheck = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const checked = e.target.checked;
+    setIsChecked(checked); // Instant local update — NO parent re-render
+    onUpdate(item.id, checklist.id, { is_checked: checked }); // async background
+  }, [item.id, checklist.id, onUpdate]);
+
+  return (
+    <div
+      className="checklist-item-row"
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '12px', background: 'rgba(255, 255, 255, 0.02)',
+        border: '1px solid var(--border-color)', borderRadius: '6px', padding: '8px 12px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+        <input
+          type="checkbox"
+          checked={isChecked}
+          disabled={!taskEditable}
+          onChange={handleCheck}
+          style={{ cursor: 'pointer', margin: 0 }}
+        />
+        <span style={{
+          fontSize: '13px',
+          color: isChecked ? 'var(--text-muted)' : 'var(--text-primary)',
+          textDecoration: isChecked ? 'line-through' : 'none',
+          flex: 1
+        }}>
+          {item.name}
+        </span>
+      </div>
+      {/* Member & Options — kept inline for simplicity */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {assignedMember ? (
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{assignedMember.name}</span>
+        ) : null}
+        {taskEditable && (
+          <button
+            onClick={() => onDelete(item.id, checklist.id)}
+            className="checklist-item-delete-btn"
+            title={t('tasks.panel.delete')}
+          >
+            <CloseOutlined style={{ fontSize: '10px' }} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+});
+
+// ─── Memoized SubtaskCheckbox ─────────────────────────────────────────────────
+// Uses local isDone state for INSTANT visual feedback.
+// The controlled checkbox re-renders would revert visually until parent state updates.
+// Local state prevents that 300ms flicker/delay.
+const SubtaskCheckbox = React.memo(({
+  subtask,
+  finalStatusId,
+  taskEditable,
+  onToggle,
+}: {
+  subtask: any;
+  finalStatusId: string;
+  taskEditable: boolean;
+  onToggle: (st: any) => void;
+}) => {
+  const [isDone, setIsDone] = React.useState(subtask.status === finalStatusId);
+
+  // Sync when parent confirms the API update
+  React.useEffect(() => {
+    setIsDone(subtask.status === finalStatusId);
+  }, [subtask.status, finalStatusId]);
+
+  return (
+    <input
+      type="checkbox"
+      checked={isDone}
+      disabled={!taskEditable}
+      onClick={(e) => e.stopPropagation()}
+      onChange={() => {
+        setIsDone(prev => !prev); // instant visual — no parent re-render
+        onToggle(subtask);        // async in background via startTransition
+      }}
+      style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#10b981', flexShrink: 0 }}
     />
+  );
+});
+
+const TaskTitleInput: React.FC<{
+  initialTitle: string;
+  taskEditable: boolean;
+  onSave: (newTitle: string) => Promise<void> | void;
+}> = ({ initialTitle, taskEditable, onSave }) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const divRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (divRef.current && document.activeElement !== divRef.current) {
+      divRef.current.textContent = initialTitle;
+    }
+  }, [initialTitle]);
+
+  const handleBlur = async () => {
+    setIsFocused(false);
+    const newTitle = divRef.current?.textContent || '';
+    if (newTitle.trim() === '') {
+      if (divRef.current) divRef.current.textContent = initialTitle;
+      return;
+    }
+    if (newTitle !== initialTitle) {
+      await onSave(newTitle);
+    }
+  };
+
+  return (
+    <div
+      ref={divRef}
+      contentEditable={taskEditable}
+      suppressContentEditableWarning
+      onFocus={() => {
+        setIsFocused(true);
+      }}
+      onBlur={handleBlur}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.currentTarget.textContent = initialTitle;
+          e.currentTarget.blur();
+        }
+      }}
+      style={{
+        fontSize: '22px',
+        fontWeight: 700,
+        lineHeight: '1.4',
+        color: 'var(--text-primary)',
+        width: '100%',
+        padding: '4px 0',
+        outline: 'none',
+        borderBottom: isFocused ? '1px solid var(--primary)' : '1px solid transparent',
+        cursor: taskEditable ? 'text' : 'default',
+        whiteSpace: 'normal',
+        wordBreak: 'break-word',
+        background: isFocused ? 'var(--bg-input, rgba(255, 255, 255, 0.02))' : 'transparent',
+        borderRadius: '4px',
+        transition: 'background 0.2s, border-color 0.2s',
+      }}
+      className="task-title-display-div"
+    >
+      {initialTitle}
+    </div>
   );
 };
 
@@ -804,22 +1119,15 @@ const getStatusName = (statusId: string, t: any, projectStatuses?: any[]): strin
   if (projectStatuses && Array.isArray(projectStatuses)) {
     const found = projectStatuses.find(s => s.id === statusId);
     if (found) {
-      const defaultNames = ['TO DO', 'IN PROGRESS', 'REVIEW', 'COMPLETE', 'DONE', 'TODO', 'CẦN LÀM', 'ĐANG LÀM', 'ĐANG DUYỆT', 'HOÀN THÀNH', 'ĐÃ XONG'];
-      const isDefault = defaultNames.includes(found.name?.toUpperCase());
-      if (isDefault) {
-        const translationKey = `tasks.status.${found.id}`;
-        const translated = t(translationKey as any);
-        if (translated !== translationKey) return translated;
-      }
       return found.name || statusId;
     }
   }
 
   // Default fallbacks
-  if (statusId === 'todo') return t('tasks.status.todo');
-  if (statusId === 'in_progress') return t('tasks.status.in_progress');
-  if (statusId === 'review') return t('tasks.status.in_review');
-  if (statusId === 'done') return t('tasks.status.done');
+  if (statusId === 'todo') return 'TO DO';
+  if (statusId === 'in_progress') return 'IN PROGRESS';
+  if (statusId === 'review') return 'REVIEW';
+  if (statusId === 'done') return 'COMPLETE';
 
   return statusId;
 };
@@ -1036,12 +1344,14 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   projectStatuses: initialStatuses,
 }) => {
   const { t, lang } = useTranslation();
+  const { showDeleteConfirm, DeleteConfirmComponent } = useDeleteConfirm();
   const [task, setTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState<User | null>(null);
   const [project, setProject] = useState<any>(null);
   const commentsListRef = useRef<HTMLDivElement | null>(null);
   const activitiesListRef = useRef<HTMLDivElement | null>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -1064,8 +1374,15 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   const [statuses, setStatuses] = useState<any[]>(initialStatuses || []);
 
   // Form edit states
-  const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
+
+  useLayoutEffect(() => {
+    if (descriptionRef.current) {
+      adjustTextareaHeight(descriptionRef.current);
+    }
+  }, [editDescription]);
+
+
   const [editStatus, setEditStatus] = useState('todo');
   const [editPriority, setEditPriority] = useState('medium');
   const [editAssigneeId, setEditAssigneeId] = useState<number | string | undefined>(undefined);
@@ -1078,23 +1395,50 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   const [subtaskPriority, setSubtaskPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [subtaskStartDate, setSubtaskStartDate] = useState('');
   const [subtaskDueDate, setSubtaskDueDate] = useState('');
+  const [showAddSubtaskForm, setShowAddSubtaskForm] = useState(false);
 
   // Comments and Activities states
   const [comments, setComments] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [commentsCount, setCommentsCount] = useState(0);
   const [activitiesCount, setActivitiesCount] = useState(0);
-  const [newCommentText, setNewCommentText] = useState('');
+  // Use ref for comment text to avoid re-rendering the entire 4900-line component on every keystroke
+  const newCommentTextRef = useRef('');
+  const [hasCommentText, setHasCommentText] = useState(false); // only for send button appearance
   const [newCommentFile, setNewCommentFile] = useState<File | null>(null);
   const [commentFilePreview, setCommentFilePreview] = useState<string | null>(null);
   const [panelTab, setPanelTab] = useState<'comments' | 'history'>('comments');
   const [aiPromptChecklist, setAiPromptChecklist] = useState('');
   const [aiChecklistLoading, setAiChecklistLoading] = useState(false);
-  const [isAiChecklistPopoverOpen, setIsAiChecklistPopoverOpen] = useState(false);
-  const [isAiDescChecklistPopoverOpen, setIsAiDescChecklistPopoverOpen] = useState(false);
+  const [aiDescLoading, setAiDescLoading] = useState(false);
+  const [aiSubtasksLoading, setAiSubtasksLoading] = useState(false);
+  const aiLoading = aiDescLoading || aiSubtasksLoading || aiChecklistLoading;
+
+  // Brain AI Preview Modal States
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [aiModalType, setAiModalType] = useState<'description' | 'subtasks' | 'checklist'>('description');
+  const [aiModalPrompt, setAiModalPrompt] = useState(''); // kept for legacy reads
+  const aiModalPromptRef = useRef('');   // uncontrolled — no parent re-render on keystroke
+  const aiModalInputRef = useRef<HTMLInputElement>(null); // DOM ref to clear input
+  const [aiModalResult, setAiModalResult] = useState<any>(null);
+  const [aiModalLoading, setAiModalLoading] = useState(false);
+
+  // Attachment preview states
+  const [previewAttachment, setPreviewAttachment] = useState<any | null>(null);
+  const [previewSrc, setPreviewSrc] = useState('');
+  const [previewType, setPreviewType] = useState<'image' | 'pdf' | 'office' | ''>('');
+  const [previewTitle, setPreviewTitle] = useState('');
+
+  // Rename attachment modal state (custom — follows dark theme unlike Modal.confirm)
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
+  const [renameAttachmentId, setRenameAttachmentId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
 
   // Comment replies & expansion states
-  const [replyText, setReplyText] = useState('');
+  // replyText: use ref to avoid re-rendering the whole component on every keystroke
+  const replyTextRef = useRef('');
+  const [hasReplyText, setHasReplyText] = useState(false);
   const [replyFile, setReplyFile] = useState<File | null>(null);
   const [replyFilePreview, setReplyFilePreview] = useState<string | null>(null);
   const [replyingToCommentId, setReplyingToCommentId] = useState<number | null>(null);
@@ -1147,15 +1491,137 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     }
   }, [replyingToCommentId, replyingToSubCommentId]);
 
+  const refreshActivities = async () => {
+    if (!task?.id) return;
+    try {
+      const res = await api.getTaskActivities(task.id, 1);
+      if (res?.success) {
+        const sortedActs = [...(res.data || [])].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setActivities(sortedActs);
+        setActivitiesPage(1);
+        setActivitiesHasMore(res.pagination?.has_more || false);
+        setActivitiesCount(res.pagination?.total || sortedActs.length);
+      }
+    } catch (err) {
+      console.error('Failed to refresh activities:', err);
+    }
+  };
+
+  const getFileUrl = (path: string) => {
+    if (!path) return '';
+    return path.startsWith('http') ? path : (api.getBackendUrl() + path);
+  };
+
+  const isImageFile = (filename: string) => {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    return ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp'].includes(ext || '');
+  };
+
+  const handlePreviewAttachment = (att: any) => {
+    const path = att.file_path;
+    const ext = att.file_name.split('.').pop()?.toLowerCase() || '';
+    const rawName = path.split('/').pop() || '';
+    const displayName = rawName.replace(/^\d+_/, '');
+    const titleText = (t('tasks.panel.preview_file' as any) || 'Xem file: ') + displayName;
+    setPreviewTitle(titleText);
+
+    const fileUrl = getFileUrl(path);
+
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+      setPreviewSrc(fileUrl);
+      setPreviewType('image');
+    } else if (ext === 'pdf') {
+      setPreviewSrc(fileUrl);
+      setPreviewType('pdf');
+    } else if (['doc', 'docx', 'xls', 'xlsx'].includes(ext)) {
+      const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+      const publicUrl = getFileUrl(encodedPath);
+      setPreviewSrc(`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`);
+      setPreviewType('office');
+    } else {
+      // Unknown type: open in new tab
+      window.open(fileUrl, '_blank');
+      return;
+    }
+
+    setPreviewAttachment(att);
+  };
+
+  const handleRenameAttachment = (attachmentId: number, currentName: string) => {
+    setRenameAttachmentId(attachmentId);
+    setRenameValue(currentName);
+    setRenameModalOpen(true);
+  };
+
+  const handleRenameConfirm = async () => {
+    if (!renameValue.trim()) {
+      message.warning(t('tasks.panel.name_required' as any));
+      return;
+    }
+    if (!renameAttachmentId) return;
+    setRenameLoading(true);
+    try {
+      const res = await api.renameAttachment(renameAttachmentId, renameValue);
+      if (res.success) {
+        message.success(t('tasks.detail_toast.attachment_rename_success' as any));
+        setTask(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            attachments: (prev.attachments || []).map(a =>
+              a.id === renameAttachmentId ? { ...a, file_name: renameValue } : a
+            )
+          };
+        });
+        refreshActivities();
+        setRenameModalOpen(false);
+      }
+    } catch (err) {
+      console.error(err);
+      message.error(t('tasks.detail_toast.attachment_rename_err' as any));
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
+  const handleCopyUrl = (filePath: string) => {
+    const fullUrl = getFileUrl(filePath);
+    navigator.clipboard.writeText(fullUrl)
+      .then(() => {
+        message.success(t('tasks.detail_toast.copy_url_success' as any) || 'Đã sao chép đường dẫn');
+      })
+      .catch((err) => {
+        console.error(err);
+        message.error(t('tasks.detail_toast.copy_url_err' as any) || 'Không thể sao chép');
+      });
+  };
+
+  const handleDownloadFile = (filePath: string, fileName: string) => {
+    const link = document.createElement('a');
+    link.href = getFileUrl(filePath);
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDeleteAttachmentConfirm = (attachmentId: number) => {
+    showDeleteConfirm({
+      title: t('tasks.panel.delete_attachment_confirm'),
+      okText: t('tasks.panel.delete'),
+      cancelText: t('tasks.panel.cancel'),
+      onConfirm: () => handleDeleteAttachment(attachmentId),
+    });
+  };
+
   // Fetch Task Details
-  const fetchTaskDetails = async (id: number | string) => {
-    setLoading(true);
+  const fetchTaskDetails = async (id: number | string, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await api.getTask(id);
       if (res.success) {
         const fullTask = res.data as Task;
         setTask(fullTask);
-        setEditTitle(fullTask.title || '');
         setEditDescription(fullTask.description || '');
         setEditStatus(fullTask.status || 'todo');
         setEditPriority(fullTask.priority || 'medium');
@@ -1200,9 +1666,9 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
       }
     } catch (err) {
       console.error(err);
-      message.error(t('tasks.detail_toast.fetch_err'));
+      if (!silent) message.error(t('tasks.detail_toast.fetch_err'));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -1210,6 +1676,18 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     if (taskId) {
       fetchTaskDetails(taskId);
     }
+  }, [taskId]);
+
+  useEffect(() => {
+    const handleTimerUpdated = () => {
+      if (taskId) {
+        fetchTaskDetails(taskId, true);
+      }
+    };
+    window.addEventListener('timer-updated', handleTimerUpdated);
+    return () => {
+      window.removeEventListener('timer-updated', handleTimerUpdated);
+    };
   }, [taskId]);
 
   useEffect(() => {
@@ -1236,22 +1714,44 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
           return [...prev, comment];
         });
         setCommentsCount(prev => prev + 1);
+        refreshActivities();
       } else if (data.action === 'updated' && data.taskData.id === task.id) {
         setTask(prev => prev ? { ...prev, ...data.taskData } : null);
-        setEditTitle(data.taskData.title || '');
-        setEditDescription(data.taskData.description || '');
-        setEditStatus(data.taskData.status || 'todo');
-        setEditPriority(data.taskData.priority || 'medium');
-        setEditAssigneeId(data.taskData.assignee_id || undefined);
-        setEditStartDate(data.taskData.start_date || '');
-        setEditDueDate(data.taskData.due_date || '');
+        // Only update edit states for fields that are actually present in the broadcast payload
+        // (broadcast may be a minimal payload without description, checklists, etc.)
+        if ('description' in data.taskData) setEditDescription(data.taskData.description || '');
+        if ('status' in data.taskData) setEditStatus(data.taskData.status || 'todo');
+        if ('priority' in data.taskData) setEditPriority(data.taskData.priority || 'medium');
+        if ('assignee_id' in data.taskData) setEditAssigneeId(data.taskData.assignee_id || undefined);
+        if ('start_date' in data.taskData) setEditStartDate(data.taskData.start_date || '');
+        if ('due_date' in data.taskData) setEditDueDate(data.taskData.due_date || '');
+        refreshActivities();
+      } else if (data.action === 'comment_reacted' && data.taskData.task_id === task.id) {
+        const { comment_id, reactions } = data.taskData;
+        setComments(prev => prev.map((c: any) => c.id === comment_id ? { ...c, reactions } : c));
+      }
+    };
+
+    const handleTimerUpdated = (data: { action: string; userId: number; timeEntry?: any; serverTime?: string }) => {
+      console.log('[Echo] TaskDetailPanel received project timer update:', data);
+      if (data?.serverTime) {
+        const serverTimeMs = new Date(data.serverTime).getTime();
+        if (!isNaN(serverTimeMs)) {
+          const offset = serverTimeMs - Date.now();
+          localStorage.setItem('taskflow_server_time_offset', String(offset));
+        }
+      }
+      if (data.timeEntry && Number(data.timeEntry.task_id) === Number(task.id)) {
+        fetchTaskDetails(task.id, true);
       }
     };
 
     channel.listen('.task.updated', handleTaskUpdated);
+    channel.listen('.timer.updated', handleTimerUpdated);
 
     return () => {
       channel.stopListening('.task.updated', handleTaskUpdated);
+      channel.stopListening('.timer.updated', handleTimerUpdated);
     };
   }, [task?.id, task?.project_id]);
 
@@ -1321,6 +1821,14 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   const taskEditable = checkCanEditTask();
   const canDelete = checkCanDeleteTask();
 
+  const isTaskDone = (t: any) => {
+    if (!t) return false;
+    const projectStatuses = t.project?.statuses || [];
+    const statusObj = projectStatuses.find((s: any) => s.id === t.status);
+    if (statusObj) return statusObj.type === 'closed';
+    return t.status === 'done';
+  };
+
   // Auto Save fields helper
   const autoSaveTaskField = async (fieldName: string, value: any) => {
     try {
@@ -1329,12 +1837,20 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
       if (fieldName === 'start_date') startVal = value;
       if (fieldName === 'due_date') dueVal = value;
 
+      let assigneeIdVal = fieldName === 'assignee_id' ? (value || null) : (editAssigneeId || null);
+
+      // If the task has no assignee, and the status changes, assign it to the current logged-in user
+      if (fieldName === 'status' && !editAssigneeId && me?.id) {
+        assigneeIdVal = me.id;
+        setEditAssigneeId(me.id);
+      }
+
       const payload: any = {
-        title: fieldName === 'title' ? value : editTitle,
+        title: fieldName === 'title' ? value : (task ? task.title : ''),
         description: fieldName === 'description' ? value : editDescription,
         status: fieldName === 'status' ? value : editStatus,
         priority: fieldName === 'priority' ? value : editPriority,
-        assignee_id: fieldName === 'assignee_id' ? (value || null) : (editAssigneeId || null),
+        assignee_id: assigneeIdVal,
         start_date: startVal ? new Date(startVal).toISOString() : null,
         due_date: dueVal ? new Date(dueVal).toISOString() : null,
       };
@@ -1343,10 +1859,22 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
       if (res.success) {
         setTask(prev => prev ? { ...prev, ...res.data } : null);
         onUpdate(true);
+        refreshActivities();
       }
     } catch (err: any) {
       console.error(err);
       message.error(err.response?.data?.message || t('tasks.detail_toast.auto_save_err'));
+    }
+  };
+
+  // Type Change Handler
+  const handleTypeChange = async (newType: 'task' | 'bug') => {
+    if (!task?.id) return;
+    try {
+      await api.updateTask(task.id, { type: newType });
+      setTask((prev: any) => prev ? { ...prev, type: newType } : prev);
+    } catch (err) {
+      console.error('Failed to update task type', err);
     }
   };
 
@@ -1355,7 +1883,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     try {
       const res = await api.toggleWatchTask(task.id);
       if (res.success) {
-        setTask(prev => prev ? { ...prev, watcher_ids: res.data } : null);
+        setTask(prev => prev ? { ...prev, watcher_ids: res.watcher_ids } : null);
         onUpdate(true);
         message.success(t('tasks.detail_toast.watcher_success'));
       }
@@ -1364,15 +1892,13 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     }
   };
 
-  // Delete Task
   const handleDeleteTask = () => {
-    Modal.confirm({
+    showDeleteConfirm({
       title: t('project_detail.confirm.delete_task'),
       content: t('project_detail.confirm.delete_task_content'),
       okText: t('tasks.action.delete'),
-      okType: 'danger',
       cancelText: t('tasks.panel.cancel'),
-      onOk: async () => {
+      onConfirm: async () => {
         try {
           const res = await api.deleteTask(task.id);
           if (res.success) {
@@ -1380,8 +1906,9 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
             onClose();
             onUpdate(true);
           }
-        } catch {
+        } catch (err) {
           message.error(t('tasks.detail_toast.delete_err'));
+          throw err;
         }
       }
     });
@@ -1414,18 +1941,48 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     const firstStatusId = getFirstStatusId(statuses);
     const isDone = st.status === finalStatusId;
     const newStatus = isDone ? firstStatusId : finalStatusId;
+
+    // Optimistic Update — deferred via startTransition so the click handler
+    // returns quickly without blocking the UI thread for 300+ms.
+    // Visual feedback is immediate via SubtaskRow's local state.
+    const previousSubtasks = task.subtasks || [];
+    const updatedSubtasks = previousSubtasks.map((sub: any) =>
+      sub.id === st.id ? { ...sub, status: newStatus } : sub
+    );
+    startTransition(() => {
+      setTask(prev => prev ? { ...prev, subtasks: updatedSubtasks } : null);
+    });
+
     try {
       const res = await api.updateTask(st.id, { status: newStatus });
       if (res.success) {
         // Reload details to get refreshed subtask tree
         const taskRes = await api.getTask(task.id);
         if (taskRes.success) {
-          setTask(taskRes.data);
+          startTransition(() => {
+            setTask(taskRes.data);
+          });
           onUpdate(true);
         }
+      } else {
+        // API returned success:false — rollback optimistic update
+        startTransition(() => {
+          setTask(prev => prev ? { ...prev, subtasks: previousSubtasks } : null);
+        });
+        const errMsg = res.message || t('tasks.detail_toast.subtask_status_err');
+        message.error(errMsg);
       }
-    } catch {
-      message.error(t('tasks.detail_toast.subtask_status_err'));
+    } catch (err: any) {
+      // Rollback on error
+      startTransition(() => {
+        setTask(prev => prev ? { ...prev, subtasks: previousSubtasks } : null);
+      });
+      // Extract specific workflow/API error message if available
+      const apiMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        null;
+      message.error(apiMsg || t('tasks.detail_toast.subtask_status_err'));
     }
   };
 
@@ -1450,6 +2007,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         setSubtaskPriority('medium');
         setSubtaskStartDate('');
         setSubtaskDueDate('');
+        setShowAddSubtaskForm(false);
         const taskRes = await api.getTask(task.id);
         if (taskRes.success) {
           setTask(taskRes.data);
@@ -1572,6 +2130,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         });
         setEditingChecklistId(res.data.id);
         setEditingChecklistName(res.data.name || defaultName);
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1596,6 +2155,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
             ),
           };
         });
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1624,6 +2184,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         });
         setNewChecklistName('');
         setIsChecklistPopoverOpen(false);
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1633,28 +2194,154 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
   const handleGenerateAiChecklist = async (prompt?: string) => {
     if (!task) return;
-    setAiChecklistLoading(true);
+    setAiModalType('checklist');
+    setIsAiModalOpen(true);
+    setAiModalLoading(true);
+    setAiModalResult(null);
+    setAiModalPrompt('');
     try {
-      const res = await api.generateAiChecklist(task.id, prompt);
+      const res = await api.generateAiChecklist(task.id, prompt, true);
       if (res.success) {
-        message.success("Đã sinh checklist bằng AI thành công!");
-        setTask(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            checklists: [...(prev.checklists || []), res.data],
-          };
-        });
-        setAiPromptChecklist('');
-        setIsAiChecklistPopoverOpen(false);
-        setIsAiDescChecklistPopoverOpen(false);
+        setAiModalResult(res.data);
+      } else {
+        message.error(t('ai.err.checklist'));
       }
     } catch (err) {
       console.error(err);
-      message.error("Có lỗi xảy ra khi tạo gợi ý checklist từ AI.");
+      message.error(t('ai.err.checklist'));
     } finally {
-      setAiChecklistLoading(false);
+      setAiModalLoading(false);
     }
+  };
+
+  const handleGenerateAiDescription = async (prompt?: string) => {
+    if (!task) return;
+    setAiModalType('description');
+    setIsAiModalOpen(true);
+    setAiModalLoading(true);
+    setAiModalResult(null);
+    setAiModalPrompt('');
+    try {
+      const res = await api.generateAiDescription(task.id, prompt, true);
+      if (res.success) {
+        setAiModalResult(res.data);
+      } else {
+        message.error(t('ai.err.description'));
+      }
+    } catch (err) {
+      console.error(err);
+      message.error(t('ai.err.description'));
+    } finally {
+      setAiModalLoading(false);
+    }
+  };
+
+  const handleGenerateAiSubtasks = async (prompt?: string) => {
+    if (!task) return;
+    setAiModalType('subtasks');
+    setIsAiModalOpen(true);
+    setAiModalLoading(true);
+    setAiModalResult(null);
+    setAiModalPrompt('');
+    try {
+      const res = await api.generateAiSubtasks(task.id, prompt, true);
+      if (res.success) {
+        setAiModalResult(res.data);
+      } else {
+        message.error(t('ai.err.subtasks'));
+      }
+    } catch (err) {
+      console.error(err);
+      message.error(t('ai.err.subtasks'));
+    } finally {
+      setAiModalLoading(false);
+    }
+  };
+
+  const handleRegenerateAi = async (customPrompt?: string) => {
+    if (!task) return;
+    setAiModalLoading(true);
+    setAiModalResult(null); // Clear result so loading spinner shows during retry
+    try {
+      const promptToUse = customPrompt || aiModalPromptRef.current;
+      let res;
+      if (aiModalType === 'description') {
+        res = await api.generateAiDescription(task.id, promptToUse, true);
+      } else if (aiModalType === 'subtasks') {
+        res = await api.generateAiSubtasks(task.id, promptToUse, true);
+      } else {
+        res = await api.generateAiChecklist(task.id, promptToUse, true);
+      }
+      if (res.success) {
+        setAiModalResult(res.data);
+        // Clear input via ref (uncontrolled)
+        if (aiModalInputRef.current) aiModalInputRef.current.value = '';
+        aiModalPromptRef.current = '';
+      } else {
+        message.error(t('ai.err.regenerate'));
+      }
+    } catch (err) {
+      console.error(err);
+      message.error(t('ai.err.generate'));
+    } finally {
+      setAiModalLoading(false);
+    }
+  };
+
+  const handleApplyAiResult = async () => {
+    if (!task || !aiModalResult) return;
+    setAiModalLoading(true);
+    try {
+      if (aiModalType === 'description') {
+        const res = await api.generateAiDescription(task.id, undefined, false, aiModalResult);
+        if (res.success) {
+          message.success(t('ai.success.description'));
+          setTask(prev => prev ? { ...prev, description: aiModalResult } : null);
+          setEditDescription(aiModalResult);
+          onUpdate(true);
+          setIsAiModalOpen(false);
+        }
+      } else if (aiModalType === 'subtasks') {
+        const res = await api.generateAiSubtasks(task.id, undefined, false, aiModalResult);
+        if (res.success) {
+          message.success(t('ai.success.subtasks'));
+          const taskRes = await api.getTask(task.id);
+          if (taskRes.success) {
+            setTask(taskRes.data);
+          }
+          onUpdate(true);
+          setIsAiModalOpen(false);
+        }
+      } else if (aiModalType === 'checklist') {
+        const res = await api.generateAiChecklist(task.id, undefined, false, aiModalResult);
+        if (res.success) {
+          message.success(t('ai.success.checklist'));
+          const taskRes = await api.getTask(task.id);
+          if (taskRes.success) {
+            setTask(taskRes.data);
+          }
+          onUpdate(true);
+          setIsAiModalOpen(false);
+        }
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error(err.response?.data?.message || t('ai.err.apply'));
+    } finally {
+      setAiModalLoading(false);
+    }
+  };
+
+  const handleCopyAiResult = () => {
+    if (!aiModalResult) return;
+    let textToCopy = '';
+    if (aiModalType === 'description') {
+      textToCopy = aiModalResult;
+    } else if (Array.isArray(aiModalResult)) {
+      textToCopy = aiModalResult.join('\n');
+    }
+    navigator.clipboard.writeText(textToCopy);
+    message.success(t('ai.copied'));
   };
 
 
@@ -1671,6 +2358,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
             checklists: (prev.checklists || []).filter(c => c.id !== checklistId),
           };
         });
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1701,6 +2389,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
           };
         });
         setNewItemNames(prev => ({ ...prev, [checklistId]: '' }));
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1709,28 +2398,58 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   };
 
   const handleUpdateChecklistItem = async (itemId: number, checklistId: number, data: { name?: string; is_checked?: boolean; assignee_id?: number | null }) => {
+    // Keep reference to previous checklists for rollback
+    const previousChecklists = task?.checklists || [];
+
+    // Optimistic update — deferred so click handler returns quickly (no violation).
+    // ChecklistItemRow's local isChecked state provides instant visual feedback.
+    startTransition(() => {
+      setTask(prev => {
+        if (!prev) return null;
+        const updatedChecklists = (prev.checklists || []).map((c: any) => {
+          if (c.id === checklistId) {
+            return {
+              ...c,
+              items: (c.items || []).map((item: any) =>
+                item.id === itemId ? { ...item, ...data } : item
+              ),
+            };
+          }
+          return c;
+        });
+        return { ...prev, checklists: updatedChecklists };
+      });
+    });
+
     try {
       const res = await api.updateChecklistItem(itemId, data);
       if (res.success) {
-        setTask(prev => {
-          if (!prev) return null;
-          const updatedChecklists = (prev.checklists || []).map((c: any) => {
-            if (c.id === checklistId) {
-              return {
-                ...c,
-                items: (c.items || []).map((item: any) => item.id === itemId ? res.data : item),
-              };
-            }
-            return c;
+        startTransition(() => {
+          setTask(prev => {
+            if (!prev) return null;
+            const updatedChecklists = (prev.checklists || []).map((c: any) => {
+              if (c.id === checklistId) {
+                return {
+                  ...c,
+                  items: (c.items || []).map((item: any) => item.id === itemId ? res.data : item),
+                };
+              }
+              return c;
+            });
+            return {
+              ...prev,
+              checklists: updatedChecklists,
+            };
           });
-          return {
-            ...prev,
-            checklists: updatedChecklists,
-          };
         });
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
+      // Rollback on error
+      startTransition(() => {
+        setTask(prev => prev ? { ...prev, checklists: previousChecklists } : null);
+      });
       message.error(t('tasks.detail_toast.checklist_item_update_err'));
     }
   };
@@ -1756,6 +2475,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
             checklists: updatedChecklists,
           };
         });
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1828,6 +2548,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         if (task) {
           fetchTaskDetails(task.id);
         }
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1855,6 +2576,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
             setTask(r.data);
           }
         });
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1874,6 +2596,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
             attachments: (prev.attachments || []).filter(a => a.id !== attachmentId),
           };
         });
+        refreshActivities();
       }
     } catch (err) {
       console.error(err);
@@ -1966,12 +2689,17 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
   // Post Comment
   const handlePostComment = async () => {
-    if (!newCommentText.trim() && !newCommentFile) return;
+    const text = newCommentTextRef.current;
+    if (!text.trim() && !newCommentFile) return;
     try {
-      const res = await api.createTaskComment(task.id, newCommentText, newCommentFile || undefined);
+      const res = await api.createTaskComment(task.id, text, newCommentFile || undefined);
       if (res.success) {
         message.success(t('project_detail.toast.comment_sent'));
-        setNewCommentText('');
+        // Clear ref and reset DOM textarea directly
+        newCommentTextRef.current = '';
+        setHasCommentText(false);
+        const commentTextarea = document.getElementById('comment-textarea') as HTMLTextAreaElement;
+        if (commentTextarea) commentTextarea.value = '';
         setNewCommentFile(null);
         setCommentFilePreview(null);
         const taskRes = await api.getTask(task.id);
@@ -1991,12 +2719,17 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
   // Post Reply to Comment
   const handlePostReply = async (parentCommentId: number) => {
-    if (!replyText.trim()) return;
+    const text = replyTextRef.current;
+    if (!text.trim()) return;
     try {
-      const res = await api.createTaskComment(task.id, replyText, replyFile || undefined, parentCommentId);
+      const res = await api.createTaskComment(task.id, text, replyFile || undefined, parentCommentId);
       if (res.success) {
         message.success(t('project_detail.toast.comment_sent'));
-        setReplyText('');
+        // Clear ref + DOM + state
+        replyTextRef.current = '';
+        setHasReplyText(false);
+        const replyTextarea = document.getElementById(`reply-textarea-${parentCommentId}`) as HTMLTextAreaElement;
+        if (replyTextarea) replyTextarea.value = '';
         setReplyFile(null);
         setReplyFilePreview(null);
         setReplyingToCommentId(null);
@@ -2091,7 +2824,16 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   // Mention functions
   const handleCommentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
-    setNewCommentText(val);
+    // Store in ref - NO re-render of the 4900-line component
+    newCommentTextRef.current = val;
+    // Only update boolean state if send button appearance needs to change
+    const hasText = val.trim().length > 0;
+    setHasCommentText(prev => prev !== hasText ? hasText : prev);
+
+    // Auto-grow textarea
+    const ta = e.target;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
 
     const selectionStart = e.target.selectionStart;
     const textBeforeCursor = val.substring(0, selectionStart);
@@ -2105,35 +2847,42 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
         const query = textAfterAt.toLowerCase();
         const matches = members.filter((m: any) =>
-          m.name.toLowerCase().includes(query) ||
-          m.email?.toLowerCase().includes(query)
+          m.id !== me?.id && // exclude self
+          (m.name.toLowerCase().includes(query) ||
+          m.email?.toLowerCase().includes(query))
         );
         setMentionSuggestions(matches);
         return;
       }
     }
 
-    setShowMentions(false);
-    setMentionSuggestions([]);
+    // CRITICAL: guard these calls — `setMentionSuggestions([])` creates a NEW array
+    // reference on every keystroke, causing React to re-render even when already empty.
+    // Only call setState if the value actually needs to change.
+    setShowMentions(prev => prev ? false : prev);
+    setMentionSuggestions(prev => prev.length > 0 ? [] : prev);
   };
 
   const selectMention = (member: any) => {
     if (mentionTriggerIndex === -1) return;
-    const before = newCommentText.substring(0, mentionTriggerIndex);
-    const after = newCommentText.substring(mentionTriggerIndex + 1);
+    const current = newCommentTextRef.current;
+    const before = current.substring(0, mentionTriggerIndex);
+    const after = current.substring(mentionTriggerIndex + 1);
     const nextSpaceIdx = after.indexOf(' ');
     const rest = nextSpaceIdx === -1 ? '' : after.substring(nextSpaceIdx);
 
     const newText = `${before}@[${member.name}]${rest || ' '}`;
-    setNewCommentText(newText);
+    newCommentTextRef.current = newText;
+    // Also update DOM directly
+    const textarea = document.getElementById('comment-textarea') as HTMLTextAreaElement;
+    if (textarea) {
+      textarea.value = newText;
+      textarea.focus();
+    }
+    setHasCommentText(true);
     setShowMentions(false);
     setMentionSuggestions([]);
     setMentionTriggerIndex(-1);
-
-    const textarea = document.getElementById('comment-textarea') as HTMLTextAreaElement;
-    if (textarea) {
-      textarea.focus();
-    }
   };
 
   const handleCommentFileChange = (file: File | null) => {
@@ -2165,7 +2914,8 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   const insertEmoji = (emoji: string) => {
     const textarea = document.getElementById('comment-textarea') as HTMLTextAreaElement;
     if (!textarea) {
-      setNewCommentText(prev => prev + emoji);
+      // fallback: append to ref and update DOM if available
+      newCommentTextRef.current = newCommentTextRef.current + emoji;
       return;
     }
     const start = textarea.selectionStart;
@@ -2173,7 +2923,11 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     const text = textarea.value;
     const before = text.substring(0, start);
     const after = text.substring(end);
-    setNewCommentText(before + emoji + after);
+    const newText = before + emoji + after;
+    textarea.value = newText;
+    newCommentTextRef.current = newText;
+    const hasText = newText.trim().length > 0;
+    setHasCommentText(hasText);
 
     setTimeout(() => {
       textarea.focus();
@@ -2187,8 +2941,12 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         <div style={{ position: 'relative', width: '100%' }}>
           <textarea
             id={`reply-textarea-${commentId}`}
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
+            defaultValue=""
+            onChange={(e) => {
+              replyTextRef.current = e.target.value;
+              const hasText = e.target.value.trim().length > 0;
+              setHasReplyText(prev => prev !== hasText ? hasText : prev);
+            }}
             placeholder={t('tasks.panel.reply_placeholder' as any)}
             style={{ width: '100%', background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', resize: 'vertical', fontSize: '13px', minHeight: '60px' }}
           />
@@ -2249,18 +3007,18 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 </div>
               }
             >
-              <span style={{ cursor: 'pointer', color: 'var(--text-muted)' }}><SmileOutlined style={{ fontSize: '14px' }} /></span>
+              <span style={{ cursor: 'pointer', color: 'var(--text-secondary)' }} className="comment-action-icon"><SmileOutlined style={{ fontSize: '14px' }} /></span>
             </Popover>
             <Tooltip title={t('tasks.panel.attach_file_tooltip' as any)}>
-              <label htmlFor={`reply-file-upload-${commentId}`} style={{ cursor: 'pointer', color: 'var(--text-muted)' }}>
+              <label htmlFor={`reply-file-upload-${commentId}`} style={{ cursor: 'pointer', color: 'var(--text-secondary)' }} className="comment-action-icon">
                 <PaperClipOutlined style={{ fontSize: '14px' }} />
               </label>
             </Tooltip>
           </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-            <Button size="small" onClick={() => { setReplyingToCommentId(null); setReplyingToSubCommentId(null); }}>{t('tasks.panel.cancel_btn' as any)}</Button>
-            <Button size="small" type="primary" onClick={() => handlePostReply(commentId)} disabled={!replyText.trim()}>{t('tasks.panel.send_btn' as any)}</Button>
+            <Button size="small" onClick={() => { setReplyingToCommentId(null); setReplyingToSubCommentId(null); setHasReplyText(false); }}>{t('tasks.panel.cancel_btn' as any)}</Button>
+            <Button size="small" type="primary" onClick={() => handlePostReply(commentId)} disabled={!hasReplyText}>{t('tasks.panel.send_btn' as any)}</Button>
           </div>
         </div>
       </div>
@@ -2283,15 +3041,18 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 {t('tasks.panel.watchers_count', { count: task.watcher_ids?.length || 0 })}
               </span>
 
-              <Button
-                type={me?.id && task.watcher_ids?.includes(me.id) ? "primary" : "default"}
-                size="small"
-                style={{ fontSize: '12px', height: '24px', padding: '0 8px', display: 'flex', alignItems: 'center' }}
-                icon={me?.id && task.watcher_ids?.includes(me.id) ? <EyeInvisibleOutlined style={{ fontSize: '12px' }} /> : <EyeOutlined style={{ fontSize: '12px' }} />}
-                onClick={handleToggleWatch}
-              >
-                {me?.id && task.watcher_ids?.includes(me.id) ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
-              </Button>
+              {/* Only show watch button if current user is NOT the assignee */}
+              {me?.id && me.id !== task.assignee_id && (
+                <Button
+                  type={task.watcher_ids?.includes(me.id) ? "primary" : "default"}
+                  size="small"
+                  style={{ fontSize: '12px', height: '24px', padding: '0 8px', display: 'flex', alignItems: 'center' }}
+                  icon={task.watcher_ids?.includes(me.id) ? <EyeInvisibleOutlined style={{ fontSize: '12px' }} /> : <EyeOutlined style={{ fontSize: '12px' }} />}
+                  onClick={handleToggleWatch}
+                >
+                  {task.watcher_ids?.includes(me.id) ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
+                </Button>
+              )}
 
               {task.watcher_ids && task.watcher_ids.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
@@ -2352,32 +3113,23 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 </>
               )}
               <span>/</span>
-              <span style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{t('tasks.panel.task_id_label' as any, { id: task.id })}</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 500, color: 'var(--text-secondary)' }}>
+                <TaskTypeBadge
+                  type={task.type || 'task'}
+                  size="badge"
+                  onClick={() => handleTypeChange(task.type === 'bug' ? 'task' : 'bug')}
+                />
+                {t('tasks.panel.task_id_label' as any, { id: task.id })}
+              </span>
             </div>
 
-            {/* Title Input */}
-            <input
-              className="task-title-input"
-              value={editTitle}
-              disabled={!taskEditable}
-              onChange={(e) => setEditTitle(e.target.value)}
-              style={{
-                fontSize: '22px',
-                fontWeight: 700,
-                color: 'var(--text-primary)',
-                width: '100%',
-                padding: '4px 0',
-              }}
-              onFocus={(e) => {
-                if (taskEditable) e.target.style.borderBottom = '1px solid var(--primary)';
-              }}
-              onBlur={(e) => {
-                e.target.style.borderBottom = '1px solid transparent';
-                if (taskEditable && editTitle !== task.title) {
-                  autoSaveTaskField('title', editTitle);
-                }
-              }}
+            <TaskTitleInput
+              initialTitle={task.title}
+              taskEditable={taskEditable}
+              onSave={(newTitle) => autoSaveTaskField('title', newTitle)}
             />
+
+
 
             {/* Properties Grid - 2 Column Layout (ưu tiên giao diện 2 cột như hình 1) */}
             <div className="properties-grid">
@@ -2600,7 +3352,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                     <TimeTracker
                       taskId={task.id}
                       timeEntries={task.time_entries || []}
-                      disabled={!taskEditable}
+                      disabled={!taskEditable || isTaskDone(task) || Number(task.assignee_id) !== Number(me?.id)}
                       onUpdate={async () => {
                         const res = await api.getTask(task.id);
                         if (res.success) {
@@ -2757,62 +3509,44 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
             </div>
 
             {/* Description */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('tasks.panel.description' as any) || "Mô tả công việc"}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('tasks.panel.description' as any) || "Mô tả công việc"}</span>
+                {taskEditable && (
+                  <Button
+                    type="text"
+                    size="small"
+                    loading={aiDescLoading}
+                    disabled={aiLoading}
+                    onClick={() => handleGenerateAiDescription()}
+                    style={{
+                      fontSize: '12px',
+                      color: '#6366f1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '0 4px'
+                    }}
+                  >
+                    ✨ {t('ai.write_btn')}
+                  </Button>
+                )}
+              </div>
               <textarea
+                ref={descriptionRef}
                 className="task-description-textarea"
                 placeholder={t('tasks.panel.desc_placeholder' as any) || "Thêm mô tả công việc..."}
                 value={editDescription}
                 disabled={!taskEditable}
-                onChange={(e) => setEditDescription(e.target.value)}
+                onChange={(e) => {
+                  setEditDescription(e.target.value);
+                }}
                 onBlur={() => {
                   if (taskEditable && editDescription !== task.description) {
                     autoSaveTaskField('description', editDescription);
                   }
                 }}
               />
-              {taskEditable && (
-                <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                  <Popover
-                    open={isAiDescChecklistPopoverOpen}
-                    onOpenChange={setIsAiDescChecklistPopoverOpen}
-                    content={
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '250px' }}>
-                        <span style={{ fontWeight: 500, fontSize: '12px' }}>Gợi ý checklist bằng AI</span>
-                        <Input.TextArea
-                          placeholder="Nhập yêu cầu gợi ý (ví dụ: checklist cho test API, checklist code review...)"
-                          rows={3}
-                          value={aiPromptChecklist}
-                          onChange={(e) => setAiPromptChecklist(e.target.value)}
-                        />
-                        <div style={{ display: 'flex', justifyContent: 'end', gap: '8px' }}>
-                          <Button size="small" onClick={() => { setAiPromptChecklist(''); setIsAiDescChecklistPopoverOpen(false); }}>Hủy</Button>
-                          <Button
-                            type="primary"
-                            size="small"
-                            loading={aiChecklistLoading}
-                            onClick={() => handleGenerateAiChecklist(aiPromptChecklist)}
-                          >
-                            Tạo
-                          </Button>
-                        </div>
-                      </div>
-                    }
-                    title={null}
-                    trigger="click"
-                  >
-                    <Button
-                      type="default"
-                      size="small"
-                      icon={<RobotOutlined />}
-                      style={{ color: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}
-                      loading={aiChecklistLoading}
-                    >
-                      Gợi ý checklist từ AI
-                    </Button>
-                  </Popover>
-                </div>
-              )}
             </div>
 
             {/* Subtasks Section */}
@@ -2821,6 +3555,25 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {t('tasks.panel.subtasks_count' as any, { count: task.subtasks?.length || 0 })}
                 </span>
+                {taskEditable && (
+                  <Button
+                    type="text"
+                    size="small"
+                    loading={aiSubtasksLoading}
+                    disabled={aiLoading}
+                    onClick={() => handleGenerateAiSubtasks()}
+                    style={{
+                      fontSize: '12px',
+                      color: '#a855f7',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '0 4px'
+                    }}
+                  >
+                    ✨ {t('ai.suggest_btn')}
+                  </Button>
+                )}
               </div>
 
               {/* Progress Bar */}
@@ -2834,7 +3587,6 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                   <div style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
                       <span>{t('tasks.panel.progress_label' as any) || "Tiến độ hoàn thành"}</span>
-                      <span>{completedSubtasks}/{totalSubtasks} ({percent}%)</span>
                     </div>
                     <div style={{ background: 'var(--border-color)', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
                       <div style={{ background: '#10b981', height: '100%', width: `${percent}%`, transition: 'width 0.3s ease' }} />
@@ -2847,7 +3599,6 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
                 {task.subtasks?.map((st: any) => {
                   const finalStatusId = getFinalStatusId(statuses);
-                  const isDone = st.status === finalStatusId;
                   return (
                     <div
                       key={st.id}
@@ -2864,13 +3615,11 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-                        <input
-                          type="checkbox"
-                          checked={isDone}
-                          disabled={!taskEditable}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={() => handleToggleSubtaskStatus(st)}
-                          style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#10b981', flexShrink: 0 }}
+                        <SubtaskCheckbox
+                          subtask={st}
+                          finalStatusId={finalStatusId}
+                          taskEditable={taskEditable}
+                          onToggle={handleToggleSubtaskStatus}
                         />
                         <SubtaskTitleInput
                           subtask={st}
@@ -2885,7 +3634,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                         />
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                         <div style={{ width: '90px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexShrink: 0 }}>
                           <SubtaskDatePicker
                             subtask={st}
@@ -2970,7 +3719,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
               </div>
 
               {/* Inline Subtask Creator */}
-              {taskEditable && (
+              {taskEditable && showAddSubtaskForm && (
                 <div
                   style={{
                     border: '1px solid var(--border-color)',
@@ -2990,6 +3739,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
                   <input
                     type="text"
+                    autoFocus
                     placeholder={t('tasks.panel.add_subtask_placeholder' as any) || "Thêm công việc con..."}
                     value={subtaskTitle}
                     onChange={(e) => setSubtaskTitle(e.target.value)}
@@ -3051,7 +3801,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                             ) : <UserOutlined style={{ color: 'var(--text-muted)' }} />;
                           })()
                         ) : (
-                          <Tooltip title={t('tasks.panel.assign_tooltip' as any) || "Giao việc"}><UserOutlined style={{ color: 'var(--text-muted)' }} /></Tooltip>
+                          <Tooltip title={t('tasks.panel.assign_tooltip' as any) || "Giao việc"}><UserOutlined style={{ color: 'var(--text-secondary)' }} /></Tooltip>
                         )}
                       </div>
                     </Dropdown>
@@ -3156,6 +3906,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                         setSubtaskPriority('medium');
                         setSubtaskStartDate('');
                         setSubtaskDueDate('');
+                        setShowAddSubtaskForm(false);
                       }}
                       style={{
                         background: 'none',
@@ -3191,6 +3942,15 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                   </div>
                 </div>
               )}
+
+              {taskEditable && !showAddSubtaskForm && (
+                <div
+                  className="add-subtask-dashed-btn"
+                  onClick={() => setShowAddSubtaskForm(true)}
+                >
+                  <PlusOutlined style={{ fontSize: '12px' }} /> {t('tasks.panel.add_subtask' as any) || 'Thêm công việc con'}
+                </div>
+              )}
             </div>
 
             {/* Checklists Section */}
@@ -3200,56 +3960,24 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                   {t('tasks.panel.checklists')}
                 </span>
 
-                {/* Create Checklist */}
+                {/* Create / Suggest Checklist */}
                 {taskEditable && (
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <Popover
-                      open={isAiChecklistPopoverOpen}
-                      onOpenChange={setIsAiChecklistPopoverOpen}
-                      content={
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '250px' }}>
-                          <span style={{ fontWeight: 500, fontSize: '12px' }}>Gợi ý checklist bằng AI</span>
-                          <Input.TextArea
-                            placeholder="Nhập yêu cầu gợi ý (ví dụ: checklist cho test API, checklist code review...)"
-                            rows={3}
-                            value={aiPromptChecklist}
-                            onChange={(e) => setAiPromptChecklist(e.target.value)}
-                          />
-                          <div style={{ display: 'flex', justifyContent: 'end', gap: '8px' }}>
-                            <Button size="small" onClick={() => { setAiPromptChecklist(''); setIsAiChecklistPopoverOpen(false); }}>Hủy</Button>
-                            <Button
-                              type="primary"
-                              size="small"
-                              loading={aiChecklistLoading}
-                              onClick={() => handleGenerateAiChecklist(aiPromptChecklist)}
-                            >
-                              Tạo
-                            </Button>
-                          </div>
-                        </div>
-                      }
-                      title={null}
-                      trigger="click"
-                    >
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<RobotOutlined />}
-                        style={{ color: 'var(--primary-color)' }}
-                        loading={aiChecklistLoading}
-                      >
-                        Gợi ý checklist từ AI
-                      </Button>
-                    </Popover>
-
                     <Button
                       type="text"
                       size="small"
-                      icon={<PlusOutlined />}
-                      style={{ color: 'var(--primary-color)' }}
-                      onClick={handleQuickCreateChecklist}
+                      loading={aiChecklistLoading}
+                      disabled={aiLoading}
+                      onClick={() => handleGenerateAiChecklist()}
+                      style={{
+                        fontSize: '12px',
+                        color: '#ec4899',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
                     >
-                      {t('tasks.panel.add_checklist')}
+                      ✨ {t('ai.suggest_btn')}
                     </Button>
                   </div>
                 )}
@@ -3322,119 +4050,22 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                       </div>
                     )}
 
-                    {/* Items List */}
+                    {/* Items List — memoized for instant checkbox feedback */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
-                      {(checklist.items || []).map((item: any) => {
-                        const assignedMember = members.find((m: any) => m.id === item.assignee_id);
-
-                        return (
-                          <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', flex: 1 }}>
-                              <input
-                                type="checkbox"
-                                checked={item.is_checked}
-                                disabled={!taskEditable}
-                                onChange={(e) => handleUpdateChecklistItem(item.id, checklist.id, { is_checked: e.target.checked })}
-                                style={{ cursor: 'pointer', marginTop: '3px' }}
-                              />
-                              <span style={{
-                                fontSize: '13px',
-                                color: item.is_checked ? 'var(--text-muted)' : 'var(--text-primary)',
-                                textDecoration: item.is_checked ? 'line-through' : 'none',
-                                flex: 1
-                              }}>
-                                {item.name}
-                              </span>
-                            </div>
-
-                            {/* Member Assignee & Dropdown options */}
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '2px' }}>
-                              <Dropdown
-                                disabled={!taskEditable}
-                                trigger={['click']}
-                                dropdownRender={() => (
-                                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: '180px' }}>
-                                    <div style={{ fontSize: '11px', padding: '6px 12px', color: 'var(--text-muted)', fontWeight: 600 }}>{t('tasks.panel.assignee')}</div>
-                                    <div
-                                      onClick={() => handleUpdateChecklistItem(item.id, checklist.id, { assignee_id: null })}
-                                      style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '8px',
-                                        padding: '8px 12px',
-                                        cursor: 'pointer',
-                                        borderRadius: '6px',
-                                        background: !assignedMember ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
-                                        color: !assignedMember ? '#6366f1' : 'var(--text-primary)',
-                                      }}
-                                    >
-                                      <UserOutlined style={{ fontSize: '12px' }} />
-                                      <span style={{ fontSize: '12px' }}>{t('tasks.panel.unassigned' as any)}</span>
-                                    </div>
-                                    {members.map((m: any) => (
-                                      <div
-                                        key={m.id}
-                                        onClick={() => handleUpdateChecklistItem(item.id, checklist.id, { assignee_id: m.id })}
-                                        style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          gap: '8px',
-                                          padding: '8px 12px',
-                                          cursor: 'pointer',
-                                          borderRadius: '6px',
-                                          background: m.id === item.assignee_id ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
-                                          color: m.id === item.assignee_id ? '#6366f1' : 'var(--text-primary)',
-                                        }}
-                                      >
-                                        <div style={{ background: '#6366f1', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: '#fff', fontSize: '9px', fontWeight: 600, overflow: 'hidden' }}>
-                                          {m.photo ? <img src={m.photo} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(m.name)}
-                                        </div>
-                                        <span style={{ fontSize: '12px' }}>{m.name}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              >
-                                <div style={{ cursor: !taskEditable ? 'not-allowed' : 'pointer' }}>
-                                  {assignedMember ? (
-                                    <Tooltip title={assignedMember.name}>
-                                      <div style={{ background: '#6366f1', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: '#fff', fontSize: '9px', fontWeight: 600, overflow: 'hidden' }}>
-                                        {assignedMember.photo ? (
-                                          <img src={assignedMember.photo} alt={assignedMember.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                        ) : (
-                                          getInitials(assignedMember.name)
-                                        )}
-                                      </div>
-                                    </Tooltip>
-                                  ) : (
-                                    <Tooltip title={t('tasks.panel.assignee_placeholder')}>
-                                      <div style={{ width: '22px', height: '22px', border: '1px dashed var(--text-muted)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent' }}>
-                                        <UserOutlined style={{ color: 'var(--text-muted)', fontSize: '10px' }} />
-                                      </div>
-                                    </Tooltip>
-                                  )}
-                                </div>
-                              </Dropdown>
-
-                              {/* Options Menu: Convert to Task/Subtask, Delete */}
-                              {taskEditable && (
-                                <Dropdown
-                                  trigger={['click']}
-                                  dropdownRender={() => (
-                                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '4px', display: 'flex', flexDirection: 'column', gap: '2px', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
-                                      <Button type="text" size="small" icon={<CheckSquareOutlined style={{ fontSize: '12px' }} />} style={{ textAlign: 'left', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', width: '100%' }} onClick={() => handleConvertChecklistItem(item.id, checklist.id, 'task')}>{t('tasks.panel.convert_to_task')}</Button>
-                                      <Button type="text" size="small" icon={<SubnodeOutlined style={{ fontSize: '12px' }} />} style={{ textAlign: 'left', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', width: '100%' }} onClick={() => handleConvertChecklistItem(item.id, checklist.id, 'subtask')}>{t('tasks.panel.convert_to_subtask')}</Button>
-                                      <Button type="text" size="small" danger icon={<DeleteOutlined style={{ fontSize: '12px' }} />} style={{ textAlign: 'left', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', width: '100%' }} onClick={() => handleDeleteChecklistItem(item.id, checklist.id)}>{t('tasks.panel.delete')}</Button>
-                                    </div>
-                                  )}
-                                >
-                                  <Button type="text" size="small" style={{ padding: '0 4px', height: '20px' }}>•••</Button>
-                                </Dropdown>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                      {(checklist.items || []).map((item: any) => (
+                        <ChecklistItemRow
+                          key={item.id}
+                          item={item}
+                          checklist={checklist}
+                          taskEditable={taskEditable}
+                          members={members}
+                          onUpdate={handleUpdateChecklistItem}
+                          onDelete={handleDeleteChecklistItem}
+                          onConvert={handleConvertChecklistItem}
+                          t={t}
+                          getInitials={getInitials}
+                        />
+                      ))}
                     </div>
 
                     {/* Add Item form */}
@@ -3457,6 +4088,15 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                   </div>
                 );
               })}
+
+              {taskEditable && (
+                <div
+                  className="add-checklist-dashed-btn"
+                  onClick={handleQuickCreateChecklist}
+                >
+                  <PlusOutlined style={{ fontSize: '12px' }} /> {t('tasks.panel.add_checklist')}
+                </div>
+              )}
             </div>
 
             {/* Attachments Section */}
@@ -3499,41 +4139,66 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
               {/* Attachments list */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px', marginTop: '8px' }}>
                 {(task.attachments || []).map((att: any) => {
-                  const isImage = att.file_type?.startsWith('image/');
+                  const isImage = att.file_type?.startsWith('image/') || isImageFile(att.file_name);
                   const sizeMB = (att.file_size / (1024 * 1024)).toFixed(2);
                   const formattedSize = parseFloat(sizeMB) > 0.1 ? `${sizeMB} MB` : `${(att.file_size / 1024).toFixed(1)} KB`;
+                  const uploader = att.user;
 
                   return (
-                    <div key={att.id} className="attachment-card" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column' }}>
-                      <div style={{ height: '100px', background: 'var(--bg-card-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
+                    <div key={att.id} className="attachment-card" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                      <div
+                        onClick={() => handlePreviewAttachment(att)}
+                        style={{ height: '100px', background: 'var(--bg-card-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative', cursor: 'pointer' }}
+                      >
                         {isImage ? (
-                          <img src={att.file_path} alt={att.file_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          <img src={getFileUrl(att.file_path)} alt={att.file_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         ) : (
                           <PaperClipOutlined style={{ fontSize: '32px', color: 'var(--text-muted)' }} />
                         )}
-                        {taskEditable && (
-                          <Popconfirm
-                            title={t('tasks.panel.delete_attachment_confirm')}
-                            onConfirm={() => handleDeleteAttachment(att.id)}
-                            okText={t('tasks.panel.delete')}
-                            cancelText={t('tasks.panel.cancel')}
-                          >
-                            <div style={{ position: 'absolute', top: '6px', right: '6px', background: 'rgba(255,255,255,0.85)', padding: '4px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <DeleteOutlined style={{ color: '#ef4444', fontSize: '12px' }} />
-                            </div>
-                          </Popconfirm>
-                        )}
                       </div>
-                      <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={att.file_name}>
+
+                      {/* Top-right menu trigger */}
+                      {taskEditable && (
+                        <div style={{ position: 'absolute', top: '6px', right: '6px', zIndex: 10 }}>
+                          <Dropdown
+                            trigger={['click']}
+                            dropdownRender={() => (
+                              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '4px', display: 'flex', flexDirection: 'column', gap: '2px', boxShadow: '0 2px 8px rgba(0,0,0,0.15)', minWidth: '130px' }}>
+                                <Button type="text" size="small" icon={<EditOutlined />} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', fontSize: '12px', width: '100%' }} onClick={() => handleRenameAttachment(att.id, att.file_name)}>{t('tasks.panel.rename' as any)}</Button>
+                                <Button type="text" size="small" icon={<CopyOutlined />} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', fontSize: '12px', width: '100%' }} onClick={() => handleCopyUrl(att.file_path)}>{t('tasks.panel.copy_url' as any)}</Button>
+                                <Button type="text" size="small" icon={<DownloadOutlined />} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', fontSize: '12px', width: '100%' }} onClick={() => handleDownloadFile(att.file_path, att.file_name)}>{t('tasks.panel.download' as any)}</Button>
+                                <Button type="text" size="small" danger icon={<DeleteOutlined />} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left', fontSize: '12px', width: '100%' }} onClick={() => handleDeleteAttachmentConfirm(att.id)}>{t('tasks.panel.delete' as any)}</Button>
+                              </div>
+                            )}
+                          >
+                            <div style={{ background: 'rgba(255,255,255,0.85)', padding: '4px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <MoreOutlined style={{ color: '#1f1f1f', fontSize: '14px' }} />
+                            </div>
+                          </Dropdown>
+                        </div>
+                      )}
+
+                      <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '2px', position: 'relative', minHeight: '60px' }}>
+                        <span
+                          onClick={() => handlePreviewAttachment(att)}
+                          style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: '24px', cursor: 'pointer' }}
+                          title={att.file_name}
+                        >
                           {att.file_name}
                         </span>
                         <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                           {formattedSize}
                         </span>
-                        <a href={att.file_path} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: 'var(--primary-color)', marginTop: '4px', textDecoration: 'none' }}>
-                          {t('tasks.panel.download')}
-                        </a>
+
+                        {uploader && (
+                          <div style={{ position: 'absolute', bottom: '8px', right: '8px' }}>
+                            <Tooltip title={uploader.name}>
+                              <div style={{ background: '#6366f1', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: '#fff', fontSize: '9px', fontWeight: 600, overflow: 'hidden' }}>
+                                {uploader.photo ? <img src={uploader.photo} alt={uploader.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(uploader.name)}
+                              </div>
+                            </Tooltip>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -3566,7 +4231,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 <div ref={commentsListRef} onScroll={handleScrollComments} style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
                   {[...comments].sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).filter(c => !c.parent_id).map((comment) => {
                     const userReaction = comment.reactions?.find((r: any) => r.user_id === me?.id);
-                    const replies = comments.filter(c => c.parent_id === comment.id);
+                    const replies = comments.filter(c => c.parent_id == comment.id);
                     const isRepliesExpanded = !!expandedCommentIds[comment.id];
 
                     return (
@@ -3591,16 +4256,16 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                             {comment.attachment_path && (
                               <div style={{ marginTop: '6px', marginLeft: '8px' }}>
                                 {isImageFile(comment.attachment_path) ? (
-                                  <a href={`http://localhost:8000${comment.attachment_path}`} target="_blank" rel="noreferrer">
+                                  <a href={getFileUrl(comment.attachment_path)} target="_blank" rel="noreferrer">
                                     <img
-                                      src={`http://localhost:8000${comment.attachment_path}`}
+                                      src={getFileUrl(comment.attachment_path)}
                                       alt="attachment"
                                       style={{ maxWidth: '200px', maxHeight: '150px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
                                     />
                                   </a>
                                 ) : (
                                   <a
-                                    href={`http://localhost:8000${comment.attachment_path}`}
+                                    href={getFileUrl(comment.attachment_path)}
                                     target="_blank"
                                     rel="noreferrer"
                                     style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
@@ -3626,7 +4291,14 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                                 onClick={() => {
                                   setReplyingToCommentId(comment.id);
                                   setReplyingToSubCommentId(null);
-                                  setReplyText(comment.user?.id === me?.id ? '' : `@[${comment.user?.name || ''}] `);
+                                  const initText = comment.user?.id === me?.id ? '' : `@[${comment.user?.name || ''}] `;
+                                  replyTextRef.current = initText;
+                                  setHasReplyText(initText.trim().length > 0);
+                                  // Set DOM value after render
+                                  setTimeout(() => {
+                                    const ta = document.getElementById(`reply-textarea-${comment.id}`) as HTMLTextAreaElement;
+                                    if (ta) { ta.value = initText; ta.focus(); ta.setSelectionRange(initText.length, initText.length); }
+                                  }, 50);
                                 }}
                                 style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-secondary)', fontWeight: 600 }}
                               >
@@ -3687,7 +4359,13 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                                               onClick={() => {
                                                 setReplyingToCommentId(comment.id);
                                                 setReplyingToSubCommentId(reply.id);
-                                                setReplyText(reply.user?.id === me?.id ? '' : `@[${reply.user?.name || ''}] `);
+                                                const initText = reply.user?.id === me?.id ? '' : `@[${reply.user?.name || ''}] `;
+                                                replyTextRef.current = initText;
+                                                setHasReplyText(initText.trim().length > 0);
+                                                setTimeout(() => {
+                                                  const ta = document.getElementById(`reply-textarea-${comment.id}`) as HTMLTextAreaElement;
+                                                  if (ta) { ta.value = initText; ta.focus(); ta.setSelectionRange(initText.length, initText.length); }
+                                                }, 50);
                                               }}
                                               style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-secondary)', fontWeight: 600 }}
                                             >
@@ -3717,18 +4395,30 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 {/* Comment Input */}
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', position: 'relative' }}>
                   {showMentions && mentionSuggestions.length > 0 && (
-                    <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', boxShadow: '0 -4px 12px rgba(0,0,0,0.15)', maxHeight: '160px', overflowY: 'auto', zIndex: 10, padding: '4px' }}>
+                    <div style={{
+                      position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, right: 0,
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: '10px',
+                      boxShadow: '0 -8px 24px rgba(0,0,0,0.25)',
+                      maxHeight: '180px', overflowY: 'auto',
+                      zIndex: 20, padding: '6px',
+                      animation: 'slideUpFade 0.15s ease',
+                    }}>
                       {mentionSuggestions.map(member => (
                         <div
                           key={member.id}
                           onClick={() => selectMention(member)}
-                          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', cursor: 'pointer', borderRadius: '4px' }}
+                          style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 10px', cursor: 'pointer', borderRadius: '6px', transition: 'background 0.12s' }}
                           className="status-item-hover"
                         >
-                          <div style={{ background: '#6366f1', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: '#fff', fontSize: '9px', fontWeight: 600, overflow: 'hidden' }}>
+                          <div style={{ background: '#6366f1', width: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: '#fff', fontSize: '10px', fontWeight: 700, flexShrink: 0, overflow: 'hidden' }}>
                             {member.photo ? <img src={member.photo} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(member.name)}
                           </div>
-                          <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{member.name}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{member.name}</span>
+                            {member.email && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{member.email}</span>}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -3746,13 +4436,23 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                       {me?.photo ? <img src={me.photo} alt={me.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : getInitials(me?.name || '')}
                     </div>
 
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(120, 120, 120, 0.05)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '8px 12px' }}>
+                    <div
+                      style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(120, 120, 120, 0.05)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '10px 14px', transition: 'border-color 0.2s, box-shadow 0.2s' }}
+                      onFocus={() => {}}
+                      className="comment-input-box"
+                    >
                       <textarea
                         id="comment-textarea"
                         placeholder={t('tasks.panel.comment_placeholder_mention' as any) || "Viết bình luận (Sử dụng @ để nhắc tên)..."}
-                        value={newCommentText}
+                        defaultValue=""
                         onChange={handleCommentChange}
-                        style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', resize: 'vertical', fontSize: '13px', minHeight: '60px', fontFamily: 'inherit' }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                            e.preventDefault();
+                            handlePostComment();
+                          }
+                        }}
+                        style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', resize: 'none', fontSize: '13px', minHeight: '36px', maxHeight: '200px', fontFamily: 'inherit', lineHeight: '1.5', overflow: 'hidden' }}
                       />
 
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'between', borderTop: '1px solid rgba(120,120,120,0.1)', paddingTop: '6px' }}>
@@ -3764,7 +4464,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                             onChange={(e) => handleCommentFileChange(e.target.files ? e.target.files[0] : null)}
                           />
                           <Tooltip title={t('tasks.panel.attach_file_tooltip' as any) || "Đính kèm tệp"}>
-                            <label htmlFor="file-upload" style={{ cursor: 'pointer', color: 'var(--text-muted)' }}>
+                            <label htmlFor="file-upload" style={{ cursor: 'pointer', color: '#a0a8c0', display: 'flex', alignItems: 'center' }}>
                               <PaperClipOutlined style={{ fontSize: '16px' }} />
                             </label>
                           </Tooltip>
@@ -3809,22 +4509,22 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                               </div>
                             }
                           >
-                            <span style={{ cursor: 'pointer', color: 'var(--text-muted)' }}><SmileOutlined style={{ fontSize: '16px' }} /></span>
+                            <span style={{ cursor: 'pointer', color: '#a0a8c0', display: 'flex', alignItems: 'center' }}><SmileOutlined style={{ fontSize: '16px' }} /></span>
                           </Popover>
                         </div>
 
                         <button
                           onClick={handlePostComment}
-                          disabled={!newCommentText.trim() && !newCommentFile}
+                          disabled={!hasCommentText && !newCommentFile}
                           style={{
                             marginLeft: 'auto',
-                            background: (newCommentText.trim() || newCommentFile) ? 'var(--primary)' : 'transparent',
-                            color: (newCommentText.trim() || newCommentFile) ? '#fff' : 'var(--text-muted)',
-                            border: 'none',
+                            background: (hasCommentText || newCommentFile) ? 'var(--primary)' : 'transparent',
+                            color: (hasCommentText || newCommentFile) ? '#fff' : '#a0a8c0',
+                            border: (hasCommentText || newCommentFile) ? 'none' : '1px solid #3a3f5c',
                             borderRadius: '50%',
                             width: '28px',
                             height: '28px',
-                            cursor: (newCommentText.trim() || newCommentFile) ? 'pointer' : 'not-allowed',
+                            cursor: (hasCommentText || newCommentFile) ? 'pointer' : 'default',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -3926,13 +4626,331 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
         </div>
       </div>
+
+      {/* Brain AI Modal Overlay */}
+      {isAiModalOpen && (
+        <>
+          <div className="ai-brain-modal__backdrop" onClick={() => setIsAiModalOpen(false)} />
+          <div className="ai-brain-modal__container">
+            {/* Header */}
+            <div className="ai-brain-modal__header">
+              <div className="ai-brain-modal__header-left">
+                <div className="ai-brain-modal__header-logo">
+                  <span className="sparkle-icon">✨</span>
+                </div>
+                <div className="ai-brain-modal__header-title-wrapper">
+                  <span className="ai-brain-modal__header-title">Brain</span>
+                  <span className="ai-brain-modal__header-subtitle">
+                    {t('ai.suggest_subtitle' as any, { projectName: project?.name || 'Project' })}
+                  </span>
+                </div>
+              </div>
+              <button className="ai-brain-modal__header-close" onClick={() => setIsAiModalOpen(false)}>
+                <CloseOutlined />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="ai-brain-modal__body">
+              {aiModalLoading && !aiModalResult ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '120px', gap: '12px' }}>
+                  <Spin size="default" />
+                  <span style={{ fontSize: '12px', color: '#9ca0b0' }}>
+                    {t('ai.thinking')}
+                  </span>
+                </div>
+              ) : (
+                <div className="ai-brain-modal__content">
+                  {aiModalType === 'description' ? (
+                    renderMarkdown(aiModalResult || '')
+                  ) : Array.isArray(aiModalResult) ? (
+                    <ul style={{ paddingLeft: '20px', margin: '0', listStyleType: 'disc' }}>
+                      {aiModalResult.map((item: string, idx: number) => (
+                        <li key={idx} style={{ marginBottom: '6px' }}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={{ fontStyle: 'italic', color: '#9ca0b0' }}>
+                      {t('ai.no_results')}
+                    </div>
+                  )}
+
+                  {aiModalResult && (
+                    <div className="ai-brain-modal__feedback-row">
+                      <button className="feedback-btn" onClick={() => handleRegenerateAi()}>
+                        <ReloadOutlined /> {t('ai.regenerate')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Input Wrapper */}
+            <div className="ai-brain-modal__input-wrapper">
+              <div className="ai-brain-modal__input-container">
+                <input
+                  ref={aiModalInputRef}
+                  type="text"
+                  placeholder={t('ai.placeholder')}
+                  defaultValue=""
+                  disabled={aiModalLoading}
+                  onChange={(e) => {
+                    // Update ref only — zero parent re-render, no violation
+                    aiModalPromptRef.current = e.target.value;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && aiModalPromptRef.current.trim()) {
+                      handleRegenerateAi();
+                    }
+                  }}
+                />
+                <span
+                  className="input-action send"
+                  onClick={() => {
+                    if (aiModalPromptRef.current.trim()) handleRegenerateAi();
+                  }}
+                >
+                  <SendOutlined />
+                </span>
+              </div>
+            </div>
+
+            {/* Actions list */}
+            {aiModalResult && (
+              <div className="ai-brain-modal__actions">
+                <div className="ai-brain-modal__action-item" onClick={handleApplyAiResult}>
+                  <div className="ai-brain-modal__action-item-left">
+                    <CheckOutlined style={{ color: '#10b981' }} />
+                    <span style={{ fontWeight: 600 }}>
+                      {aiModalType === 'description'
+                        ? t('ai.replace_description')
+                        : aiModalType === 'subtasks'
+                          ? t('ai.create_subtasks')
+                          : t('ai.create_checklist')}
+                    </span>
+                  </div>
+                  <span className="enter-badge">↵</span>
+                </div>
+                <div className="ai-brain-modal__action-item" onClick={handleCopyAiResult}>
+                  <div className="ai-brain-modal__action-item-left">
+                    <CopyOutlined />
+                    <span>{t('ai.copy')}</span>
+                  </div>
+                </div>
+                <div className="ai-brain-modal__action-item" onClick={() => setIsAiModalOpen(false)}>
+                  <div className="ai-brain-modal__action-item-left">
+                    <ArrowLeftOutlined />
+                    <span>{t('ai.back')}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {previewAttachment && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.9)',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          color: '#fff'
+        }}>
+          {/* Header toolbar */}
+          <div style={{
+            height: '56px',
+            background: '#1a1a1a',
+            borderBottom: '1px solid #333',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 20px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <ArrowLeftOutlined
+                style={{ fontSize: '18px', cursor: 'pointer' }}
+                onClick={() => { setPreviewAttachment(null); setPreviewSrc(''); setPreviewType(''); }}
+              />
+              <span style={{ fontSize: '15px', fontWeight: 600 }}>{previewTitle}</span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <Button
+                type="text"
+                icon={<DownloadOutlined style={{ color: '#fff' }} />}
+                onClick={() => handleDownloadFile(previewAttachment.file_path, previewAttachment.file_name)}
+                style={{ color: '#fff', display: 'flex', alignItems: 'center' }}
+              >
+                {t('tasks.panel.download')}
+              </Button>
+              <CloseOutlined
+                style={{ fontSize: '18px', cursor: 'pointer' }}
+                onClick={() => { setPreviewAttachment(null); setPreviewSrc(''); setPreviewType(''); }}
+              />
+            </div>
+          </div>
+
+          {/* Content area */}
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            overflow: 'auto'
+          }}>
+            {previewType === 'image' ? (
+              <img
+                src={previewSrc}
+                alt={previewTitle}
+                style={{
+                  maxWidth: '90%',
+                  maxHeight: '85vh',
+                  objectFit: 'contain',
+                  borderRadius: '4px',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+                }}
+              />
+            ) : (previewType === 'pdf' || previewType === 'office') ? (
+              <iframe
+                src={previewSrc}
+                title={previewTitle}
+                style={{
+                  width: '90%',
+                  height: 'calc(100vh - 120px)',
+                  border: 'none',
+                  borderRadius: '4px',
+                  background: '#fff'
+                }}
+              />
+            ) : null}
+          </div>
+        </div>
+      )}
+      <DeleteConfirmComponent />
+
+      {/* Custom Rename Attachment Modal — renders inside component tree → follows dark theme */}
+      {renameModalOpen && (
+        <>
+          <div
+            onClick={() => setRenameModalOpen(false)}
+            style={{
+              position: 'fixed', inset: 0,
+              background: 'rgba(0,0,0,0.5)',
+              zIndex: 1100,
+              backdropFilter: 'blur(2px)',
+            }}
+          />
+          <div style={{
+            position: 'fixed',
+            top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 1101,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-light)',
+            borderRadius: '12px',
+            padding: '24px',
+            width: '400px',
+            maxWidth: '90vw',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+              <span style={{ fontSize: '18px' }}>✏️</span>
+              <span style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>
+                {t('tasks.panel.rename_attachment' as any)}
+              </span>
+            </div>
+
+            {/* Input */}
+            <input
+              autoFocus
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRenameConfirm();
+                if (e.key === 'Escape') setRenameModalOpen(false);
+              }}
+              placeholder={t('tasks.panel.attachment_name_placeholder' as any)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                background: 'var(--bg-card-hover)',
+                border: '1px solid var(--border-light)',
+                borderRadius: '8px',
+                color: 'var(--text-primary)',
+                fontSize: '13px',
+                outline: 'none',
+                boxSizing: 'border-box',
+                marginBottom: '20px',
+                fontFamily: 'inherit',
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = 'var(--primary)';
+                e.target.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.2)';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = 'var(--border-light)';
+                e.target.style.boxShadow = 'none';
+              }}
+            />
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setRenameModalOpen(false)}
+                style={{
+                  padding: '8px 18px',
+                  background: 'var(--bg-card-hover)',
+                  border: '1px solid var(--border-light)',
+                  borderRadius: '8px',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontFamily: 'inherit',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {t('tasks.panel.cancel')}
+              </button>
+              <button
+                onClick={handleRenameConfirm}
+                disabled={renameLoading}
+                style={{
+                  padding: '8px 18px',
+                  background: 'var(--primary)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  cursor: renameLoading ? 'not-allowed' : 'pointer',
+                  fontSize: '13px',
+                  fontFamily: 'inherit',
+                  fontWeight: 600,
+                  opacity: renameLoading ? 0.7 : 1,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {renameLoading ? '...' : t('tasks.panel.save' as any)}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 
   function insertEmojiToReply(emoji: string) {
     const textarea = document.getElementById(`reply-textarea-${replyingToCommentId}`) as HTMLTextAreaElement;
     if (!textarea) {
-      setReplyText(prev => prev + emoji);
+      replyTextRef.current = replyTextRef.current + emoji;
       return;
     }
     const start = textarea.selectionStart;
@@ -3940,7 +4958,10 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     const text = textarea.value;
     const before = text.substring(0, start);
     const after = text.substring(end);
-    setReplyText(before + emoji + after);
+    const newText = before + emoji + after;
+    textarea.value = newText;
+    replyTextRef.current = newText;
+    setHasReplyText(newText.trim().length > 0);
 
     setTimeout(() => {
       textarea.focus();
@@ -4024,6 +5045,17 @@ const formatDuration = (totalSeconds: number, t: any) => {
 const isImageFile = (path: string) => {
   const ext = path.split('.').pop()?.toLowerCase();
   return ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '');
+};
+
+const getFileUrl = (path: string): string => {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  const apiBase = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+  const baseUrl = apiBase.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${baseUrl}${cleanPath}`;
 };
 
 const formatEstimate = (t: any, start?: string, due?: string) => {

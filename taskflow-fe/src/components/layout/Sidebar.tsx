@@ -32,9 +32,10 @@ interface NavItem {
 interface SidebarProps {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
+  className?: string;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ collapsed, onCollapse }) => {
+const Sidebar: React.FC<SidebarProps> = ({ collapsed, onCollapse, className = '' }) => {
   const { t } = useTranslation();
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [projects, setProjects] = useState<any[]>([]);
@@ -142,7 +143,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onCollapse }) => {
   };
 
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${className}`}>
       {/* Logo */}
       <div className="sidebar__logo">
         <div className="sidebar__logo-icon" style={{ width: "27px", height: "27px" }}>T</div>
@@ -176,7 +177,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onCollapse }) => {
           {projectsExpanded && !collapsed && (
             <div className="sidebar__projects">
               {projects.map((project) => {
-                const activeTasks = project.tasks?.filter((t: any) => t.status !== 'done').length || 0;
+                const activeTasks = project.tasks?.filter((t: any) => t.status !== 'done' && !t.parent_task_id).length || 0;
                 return (
                   <div
                     key={project.id}

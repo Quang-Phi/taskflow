@@ -56,6 +56,8 @@ interface WorkflowSidebarProps {
   t: (key: string, options?: any) => string;
   onSelectNode: (id: string | null) => void;
   onSelectTransition: (id: string | null, fromCanvas?: boolean) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
@@ -80,7 +82,9 @@ export const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   onClose,
   t,
   onSelectNode,
-  onSelectTransition
+  onSelectTransition,
+  collapsed = false,
+  onToggleCollapse
 }) => {
   // Find selected status
   const selectedStatus = statuses.find(s => s.id === selectedNodeId);
@@ -213,13 +217,24 @@ export const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 
   // Render Status Details
   if (selectedStatus) {
-    const isInitial = selectedStatus.id === initialStatusId;
+    const isInitial = String(selectedStatus.id) === String(initialStatusId);
     const incoming = transitions.filter(tr => tr.to === selectedStatus.id);
     const outgoing = transitions.filter(tr => tr.from === selectedStatus.id);
     const hasGlobal = globalTransitions.some(gt => gt.to === selectedStatus.id);
 
     return (
-      <div className="workflow-sidebar">
+      <div className={`workflow-sidebar${collapsed ? ' collapsed' : ''}`}>
+        {/* Collapse toggle tab */}
+        {onToggleCollapse && (
+          <button className="sidebar-collapse-tab" onClick={onToggleCollapse} title={collapsed ? (t('workflow.sidebar.expand') || 'Mở rộng') : (t('workflow.sidebar.collapse') || 'Thu gọn')}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              {collapsed
+                ? <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                : <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              }
+            </svg>
+          </button>
+        )}
         <div className="sidebar-header">
           <h3>{t('projects.status.status_field')}</h3>
           <CloseOutlined className="close-sidebar" onClick={onClose} />
@@ -283,7 +298,7 @@ export const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
                   checked={isInitial}
                   onChange={(e) => {
                     if (e.target.checked) {
-                      setInitialStatusId(selectedStatus.id);
+                      setInitialStatusId(String(selectedStatus.id));
                     }
                   }}
                   disabled={isInitial}
@@ -488,7 +503,18 @@ export const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
     };
 
     return (
-      <div className="workflow-sidebar">
+      <div className={`workflow-sidebar${collapsed ? ' collapsed' : ''}`}>
+        {/* Collapse toggle tab */}
+        {onToggleCollapse && (
+          <button className="sidebar-collapse-tab" onClick={onToggleCollapse} title={collapsed ? (t('workflow.sidebar.expand') || 'Mở rộng') : (t('workflow.sidebar.collapse') || 'Thu gọn')}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              {collapsed
+                ? <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                : <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              }
+            </svg>
+          </button>
+        )}
         <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div 
             style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
@@ -815,10 +841,21 @@ export const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 
   // Render Empty State
   return (
-    <div className="workflow-sidebar">
+    <div className={`workflow-sidebar${collapsed ? ' collapsed' : ''}`}>
+      {/* Collapse toggle tab — sticks to left edge */}
+      {onToggleCollapse && (
+        <button className="sidebar-collapse-tab" onClick={onToggleCollapse} title={collapsed ? (t('workflow.sidebar.expand') || 'Mở rộng') : (t('workflow.sidebar.collapse') || 'Thu gọn')}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            {collapsed
+              ? <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              : <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            }
+          </svg>
+        </button>
+      )}
       <div className="sidebar-header">
         <h3>{t('workflow.sidebar.flow_properties')}</h3>
-        <CloseOutlined className="close-sidebar" onClick={onClose} />
+        {/* No close button in empty state */}
       </div>
       <div className="empty-sidebar-state">
         <div className="empty-icon">🔀</div>

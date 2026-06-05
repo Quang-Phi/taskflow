@@ -12,6 +12,7 @@ class Workflow extends Model
         'project_id',
         'status_template_id',
         'mode',
+        'initial_status',
     ];
 
     public function project(): BelongsTo

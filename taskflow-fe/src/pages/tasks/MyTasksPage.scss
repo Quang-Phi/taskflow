@@ -130,6 +130,7 @@
       cursor: pointer;
       border-radius: $radius-md;
       transition: background $transition-fast;
+      margin-bottom: 4px; // prevent hover bg from merging with first task row
 
       &:hover {
         background: $bg-card-hover;
@@ -183,8 +184,9 @@
     cursor: pointer;
     background: $bg-card;
     border: 1px solid $border-color;
-    margin-bottom: 6px;
+    margin-bottom: 2px; // reduced from 6px so subtask-toggle feels attached
     transition: all $transition-fast;
+    position: relative;
 
     &:hover {
       background: $bg-card-hover;
@@ -193,6 +195,85 @@
       .my-tasks__task-actions {
         opacity: 1;
       }
+    }
+
+    // Drop indicator lines — Jira style
+    &.drop-before {
+      &::before {
+        content: '';
+        position: absolute;
+        top: -3px;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: #3b82f6;
+        border-radius: 2px;
+        z-index: 10;
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.7);
+      }
+    }
+
+    &.drop-after {
+      &::after {
+        content: '';
+        position: absolute;
+        bottom: -3px;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: #3b82f6;
+        border-radius: 2px;
+        z-index: 10;
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.7);
+      }
+    }
+  }
+
+  // ── Subtask expand toggle (below parent task row in list view) ──────────
+  &__subtask-toggle {
+    @include flex-start;
+    gap: 5px;
+    padding: 4px 12px 4px 44px; // align with task title column
+    margin-bottom: 6px;
+    cursor: pointer;
+    color: $text-muted;
+    font-size: $font-size-xs;
+    font-weight: 600;
+    border-radius: 0 0 $radius-md $radius-md;
+    transition: color $transition-fast;
+    user-select: none;
+
+    &:hover {
+      color: $text-secondary;
+    }
+
+    .chevron {
+      transition: transform $transition-fast;
+      &.expanded {
+        transform: rotate(90deg);
+      }
+    }
+  }
+
+  // ── Inline subtask rows in list view ────────────────────────────────────
+  &__subtask-list-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px 7px 0;
+    border-radius: $radius-md;
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid transparent;
+    margin-bottom: 3px;
+    transition: all $transition-fast;
+    border-left: 2px solid var(--border-color);
+    padding-left: 10px;
+
+    &:hover {
+      background: $bg-card-hover;
+      border-left-color: $primary;
+      .my-tasks__task-actions { opacity: 1; }
     }
   }
 

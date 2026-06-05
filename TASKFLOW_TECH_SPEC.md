@@ -55,7 +55,11 @@ Quản lý các không gian dự án.
 - `icon` (string, null) - Tên icon hoặc ảnh base64
 - `priority` (string) - Mức độ ưu tiên dự án
 - `status` (string) - Trạng thái dự án (`active`, `on_hold`, `completed`, `planning`)
-- `statuses` (json, null) - Quy trình trạng thái Kanban tùy chỉnh (VD: To Do, In Progress, Done,...)
+- `statuses` (json, null) - Quy trình workflow tùy chỉnh bao gồm:
+  - `statuses[]`: Danh sách trạng thái (id, name, color, type: `not_started|active|closed`, position: `{x,y}`)
+  - `transitions[]`: Danh sách transition (id, from, to, name, allowed_roles[], rules[])
+  - `global_transitions[]`: Danh sách global transition (id, to, name, allowed_roles[], rules[])
+  - `initial_status_id`: ID trạng thái mặc định khi tạo task mới
 - `start_date` (date, null)
 - `end_date` (date, null)
 - `created_by` (int, khóa ngoại liên kết `users.id`)
@@ -309,6 +313,12 @@ Tất cả các API được bảo vệ bởi middleware `auth:sanctum` (ngoại
 - `GET /api/notifications/unread-count`: Đếm số lượng thông báo chưa đọc.
 - `GET /api/search`: Tìm kiếm toàn cục (Tasks, Projects, Members).
 
+### 3.11 Workflow Editor
+
+- `GET /api/projects/{id}`: Lấy workflow hiện tại (trường `statuses` trong response dự án).
+- `PUT /api/projects/{id}/statuses`: Lưu toàn bộ workflow: cập nhật statuses, transitions, global transitions, node positions và initial_status_id.
+- `PUT /api/tasks/{id}/status`: Chuyển trạng thái task — backend kiểm tra workflow rules trước khi cho phép chuyển, trả về lỗi chi tiết nếu vi phạm quy tắc.
+
 ---
 
 ## 4. QUY TRÌNH XÁC THỰC SSO & TÍCH HỢP BITRIX24
@@ -424,4 +434,4 @@ Khi di chuyển từ môi trường phát triển (Local/Dev) sang môi trườn
 
 ---
 
-*Cập nhật lần cuối: 2026-05-29 (Dựa trên hệ thống thực tế)*
+*Cập nhật lần cuối: 2026-06-05 (Bổ sung Workflow Editor)*

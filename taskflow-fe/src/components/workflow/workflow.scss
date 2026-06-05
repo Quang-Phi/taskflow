@@ -426,7 +426,334 @@
       to { transform: translate(-50%, 0); opacity: 1; }
     }
   }
+
+  // ─── Canvas Controls Bar ───────────────────────────────────────────────────
+  .workflow-canvas-controls {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 20;
+    background: $bg-card;
+    border: 1px solid $border-color;
+    border-radius: 10px;
+    padding: 6px 12px;
+    box-shadow: $shadow-md;
+    backdrop-filter: blur(8px);
+    animation: slideUpCtrl 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+
+    @keyframes slideUpCtrl {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  }
+
+  .wf-ctrl-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid $border-color;
+    border-radius: 8px;
+    background: $bg-card-hover;
+    color: $text-secondary;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.18s ease;
+    padding: 0;
+    flex-shrink: 0;
+
+    &:hover {
+      background: rgba(99, 102, 241, 0.1);
+      border-color: rgba(99, 102, 241, 0.35);
+      color: $primary-light;
+    }
+
+    &.wf-collapse-btn {
+      font-size: 14px;
+    }
+  }
+
+  .wf-ctrl-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    font-weight: 500;
+    color: $text-secondary;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+
+    &:hover {
+      color: $text-primary;
+    }
+
+    input[type="checkbox"] {
+      flex-shrink: 0;
+    }
+  }
+
+  // ─── Node hover transition count badge ─────────────────────────────────────
+  .workflow-node {
+    &.node-hovered {
+      border-color: rgba(99, 102, 241, 0.6) !important;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), $shadow-lg !important;
+    }
+
+    .node-transition-count-badge {
+      position: absolute;
+      top: -8px;
+      right: 8px;
+      background: $primary;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 4px;
+      border-radius: 9px;
+      border: 2px solid $bg-card;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: badgePop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      z-index: 5;
+
+      @keyframes badgePop {
+        from { transform: scale(0); opacity: 0; }
+        to   { transform: scale(1); opacity: 1; }
+      }
+    }
+  }
+
+  // ─── Sidebar collapse tab + collapsed state ─────────────────────────────────
+  .workflow-sidebar {
+    position: relative;
+    transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: visible !important; // always let the tab poke out
+
+    // Circular toggle tab pinned to the left border of the sidebar
+    .sidebar-collapse-tab {
+      position: absolute;
+      top: 50%;
+      left: -16px;          // half the circle outside
+      transform: translateY(-50%);
+      z-index: 30;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;   // CIRCLE
+      background: $bg-card;
+      border: 1.5px solid $border-color;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: $text-secondary;
+      padding: 0;
+      box-shadow: -2px 2px 8px rgba(0,0,0,0.2);
+      transition: background 0.15s ease,
+                  color 0.15s ease,
+                  box-shadow 0.15s ease,
+                  border-color 0.15s ease;
+
+      &:hover {
+        background: rgba(99, 102, 241, 0.12);
+        border-color: rgba(99, 102, 241, 0.45);
+        color: $primary-light;
+        box-shadow: -2px 2px 12px rgba(99, 102, 241, 0.25);
+      }
+    }
+
+    // Sidebar content fades when collapsed
+    .sidebar-header,
+    .sidebar-content,
+    .sidebar-section,
+    .empty-sidebar-state {
+      transition: opacity 0.2s ease;
+    }
+
+    &.collapsed {
+      // Keep 20px visible so the circular tab is still anchored
+      width: 20px !important;
+      min-width: 20px !important;
+      border-left-color: transparent;
+
+      // Hide all content children except the toggle tab
+      & > *:not(.sidebar-collapse-tab) {
+        opacity: 0;
+        pointer-events: none;
+        user-select: none;
+        overflow: hidden;
+        max-height: 0;
+        max-width: 0;
+      }
+
+      // Reposition circle to hug the 20px strip's left edge
+      .sidebar-collapse-tab {
+        left: -14px;
+      }
+    }
+  }
 }
+
+// ─── Help Modal ────────────────────────────────────────────────────────────────
+.wf-help-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  backdrop-filter: blur(3px);
+  animation: fadeInOverlay 0.2s ease;
+
+  @keyframes fadeInOverlay {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+}
+
+.wf-help-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  animation: slideUpModal 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes slideUpModal {
+    from { opacity: 0; transform: translateY(20px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+
+    h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+  }
+
+  &__close {
+    width: 30px;
+    height: 30px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    padding: 0;
+
+    &:hover {
+      background: var(--bg-card-hover);
+      color: var(--text-primary);
+    }
+  }
+
+  &__body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  &__footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+    flex-shrink: 0;
+  }
+}
+
+.wf-help-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s ease;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    width: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(120, 120, 120, 0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 8px;
+  }
+
+  &__content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 4px;
+  }
+
+  &__title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  &__desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+  }
+}
+
+.wf-help-close-btn {
+  height: 34px;
+  padding: 0 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: rgba(99, 102, 241, 0.1);
+    border-color: rgba(99, 102, 241, 0.35);
+    color: #6366f1;
+  }
+}
+
 
 // Rules Modal Styling Integration
 .rules-modal-layout {

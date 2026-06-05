@@ -280,11 +280,11 @@ class OpenAiService
 
             Log::error('OpenAiService chat completion failed', [
                 'status' => $response->status(),
-                'body' => $response->body()
+                'body'   => $response->body()
             ]);
             return match ($lang) {
-                'en' => "⚠️ An error occurred while connecting to OpenAI API. Please check your key configuration.",
-                'ja' => "⚠️ OpenAI APIへの接続中にエラーが発生しました。キーの設定を確認してください。",
+                'en'  => "⚠️ An error occurred while connecting to OpenAI API. Please check your key configuration.",
+                'ja'  => "⚠️ OpenAI APIへの接続中にエラーが発生しました。キーの設定を確認してください。",
                 default => "⚠️ Đã xảy ra lỗi khi kết nối tới OpenAI API. Vui lòng kiểm tra lại cấu hình key.",
             };
         } catch (\Exception $e) {
@@ -292,8 +292,8 @@ class OpenAiService
                 'message' => $e->getMessage()
             ]);
             return match ($lang) {
-                'en' => "⚠️ Cannot connect to OpenAI. Error: " . $e->getMessage(),
-                'ja' => "⚠️ OpenAIに接続できません。エラー: " . $e->getMessage(),
+                'en'  => "⚠️ Cannot connect to OpenAI. Error: " . $e->getMessage(),
+                'ja'  => "⚠️ OpenAIに接続できません。エラー: " . $e->getMessage(),
                 default => "⚠️ Không thể kết nối tới OpenAI. Lỗi: " . $e->getMessage(),
             };
         }
@@ -332,7 +332,10 @@ class OpenAiService
             . "8. If the user asks to create a task but does not provide a title or doesn't specify which project it belongs to, DO NOT guess. Ask the user for the task title and/or to specify which project the task should belong to (you can also search for available projects first using list_projects).\n"
             . "9. If the user asks to start/stop a timer but does not specify a task ID or name, ask the user which task they want to run the timer for.\n"
             . "10. DO NOT output raw text-based function tags (such as (function=...<function> or <function=.../function>) in your response. If you want to call a tool, use the native tool calling mechanism. If you do not have enough information to call a tool, just ask the user for the information in plain text without referencing any function names or parameter templates.\n"
-            . "11. When listing tasks (such as overdue or stuck tasks), DO NOT just report the task name and the project ID. Always use the project relation to mention the project name clearly (e.g., task 'A' belonging to project 'B') so the user has clear context.";
+            . "11. When listing tasks (such as overdue or stuck tasks), DO NOT just report the task name and the project ID. Always use the project relation to mention the project name clearly (e.g., task 'A' belonging to project 'B') so the user has clear context.\n"
+            . "12. When creating a project (create_project), ALWAYS include start_date and end_date if the user mentions any dates or time range. If the user mentions members by name, call list_users FIRST to look up their user IDs, then pass member_ids (array of integer user IDs) to create_project. Never skip dates or members if the user explicitly provided them. The creator is always added automatically as manager.\n"
+            . "13. IMPORTANT PERFORMANCE RULE: Never call more than 10 tool functions in a single response turn. If you need to create many items (e.g. 30 tasks), batch them: create the first 10, then ask the user if they want to continue, or clearly state you are processing in batches. This prevents timeouts and ensures fast response times.\n"
+            . "14. NEVER use markdown link syntax with command: protocol in your reply text. Do NOT write things like [Kiểm tra công việc](command:list_tasks(is_overdue=true)). If you want to suggest actions, ONLY use the suggest_follow_ups tool to register them as buttons. In your reply text, mention suggestions in plain text only (e.g. 'Bạn có muốn tôi kiểm tra công việc quá hạn không?').";
 
         $guide = $this->getTrainingGuide();
         if ($guide !== '') {
@@ -366,34 +369,49 @@ class OpenAiService
         $lastAssistantContent = '';
         $maxIterations = 5;
 
+        // ─── Timing / profiling ───────────────────────────────────────────────
+        $totalStart   = microtime(true);
+        $timingSteps  = [];   // array of step descriptions with ms durations
+
+        $lap = static function (string $label, float $start) use (&$timingSteps): void {
+            $ms = round((microtime(true) - $start) * 1000, 1);
+            $timingSteps[] = ['step' => $label, 'ms' => $ms];
+            Log::info("[AI Timing] {$label}: {$ms} ms");
+        };
+        // ─────────────────────────────────────────────────────────────────────
+
         for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
             try {
+                // ── Measure OpenAI API call ──────────────────────────────────
+                $openAiStart = microtime(true);
                 $response = $this->postChatCompletion([
-                    'messages' => $payloadMessages,
-                    'tools' => $tools,
+                    'messages'    => $payloadMessages,
+                    'tools'       => $tools,
                     'tool_choice' => 'auto',
                     'temperature' => 0.5,
+                    'max_tokens'  => 4096,  // cap response size to avoid 46s waits on huge payloads
                 ], 40);
+                $lap("openai_call[iter={$iteration}]", $openAiStart);
+                // ─────────────────────────────────────────────────────────────
 
                 if (!$response->successful()) {
                     Log::error('OpenAiService global chat failure', [
                         'status' => $response->status(),
-                        'body' => $response->body()
+                        'body'   => $response->body()
                     ]);
                     return [
                         'reply' => match ($lang) {
-                            'en' => "⚠️ An error occurred while communicating with OpenAI API. Error code: " . $response->status(),
-                            'ja' => "⚠️ OpenAI APIとの通信中にエラーが発生しました。エラーコード: " . $response->status(),
+                            'en'  => "⚠️ An error occurred while communicating with OpenAI API. Error code: " . $response->status(),
+                            'ja'  => "⚠️ OpenAI APIとの通信中にエラーが発生しました。エラーコード: " . $response->status(),
                             default => "⚠️ Đã xảy ra lỗi khi trao đổi với OpenAI API. Mã lỗi: " . $response->status(),
                         },
-                        'actions' => []
+                        'actions'      => [],
+                        'debug_timing' => $this->buildTimingSummary($timingSteps, $totalStart),
                     ];
                 }
 
                 $data = $response->json();
-                Log::info('OpenAiService global chat raw response', [
-                    'data' => $data
-                ]);
+                Log::info('OpenAiService global chat raw response', ['data' => $data]);
                 $messageResult = $data['choices'][0]['message'] ?? null;
                 if (!$messageResult) {
                     break;
@@ -406,54 +424,78 @@ class OpenAiService
 
                 // If LLM wants to execute tool calls
                 if (!empty($messageResult['tool_calls'])) {
-                    // Add assistant tool calls response to message flow
                     $payloadMessages[] = [
-                        'role' => 'assistant',
-                        'content' => $messageResult['content'] ?? null,
+                        'role'       => 'assistant',
+                        'content'    => $messageResult['content'] ?? null,
                         'tool_calls' => $messageResult['tool_calls']
                     ];
 
                     foreach ($messageResult['tool_calls'] as $toolCall) {
-                        $toolId = $toolCall['id'];
+                        $toolId   = $toolCall['id'];
                         $toolName = $toolCall['function']['name'];
                         $toolArgs = json_decode($toolCall['function']['arguments'], true) ?: [];
 
-                        // Execute the corresponding local database action
+                        // ── Measure each tool execution ──────────────────────
+                        $toolStart = microtime(true);
                         if ($toolName === 'suggest_follow_ups') {
                             $suggestedFollowUps = $toolArgs['suggestions'] ?? [];
                             $toolOutput = ['status' => 'success', 'message' => 'Follow ups registered'];
                         } else {
                             $toolOutput = $this->executeTool($toolName, $toolArgs, $user, $lang);
                         }
+                        $lap("tool[{$toolName}][iter={$iteration}]", $toolStart);
+                        // ─────────────────────────────────────────────────────
 
-                        // Append tool result message
                         $payloadMessages[] = [
-                            'role' => 'tool',
-                            'tool_call_id' => $toolId,
-                            'name' => $toolName,
-                            'content' => json_encode($toolOutput)
+                            'role'        => 'tool',
+                            'tool_call_id'=> $toolId,
+                            'name'        => $toolName,
+                            'content'     => json_encode($toolOutput)
                         ];
                     }
 
-                    // Continue loop to send tool results back to OpenAI
+                    // ── Early return optimisation ─────────────────────────────
+                    // If EVERY tool call this iteration was suggest_follow_ups
+                    // and we already have substantive content, there is no need
+                    // to send another round-trip to OpenAI. Returning now avoids
+                    // the model overwriting the full reply with a shorter summary.
+                    $allSuggestFollowUps = array_reduce(
+                        $messageResult['tool_calls'],
+                        fn($carry, $tc) => $carry && ($tc['function']['name'] === 'suggest_follow_ups'),
+                        true
+                    );
+                    if ($allSuggestFollowUps && $lastAssistantContent !== '') {
+                        $finalReply = $this->cleanRemainingFunctionTags($lastAssistantContent, $lang);
+                        return [
+                            'reply'        => $finalReply !== '' ? $finalReply : match ($lang) {
+                                'en'  => 'I did not understand your request.',
+                                'ja'  => 'リクエストを理解できませんでした。',
+                                default => 'Tôi chưa hiểu rõ yêu cầu của bạn.',
+                            },
+                            'actions'      => $suggestedFollowUps,
+                            'events'       => $this->executedEvents,
+                            'debug_timing' => $this->buildTimingSummary($timingSteps, $totalStart),
+                        ];
+                    }
+                    // ─────────────────────────────────────────────────────────
+
                     continue;
                 }
 
                 // Parse and clean up text-based function calls if present
-                $content = $messageResult['content'] ?? '';
+                $content      = $messageResult['content'] ?? '';
                 $textToolCalls = $this->parseTextToolCalls($content);
 
                 if (!empty($textToolCalls)) {
-                    $hasExecutedAny = false;
+                    $hasExecutedAny   = false;
                     $simulatedToolCalls = [];
-                    $toolOutputs = [];
+                    $toolOutputs      = [];
 
                     foreach ($textToolCalls as $index => $tc) {
                         $toolName = $tc['name'];
                         $toolArgs = $tc['arguments'];
-                        $rawTag = $tc['raw'];
+                        $rawTag   = $tc['raw'];
 
-                        // Check for placeholders in arguments
                         $isPlaceholder = false;
                         if ($toolName === 'create_project' && isset($toolArgs['name']) && $this->isPlaceholder($toolArgs['name'])) {
                             $isPlaceholder = true;
@@ -462,98 +504,109 @@ class OpenAiService
                             $isPlaceholder = true;
                         }
 
-                        // Remove the raw tag from the content to keep it clean
                         $content = str_replace($rawTag, '', $content);
 
                         if (!$isPlaceholder) {
                             $callId = 'call_sim_' . time() . '_' . $index;
                             $simulatedToolCalls[] = [
-                                'id' => $callId,
+                                'id'   => $callId,
                                 'type' => 'function',
                                 'function' => [
-                                    'name' => $toolName,
+                                    'name'      => $toolName,
                                     'arguments' => json_encode($toolArgs)
                                 ]
                             ];
 
+                            // ── Measure text-based tool execution ────────────
+                            $toolStart = microtime(true);
                             if ($toolName === 'suggest_follow_ups') {
                                 $suggestedFollowUps = $toolArgs['suggestions'] ?? [];
                                 $toolOutput = ['status' => 'success', 'message' => 'Follow ups registered'];
                             } else {
                                 $toolOutput = $this->executeTool($toolName, $toolArgs, $user, $lang);
                             }
+                            $lap("tool_text[{$toolName}][iter={$iteration}]", $toolStart);
+                            // ─────────────────────────────────────────────────
 
                             $toolOutputs[] = [
-                                'role' => 'tool',
+                                'role'         => 'tool',
                                 'tool_call_id' => $callId,
-                                'name' => $toolName,
-                                'content' => json_encode($toolOutput)
+                                'name'         => $toolName,
+                                'content'      => json_encode($toolOutput)
                             ];
                             $hasExecutedAny = true;
                         }
                     }
 
-                    // Update the messageResult content after stripping raw tags
                     $messageResult['content'] = $this->cleanRemainingFunctionTags(trim($content), $lang);
                     if ($messageResult['content'] !== '') {
                         $lastAssistantContent = $messageResult['content'];
                     }
 
                     if ($hasExecutedAny) {
-                        // Append assistant message with simulated tool calls
                         $payloadMessages[] = [
-                            'role' => 'assistant',
-                            'content' => $messageResult['content'],
+                            'role'       => 'assistant',
+                            'content'    => $messageResult['content'],
                             'tool_calls' => $simulatedToolCalls
                         ];
-
-                        // Append tool results
                         foreach ($toolOutputs as $to) {
                             $payloadMessages[] = $to;
                         }
-
-                        // Continue loop to let LLM generate response based on tool execution
                         continue;
                     }
                 }
 
-                // If no more tool calls, return final synthesized text
+                // No more tool calls → return final reply
                 $finalReply = $this->cleanRemainingFunctionTags($lastAssistantContent, $lang);
 
                 return [
-                    'reply' => $finalReply !== '' ? $finalReply : match ($lang) {
-                        'en' => 'I did not understand your request.',
-                        'ja' => 'リクエストを理解できませんでした。',
+                    'reply'        => $finalReply !== '' ? $finalReply : match ($lang) {
+                        'en'  => 'I did not understand your request.',
+                        'ja'  => 'リクエストを理解できませんでした。',
                         default => 'Tôi chưa hiểu rõ yêu cầu của bạn.',
                     },
-                    'actions' => $suggestedFollowUps,
-                    'events' => $this->executedEvents
+                    'actions'      => $suggestedFollowUps,
+                    'events'       => $this->executedEvents,
+                    'debug_timing' => $this->buildTimingSummary($timingSteps, $totalStart),
                 ];
 
             } catch (\Exception $e) {
-                Log::error('OpenAiService global chat exception', [
-                    'message' => $e->getMessage()
-                ]);
+                Log::error('OpenAiService global chat exception', ['message' => $e->getMessage()]);
                 return [
-                    'reply' => match ($lang) {
-                        'en' => "⚠️ An error occurred during processing: " . $e->getMessage(),
-                        'ja' => "⚠️ 処理中にエラーが発生しました: " . $e->getMessage(),
+                    'reply'        => match ($lang) {
+                        'en'  => "⚠️ An error occurred during processing: " . $e->getMessage(),
+                        'ja'  => "⚠️ 処理中にエラーが発生しました: " . $e->getMessage(),
                         default => "⚠️ Có lỗi xảy ra trong quá trình xử lý: " . $e->getMessage(),
                     },
-                    'actions' => [],
-                    'events' => $this->executedEvents
+                    'actions'      => [],
+                    'events'       => $this->executedEvents,
+                    'debug_timing' => $this->buildTimingSummary($timingSteps, $totalStart),
                 ];
             }
         }
 
         return [
-            'reply' => match ($lang) {
-                'en' => "Sorry, the system was interrupted due to reaching the consecutive processing limit.",
-                'ja' => "申し訳ございません、連続処理の上限に達したため、システムが中断されました。",
+            'reply'        => match ($lang) {
+                'en'  => "Sorry, the system was interrupted due to reaching the consecutive processing limit.",
+                'ja'  => "申し訳ございません、連続処理の上限に達したため、システムが中断されました。",
                 default => "Xin lỗi, hệ thống bị gián đoạn do đạt giới hạn xử lý liên tiếp.",
             },
-            'actions' => [],
-            'events' => $this->executedEvents
+            'actions'      => [],
+            'events'       => $this->executedEvents,
+            'debug_timing' => $this->buildTimingSummary($timingSteps, $totalStart),
+        ];
+    }
+
+    /**
+     * Build a timing summary array from profiling steps.
+     */
+    private function buildTimingSummary(array $steps, float $totalStart): array
+    {
+        $totalMs = round((microtime(true) - $totalStart) * 1000, 1);
+        Log::info("[AI Timing] ── TOTAL: {$totalMs} ms ──", ['steps' => $steps]);
+        return [
+            'total_ms' => $totalMs,
+            'steps'    => $steps,
         ];
     }
 
@@ -579,7 +632,7 @@ class OpenAiService
                 'type' => 'function',
                 'function' => [
                     'name' => 'create_project',
-                    'description' => $isEn ? 'Create a new project.' : 'Tạo một dự án mới.',
+                    'description' => $isEn ? 'Create a new project with optional dates and members.' : 'Tạo một dự án mới với ngày bắt đầu, kết thúc và thành viên tùy chọn.',
                     'parameters' => [
                         'type' => 'object',
                         'properties' => [
@@ -599,6 +652,19 @@ class OpenAiService
                             'color' => [
                                 'type' => 'string',
                                 'description' => $isEn ? 'Hex color code for the project (e.g. #6366f1)' : 'Mã màu Hex cho dự án (Ví dụ: #6366f1)'
+                            ],
+                            'start_date' => [
+                                'type' => 'string',
+                                'description' => $isEn ? 'Project start date in YYYY-MM-DD format' : 'Ngày bắt đầu dự án định dạng YYYY-MM-DD'
+                            ],
+                            'end_date' => [
+                                'type' => 'string',
+                                'description' => $isEn ? 'Project end date / deadline in YYYY-MM-DD format' : 'Ngày kết thúc / hạn chót dự án định dạng YYYY-MM-DD'
+                            ],
+                            'member_ids' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'integer'],
+                                'description' => $isEn ? 'List of user IDs to add as members of the project. Use list_users first to find the correct user IDs.' : 'Danh sách ID người dùng cần thêm vào dự án làm thành viên. Dùng list_users trước để tìm đúng ID.'
                             ]
                         ],
                         'required' => ['name']
@@ -885,22 +951,35 @@ class OpenAiService
                 case 'create_project':
                     $project = DB::transaction(function () use ($args, $user) {
                         $proj = Project::create([
-                            'name' => $args['name'],
+                            'name'        => $args['name'],
                             'description' => $args['description'] ?? null,
-                            'color' => $args['color'] ?? '#6366f1',
-                            'priority' => $args['priority'] ?? 'medium',
-                            'status' => $args['status'] ?? 'active',
-                            'created_by' => $user->id,
+                            'color'       => $args['color'] ?? '#6366f1',
+                            'priority'    => $args['priority'] ?? 'medium',
+                            'status'      => $args['status'] ?? 'active',
+                            'created_by'  => $user->id,
+                            'start_date'  => !empty($args['start_date']) ? \Carbon\Carbon::parse($args['start_date'])->toDateString() : null,
+                            'end_date'    => !empty($args['end_date'])   ? \Carbon\Carbon::parse($args['end_date'])->toDateString()   : null,
                         ]);
-                        $proj->members()->attach($user->id, [
-                            'role' => 'manager',
-                            'joined_at' => now(),
-                        ]);
+
+                        // Always add creator as manager
+                        $membersToAttach = [$user->id => ['role' => 'manager', 'joined_at' => now()]];
+
+                        // Attach additional member_ids if provided
+                        if (!empty($args['member_ids']) && is_array($args['member_ids'])) {
+                            foreach ($args['member_ids'] as $memberId) {
+                                $memberId = (int) $memberId;
+                                if ($memberId && $memberId !== (int)$user->id) {
+                                    $membersToAttach[$memberId] = ['role' => 'member', 'joined_at' => now()];
+                                }
+                            }
+                        }
+
+                        $proj->members()->attach($membersToAttach);
                         return $proj;
                     });
                     $this->executedEvents[] = [
                         'type' => 'project_created',
-                        'id' => $project->id,
+                        'id'   => $project->id,
                         'name' => $project->name
                     ];
                     return [

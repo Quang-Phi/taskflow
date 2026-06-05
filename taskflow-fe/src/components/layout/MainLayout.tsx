@@ -5,16 +5,45 @@ import Header from './Header';
 import SearchModal from './SearchModal';
 import CreateTaskModal from '../tasks/CreateTaskModal';
 import GlobalAiSidebar from './GlobalAiSidebar';
+import { MenuOutlined } from '@ant-design/icons';
 import './MainLayout.scss';
 
+const MOBILE_BREAKPOINT = 768;
+const TABLET_BREAKPOINT = 1024;
+
 const MainLayout: React.FC = () => {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.innerWidth <= TABLET_BREAKPOINT  // auto-collapse on tablet
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= MOBILE_BREAKPOINT);
   const navigate = useNavigate();
   const location = useLocation();
 
   const sidebarCollapsedRef = React.useRef(sidebarCollapsed);
+
+  // Detect mobile/tablet and adjust sidebar automatically
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth <= MOBILE_BREAKPOINT;
+      const tablet = window.innerWidth <= TABLET_BREAKPOINT && window.innerWidth > MOBILE_BREAKPOINT;
+      setIsMobile(mobile);
+      if (mobile) {
+        setMobileSidebarOpen(false);
+      } else if (tablet) {
+        setSidebarCollapsed(true); // auto-collapse at tablet
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!aiOpen) {
@@ -52,6 +81,7 @@ const MainLayout: React.FC = () => {
         window.dispatchEvent(new Event('trigger-close-panels'));
         setSearchOpen(false);
         setAiOpen(false);
+        setMobileSidebarOpen(false);
         return;
       }
     };
@@ -69,9 +99,35 @@ const MainLayout: React.FC = () => {
 
   return (
     <div className="main-layout">
-      <Sidebar collapsed={sidebarCollapsed} onCollapse={setSidebarCollapsed} />
-      <Header sidebarCollapsed={sidebarCollapsed} aiSidebarOpen={aiOpen} />
-      <div className={`main-layout__content ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${aiOpen ? 'ai-sidebar-open' : ''}`}>
+      {/* Mobile sidebar backdrop */}
+      {isMobile && mobileSidebarOpen && (
+        <div
+          className="sidebar-backdrop visible"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      <Sidebar
+        collapsed={isMobile ? false : sidebarCollapsed}
+        onCollapse={isMobile ? () => setMobileSidebarOpen(false) : setSidebarCollapsed}
+        className={isMobile ? (mobileSidebarOpen ? 'mobile-open' : '') : ''}
+      />
+      <Header
+        sidebarCollapsed={isMobile ? true : sidebarCollapsed}
+        aiSidebarOpen={aiOpen}
+        mobileHamburger={
+          isMobile ? (
+            <button
+              className="mobile-sidebar-toggle"
+              onClick={() => setMobileSidebarOpen(v => !v)}
+              aria-label="Toggle sidebar"
+            >
+              <MenuOutlined />
+            </button>
+          ) : undefined
+        }
+      />
+      <div className={`main-layout__content ${(isMobile ? true : sidebarCollapsed) ? 'sidebar-collapsed' : ''} ${aiOpen ? 'ai-sidebar-open' : ''}`}>
         <div className="main-layout__page">
           <Outlet />
         </div>

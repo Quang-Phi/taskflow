@@ -41,6 +41,7 @@ interface WorkflowCanvasProps {
   isAddingTransition: boolean;
   addingTransitionFromId: string | null;
   onAddTransitionSelect: (statusId: string) => void;
+  showTransitionLabels: boolean;
   t: (key: string, options?: any) => string;
 }
 
@@ -62,6 +63,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   isAddingTransition,
   addingTransitionFromId,
   onAddTransitionSelect,
+  showTransitionLabels,
   t
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,6 +73,22 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   const dragStartRef = useRef<{ pointer: Position; nodePos: Position }>({ pointer: { x: 0, y: 0 }, nodePos: { x: 0, y: 0 } });
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
   const [hoveredTransitionId, setHoveredTransitionId] = useState<string | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+
+  // Compute which transition IDs are connected to the hovered OR selected node
+  const highlightedTransitionIds = React.useMemo(() => {
+    // Hover takes priority; fall back to selectedNodeId when nothing is hovered
+    const activeNodeId = hoveredNodeId || selectedNodeId;
+    if (!activeNodeId || activeNodeId === '__start__') return new Set<string>();
+    const ids = new Set<string>();
+    transitions.forEach(tr => {
+      if (tr.from === activeNodeId || tr.to === activeNodeId) ids.add(tr.id);
+    });
+    globalTransitions.forEach(gt => {
+      if (gt.to === activeNodeId) ids.add(gt.id);
+    });
+    return ids;
+  }, [hoveredNodeId, selectedNodeId, transitions, globalTransitions]);
 
   // Background grid panning handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -300,9 +318,15 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                   const path = calculatePath(group.from, group.to);
                   const forwardSelected = selectedTransitionId === group.forward.id;
                   const reverseSelected = group.reverse ? selectedTransitionId === group.reverse.id : false;
-                  
-                  const forwardHovered = hoveredTransitionId === group.forward.id;
-                  const reverseHovered = group.reverse ? hoveredTransitionId === group.reverse.id : false;
+
+                  const forwardHoveredByLine = hoveredTransitionId === group.forward.id;
+                  const reverseHoveredByLine = group.reverse ? hoveredTransitionId === group.reverse.id : false;
+                  // Also highlight when the connected node is hovered
+                  const forwardHighlightedByNode = highlightedTransitionIds.has(group.forward.id);
+                  const reverseHighlightedByNode = group.reverse ? highlightedTransitionIds.has(group.reverse.id) : false;
+
+                  const forwardHovered = forwardHoveredByLine || forwardHighlightedByNode;
+                  const reverseHovered = reverseHoveredByLine || reverseHighlightedByNode;
 
                   const isAnySelected = forwardSelected || reverseSelected;
                   const isAnyHovered = forwardHovered || reverseHovered;
@@ -311,17 +335,25 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                   let markerEnd: string | undefined = undefined;
                   let markerStart: string | undefined = undefined;
 
-                  if (forwardSelected) {
+                  if (forwardSelected && reverseSelected) {
+                    // Both selected (unlikely but handle it)
                     markerEnd = 'url(#arrow-selected)';
-                    markerStart = undefined;
-                  } else if (reverseSelected) {
-                    markerEnd = undefined;
                     markerStart = 'url(#arrow-selected)';
+                  } else if (forwardSelected) {
+                    markerEnd = 'url(#arrow-selected)';
+                    markerStart = group.reverse ? 'url(#arrow)' : undefined;
+                  } else if (reverseSelected) {
+                    markerEnd = 'url(#arrow)';
+                    markerStart = 'url(#arrow-selected)';
+                  } else if (forwardHovered && reverseHovered) {
+                    // Both directions highlighted → show double-headed arrow
+                    markerEnd = 'url(#arrow-hover)';
+                    markerStart = 'url(#arrow-hover)';
                   } else if (forwardHovered) {
                     markerEnd = 'url(#arrow-hover)';
-                    markerStart = undefined;
+                    markerStart = group.reverse ? 'url(#arrow)' : undefined;
                   } else if (reverseHovered) {
-                    markerEnd = undefined;
+                    markerEnd = 'url(#arrow)';
                     markerStart = 'url(#arrow-hover)';
                   } else {
                     markerEnd = 'url(#arrow)';
@@ -372,7 +404,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
               if (!nodePositions[gt.to]) return null;
               const targetPos = nodePositions[gt.to];
               const isSelected = selectedTransitionId === gt.id;
-              const isHovered = hoveredTransitionId === gt.id;
+              const isHovered = hoveredTransitionId === gt.id || highlightedTransitionIds.has(gt.id);
               const bubbleX = targetPos.x + NODE_WIDTH / 2;
               const bubbleY = targetPos.y - 45;
 
@@ -472,11 +504,14 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             const isSelected = selectedNodeId === status.id;
             const isInitial = status.id === initialStatusId;
             const isSource = addingTransitionFromId === status.id;
+            const isNodeHovered = hoveredNodeId === status.id;
+            // Count connected transitions for the hover badge
+            const connectedCount = highlightedTransitionIds.size;
 
             return (
               <div
                 key={status.id}
-                className={`workflow-node ${isSelected ? 'selected' : ''}`}
+                className={`workflow-node ${isSelected ? 'selected' : ''} ${isNodeHovered ? 'node-hovered' : ''}`}
                 style={{
                   left: `${pos.x}px`,
                   top: `${pos.y}px`,
@@ -484,8 +519,15 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                   background: isSource ? 'rgba(99, 102, 241, 0.05)' : undefined
                 }}
                 onPointerDown={(e) => handleNodePointerDown(e, status.id)}
+                onMouseEnter={() => setHoveredNodeId(status.id)}
+                onMouseLeave={() => setHoveredNodeId(null)}
               >
                 {isInitial && <div className="node-initial-badge">{t('workflow.initial_badge')}</div>}
+                {isNodeHovered && connectedCount > 0 && (
+                  <div className="node-transition-count-badge">
+                    {connectedCount}
+                  </div>
+                )}
                 <div className="node-header">
                   <span
                     className="node-category"
@@ -505,92 +547,94 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           })}
         </div>
 
-        {/* SVG Tags Layer (above nodes, z-index: 3) */}
-        <svg className="workflow-tags-layer">
-          {(() => {
-            const groups = getConnectionGroups()
-              .filter(g => nodePositions[g.from] && nodePositions[g.to])
-              .map(group => {
-                const path = calculatePath(group.from, group.to);
-                const forwardSelected = selectedTransitionId === group.forward.id;
-                const reverseSelected = group.reverse ? selectedTransitionId === group.reverse.id : false;
-                const fromStatus = statuses.find(s => s.id === group.from);
-                const toStatus = statuses.find(s => s.id === group.to);
-                // Bidirectional: tags on first & last segments to avoid overlap
-                // Single direction: tag on middle segment
-                const forwardLabelPos = group.reverse ? path.lastSegMid : path.midSegMid;
-                const reverseLabelPos = group.reverse ? path.firstSegMid : null;
-                return { group, forwardSelected, reverseSelected, fromStatus, toStatus, forwardLabelPos, reverseLabelPos };
-              });
+        {/* SVG Tags Layer (above nodes, z-index: 3) — only when showTransitionLabels */}
+        {showTransitionLabels && (
+          <svg className="workflow-tags-layer">
+            {(() => {
+              const groups = getConnectionGroups()
+                .filter(g => nodePositions[g.from] && nodePositions[g.to])
+                .map(group => {
+                  const path = calculatePath(group.from, group.to);
+                  const forwardSelected = selectedTransitionId === group.forward.id;
+                  const reverseSelected = group.reverse ? selectedTransitionId === group.reverse.id : false;
+                  const fromStatus = statuses.find(s => s.id === group.from);
+                  const toStatus = statuses.find(s => s.id === group.to);
+                  const forwardLabelPos = group.reverse ? path.lastSegMid : path.midSegMid;
+                  const reverseLabelPos = group.reverse ? path.firstSegMid : null;
+                  return { group, forwardSelected, reverseSelected, fromStatus, toStatus, forwardLabelPos, reverseLabelPos };
+                });
 
-            const renderTag = (
-              tr: typeof transitions[0],
-              pos: Position,
-              isSelected: boolean,
-              defaultLabel: string
-            ) => {
-              const label = tr.name || defaultLabel;
-              const charWidth = 6.5;
-              const padding = 18;
-              const tagW = Math.max(label.length * charWidth + padding, 36);
-              const tagH = 22;
-              const isHovered = hoveredTransitionId === tr.id;
-              return (
-                <g
-                  key={tr.id}
-                  className="transition-tag"
-                  style={{ cursor: 'pointer', pointerEvents: 'auto' }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectNode(null);
-                    onSelectTransition(tr.id, true);
-                  }}
-                  onMouseEnter={() => setHoveredTransitionId(tr.id)}
-                  onMouseLeave={() => setHoveredTransitionId(null)}
-                >
-                  <rect
-                    x={pos.x - tagW / 2}
-                    y={pos.y - tagH / 2}
-                    width={tagW}
-                    height={tagH}
-                    rx={tagH / 2}
-                    fill={isSelected ? 'var(--transition-selected)' : isHovered ? 'var(--bg-card-hover)' : 'var(--bg-card)'}
-                    stroke={isSelected ? 'var(--transition-selected)' : isHovered ? 'var(--transition-hover)' : 'var(--border-color)'}
-                    strokeWidth={isHovered ? 1.8 : 1.2}
-                  />
-                  <text
-                    x={pos.x}
-                    y={pos.y + 3.5}
-                    textAnchor="middle"
-                    fill={isSelected ? '#fff' : isHovered ? 'var(--transition-hover)' : 'var(--text-secondary)'}
-                    fontSize={10}
-                    fontWeight={isSelected || isHovered ? 600 : 500}
-                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+              const renderTag = (
+                tr: typeof transitions[0],
+                pos: Position,
+                isSelected: boolean,
+                defaultLabel: string
+              ) => {
+                const label = tr.name || defaultLabel;
+                const charWidth = 6.5;
+                const padding = 18;
+                const tagW = Math.max(label.length * charWidth + padding, 36);
+                const tagH = 22;
+                const isHoveredByLine = hoveredTransitionId === tr.id;
+                const isHighlightedByNode = highlightedTransitionIds.has(tr.id);
+                const isHovered = isHoveredByLine || isHighlightedByNode;
+                return (
+                  <g
+                    key={tr.id}
+                    className="transition-tag"
+                    style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectNode(null);
+                      onSelectTransition(tr.id, true);
+                    }}
+                    onMouseEnter={() => setHoveredTransitionId(tr.id)}
+                    onMouseLeave={() => setHoveredTransitionId(null)}
                   >
-                    {label}
-                  </text>
-                </g>
-              );
-            };
+                    <rect
+                      x={pos.x - tagW / 2}
+                      y={pos.y - tagH / 2}
+                      width={tagW}
+                      height={tagH}
+                      rx={tagH / 2}
+                      fill={isSelected ? 'var(--transition-selected)' : isHovered ? 'var(--bg-card-hover)' : 'var(--bg-card)'}
+                      stroke={isSelected ? 'var(--transition-selected)' : isHovered ? 'var(--transition-hover)' : 'var(--border-color)'}
+                      strokeWidth={isHovered ? 1.8 : 1.2}
+                    />
+                    <text
+                      x={pos.x}
+                      y={pos.y + 3.5}
+                      textAnchor="middle"
+                      fill={isSelected ? '#fff' : isHovered ? 'var(--transition-hover)' : 'var(--text-secondary)'}
+                      fontSize={10}
+                      fontWeight={isSelected || isHovered ? 600 : 500}
+                      style={{ pointerEvents: 'none', userSelect: 'none' }}
+                    >
+                      {label}
+                    </text>
+                  </g>
+                );
+              };
 
-            return groups.map(({ group, forwardSelected, reverseSelected, fromStatus, toStatus, forwardLabelPos, reverseLabelPos }) => (
-              <g key={`tags_${group.key}`}>
-                {renderTag(
-                  group.forward,
-                  forwardLabelPos,
-                  forwardSelected,
-                  toStatus?.name || '→'
-                )}
-                {group.reverse && reverseLabelPos && renderTag(
-                  group.reverse,
-                  reverseLabelPos,
-                  reverseSelected,
-                  fromStatus?.name || '←'
-                )}
-              </g>
-            ));
-          })()}
-        </svg>
+              return groups.map(({ group, forwardSelected, reverseSelected, fromStatus, toStatus, forwardLabelPos, reverseLabelPos }) => (
+                <g key={`tags_${group.key}`}>
+                  {renderTag(
+                    group.forward,
+                    forwardLabelPos,
+                    forwardSelected,
+                    toStatus?.name || '→'
+                  )}
+                  {group.reverse && reverseLabelPos && renderTag(
+                    group.reverse,
+                    reverseLabelPos,
+                    reverseSelected,
+                    fromStatus?.name || '←'
+                  )}
+                </g>
+              ));
+            })()}
+          </svg>
+        )}
       </div>
     </div>
   );

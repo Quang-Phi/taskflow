@@ -27,6 +27,7 @@ import './Header.scss';
 interface HeaderProps {
   sidebarCollapsed: boolean;
   aiSidebarOpen?: boolean;
+  mobileHamburger?: React.ReactNode;
 }
 
 const myFormatDuration = (seconds: number): string => {
@@ -46,7 +47,7 @@ const formatSeconds = (sec: number) => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
-const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
+const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen, mobileHamburger }) => {
   const navigate = useNavigate();
   const { t, lang } = useTranslation();
   const [user, setUser] = useState<any>(null);
@@ -390,8 +391,9 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen }) => {
 
   return (
     <header className={`header ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${aiSidebarOpen ? 'ai-sidebar-open' : ''}`}>
-      {/* Left - Breadcrumb */}
+      {/* Left - Hamburger (mobile) + Breadcrumb */}
       <div className="header__left">
+        {mobileHamburger}
         <div className="header__breadcrumb">
           <span>{t('nav.dashboard')}</span>
         </div>

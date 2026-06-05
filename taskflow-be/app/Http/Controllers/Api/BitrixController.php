@@ -40,7 +40,7 @@ class BitrixController extends Controller
 
         $refresh = $request->input('refresh') === 'true';
         if ($refresh) {
-            \Illuminate\Support\Facades\Cache::forget('bitrix_users_all');
+            \Illuminate\Support\Facades\Cache::store('file')->forget('bitrix_users_all');
         }
 
         $synced = $this->bitrix->syncUsers();
@@ -92,7 +92,8 @@ class BitrixController extends Controller
             }
 
             if ($deptId && $deptId !== 'all') {
-                $uDepts = array_map('strval', $u['department_ids']);
+                $rawDepts = $u['department_ids'];
+                $uDepts = array_map('strval', is_array($rawDepts) ? $rawDepts : []);
                 if (!in_array(strval($deptId), $uDepts, true)) {
                     return false;
                 }
@@ -110,6 +111,11 @@ class BitrixController extends Controller
                 });
             } elseif ($currentUser->role === 'manager') {
                 // Find all departments managed by this user
+                $departments = $this->bitrix->getDepartments();
+                if (!is_array($departments)) {
+                    // getDepartments() failed (Bitrix unreachable etc.) — skip restriction
+                    $departments = [];
+                }
                 $managedDeptIds = [];
                 foreach ($departments as $dept) {
                     $headId = $dept['UF_HEAD'] ?? null;
@@ -140,7 +146,9 @@ class BitrixController extends Controller
                     if ((int)$u['id'] === (int)$currentUser->id) {
                         return true;
                     }
-                    $uDepts = array_map('intval', $u['department_ids'] ?? []);
+                    // Guard: department_ids may be null/false from DB
+                    $rawDepts = $u['department_ids'];
+                    $uDepts = array_map('intval', is_array($rawDepts) ? $rawDepts : []);
                     return count(array_intersect($managedDeptIds, $uDepts)) > 0;
                 });
             }
@@ -332,7 +340,7 @@ class BitrixController extends Controller
             ]
         );
 
-        \Illuminate\Support\Facades\Cache::forget('bitrix_users_all');
+        \Illuminate\Support\Facades\Cache::store('file')->forget('bitrix_users_all');
 
         return response()->json([
             'success' => true,

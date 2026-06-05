@@ -15,12 +15,19 @@ foreach (explode(',', $frontendUrls) as $url) {
 }
 
 return [
-    'paths' => ['api/*', 'sanctum/csrf-cookie', 'broadcasting/auth'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie', 'broadcasting/auth', 'callback', 'auth/*'],
     'allowed_methods' => ['*'],
     'allowed_origins' => $origins,
-    'allowed_origins_patterns' => [],
+    // Allow any ngrok tunnel or local dev origin dynamically
+    'allowed_origins_patterns' => [
+        '#^https?://.*\.ngrok(-free)?\.app$#',
+        '#^https?://.*\.ngrok\.io$#',
+        '#^http://localhost:\d+$#',
+        '#^http://127\.0\.0\.1:\d+$#',
+        '#^http://10\.\d+\.\d+\.\d+:\d+$#',
+    ],
     'allowed_headers' => ['*'],
     'exposed_headers' => [],
-    'max_age' => 0,
+    'max_age' => 86400,
     'supports_credentials' => true,
 ];

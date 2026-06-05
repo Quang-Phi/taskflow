@@ -385,6 +385,98 @@
       font-size: 12.5px;
     }
   }
+
+  // Inline command chip - clickable shortcut rendered from [text](command:...)
+  .md-cmd-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    color: var(--primary, #818cf8);
+    border-radius: 8px;
+    padding: 2px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    margin: 2px 2px;
+    transition: all 0.2s ease;
+    vertical-align: middle;
+    font-family: inherit;
+
+    &:hover {
+      background: rgba(99, 102, 241, 0.2);
+      border-color: rgba(99, 102, 241, 0.5);
+      transform: translateY(-1px);
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+  }
+
+  // Regular external link
+  .md-link {
+    color: var(--primary, #818cf8);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+
+    &:hover {
+      opacity: 0.8;
+    }
+  }
+
+  .md-table-wrapper {
+    overflow-x: auto;
+    margin: 6px 0;
+    border-radius: 10px;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+
+    .md-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+
+      thead {
+        tr {
+          background: rgba(99, 102, 241, 0.12);
+        }
+        th {
+          padding: 7px 12px;
+          text-align: left;
+          font-weight: 600;
+          color: var(--text-primary, #e2e8f0);
+          border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+          white-space: nowrap;
+        }
+      }
+
+      tbody {
+        tr {
+          transition: background 0.15s;
+
+          &:nth-child(even) {
+            background: rgba(120, 120, 120, 0.04);
+          }
+          &:hover {
+            background: rgba(99, 102, 241, 0.06);
+          }
+        }
+        td {
+          padding: 6px 12px;
+          color: var(--text-secondary, #b3b5c6);
+          border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
+          line-height: 1.4;
+
+          strong {
+            color: var(--text-primary, #e2e8f0);
+          }
+        }
+        tr:last-child td {
+          border-bottom: none;
+        }
+      }
+    }
+  }
 }
 
 // Animations

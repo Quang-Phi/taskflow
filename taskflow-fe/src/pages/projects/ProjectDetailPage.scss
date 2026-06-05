@@ -240,6 +240,39 @@
       transform: rotate(2deg);
     }
 
+    // Drop indicator lines — Jira style
+    &.drop-before {
+      position: relative;
+      &::before {
+        content: '';
+        position: absolute;
+        top: -5px;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: #3b82f6;
+        border-radius: 2px;
+        z-index: 10;
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.7);
+      }
+    }
+
+    &.drop-after {
+      position: relative;
+      &::after {
+        content: '';
+        position: absolute;
+        bottom: -5px;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: #3b82f6;
+        border-radius: 2px;
+        z-index: 10;
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.7);
+      }
+    }
+
     &-top {
       @include flex-between;
       margin-bottom: 8px;

@@ -1,0 +1,926 @@
+// =============================================================
+//  RESPONSIVE STYLES — TaskFlow
+//  Strategy: additive only, no existing CSS modified.
+//
+//  Breakpoints (from _variables.scss):
+//    $bp-xs:  480px   small phones
+//    $bp-sm:  640px   phones
+//    $bp-md:  768px   tablets portrait   ← primary mobile breakpoint
+//    $bp-lg:  1024px  tablets landscape / small laptops
+//    $bp-xl:  1280px  laptops
+//
+//  Approach:
+//    ≤ 768px  → mobile  : sidebar as drawer overlay
+//    769-1024 → tablet  : sidebar collapsed (60px), 2-col grids
+//    > 1024   → desktop : no changes from defaults
+// =============================================================
+
+@import 'variables';
+
+// ─── Hamburger button (mobile sidebar toggle) ─────────────────
+.mobile-sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  margin-right: 8px;
+
+  &:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+  }
+}
+
+// ─── Mobile sidebar backdrop ──────────────────────────────────
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 99; // below sidebar (100), above content
+  backdrop-filter: blur(2px);
+  animation: fadeInBackdrop 0.2s ease;
+
+  @keyframes fadeInBackdrop {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+}
+
+// =============================================================
+//  ≤ 1024px  —  TABLET
+// =============================================================
+@media (max-width: $bp-lg) {
+
+  // ── Page padding: slightly reduced ──────────────────────────
+  .main-layout__page {
+    padding: 18px 16px;
+  }
+
+  // ── Header: more compact at tablet ──────────────────────────
+  .header {
+    padding: 0 14px;
+
+    &__search {
+      flex: 0 1 260px;  // narrower search on tablet
+    }
+
+    &__breadcrumb {
+      display: none; // hide breadcrumb, space is tight at tablet
+    }
+  }
+
+  // ── Dashboard ───────────────────────────────────────────────
+  .dashboard__stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dashboard__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard__right {
+    gap: 16px;
+  }
+
+  // ── Projects page ───────────────────────────────────────────
+  // Card grid: 2 columns instead of auto-fill
+  .projects-page__grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  // List view: hide secondary columns
+  .projects-page__list-header,
+  .projects-page__list-row {
+    grid-template-columns: 2fr 120px 100px 60px !important;
+
+    & > *:nth-child(2) { display: none !important; } // hide second column (members)
+  }
+
+  // ── Project Detail header ────────────────────────────────────
+  .project-detail__header {
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-start;
+
+    &-left {
+      flex: 1;
+      min-width: 0;
+    }
+
+    &-right {
+      flex-shrink: 0;
+      flex-wrap: wrap;
+      gap: 6px !important;
+
+      // Make buttons more compact at tablet
+      .ant-btn {
+        font-size: 12px !important;
+        height: 28px !important;
+        padding: 0 10px !important;
+      }
+    }
+  }
+
+  // Project info title: smaller at tablet
+  .project-detail__header-left .project-info h1 {
+    font-size: 16px !important;
+  }
+
+  // ── Project toolbar: make filter row wrap ─────────────────────
+  .project-detail__toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .project-detail__toolbar-left,
+  .project-detail__toolbar-right {
+    flex-wrap: wrap;
+  }
+
+  // ── Members drawer ──────────────────────────────────────────
+  .members-page__drawer {
+    width: min(560px, 95vw) !important;
+  }
+
+  .members-page__drawer-stats {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  // ── Analytics ───────────────────────────────────────────────
+  .analytics-page__grid {
+    grid-template-columns: 1fr;
+  }
+
+  // ── Task detail panel ───────────────────────────────────────
+  .project-detail__panel-body {
+    grid-template-columns: 1fr !important;
+  }
+
+  .project-detail__panel-sidebar {
+    border-right: none !important;
+    border-top: 1px solid var(--border-color);
+    padding-top: 16px !important;
+  }
+
+  // ── Settings ────────────────────────────────────────────────
+  .settings-page__layout {
+    grid-template-columns: 160px 1fr !important;
+    gap: 20px !important;
+  }
+}
+
+// =============================================================
+//  ≤ 768px  —  MOBILE  (main breakpoint)
+// =============================================================
+@media (max-width: $bp-md) {
+
+  // ── Show hamburger, show backdrop ──────────────────────────
+  .mobile-sidebar-toggle {
+    display: flex;
+  }
+
+  .sidebar-backdrop.visible {
+    display: block;
+  }
+
+  // ── Sidebar becomes a drawer ────────────────────────────────
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease, width 0.3s ease;
+    z-index: 101; // above backdrop
+
+    &.mobile-open {
+      transform: translateX(0);
+    }
+
+    // Force full sidebar width on mobile (not collapsed icon mode)
+    &.collapsed.mobile-open {
+      width: $sidebar-width !important;
+
+      .sidebar__logo-text,
+      .sidebar__nav-label,
+      .sidebar__section-title,
+      .sidebar__project-name,
+      .sidebar__project-badge,
+      .sidebar__nav-arrow {
+        display: block !important;
+      }
+
+      .sidebar__nav-item {
+        justify-content: flex-start !important;
+        padding: 7px 10px !important;
+        width: auto !important;
+        height: auto !important;
+        margin: 0 !important;
+        border-radius: 6px !important;
+      }
+
+      .sidebar__project-item {
+        justify-content: flex-start !important;
+        padding: 6px 10px !important;
+      }
+
+      .sidebar__collapse-btn {
+        justify-content: flex-start !important;
+      }
+
+      .sidebar__nav-badge {
+        position: static !important;
+        top: auto !important;
+        right: auto !important;
+        font-size: 10px !important;
+        min-width: 18px !important;
+        height: 18px !important;
+        border-radius: 9px !important;
+        padding: 0 5px !important;
+      }
+    }
+  }
+
+  // ── Main content & Header: full width ──────────────────────
+  .main-layout__content {
+    margin-left: 0 !important;
+  }
+
+  .header {
+    left: 0 !important;
+  }
+
+  // ── Main layout page: reduced padding ──────────────────────
+  .main-layout__page {
+    padding: 16px 14px;
+  }
+
+  // ── Header ──────────────────────────────────────────────────
+  .header {
+    padding: 0 10px;
+    gap: 8px;
+
+    // Left: just the hamburger, no flex-grow
+    &__left {
+      flex: 0 0 auto;
+      gap: 4px;
+    }
+
+    // Hide breadcrumb (only hamburger remains in left)
+    &__breadcrumb {
+      display: none;
+    }
+
+    // Search: grows to fill available middle space (easy to tap)
+    &__search {
+      flex: 1 1 0;
+      max-width: 280px;
+    }
+
+    // Create (+) button: icon only, no text
+    &__create-btn {
+      padding: 0 10px;
+
+      span:not(.anticon):not([role="img"]) {
+        display: none;
+      }
+    }
+
+    // Dividers: hide on mobile
+    &__divider {
+      display: none;
+    }
+
+    // Icon buttons: standard size
+    &__icon-btn {
+      width: 32px;
+      height: 32px;
+    }
+  }
+
+  // ── Timer button: icon-only on mobile ────────────────────────
+  // IDLE timer only: hide "Bắt đầu bấm giờ" text, keep clock icon
+  .header-timer-trigger:not(.active) {
+    padding: 4px 8px !important;
+    border-radius: 20px !important;
+
+    // Hide "Bắt đầu bấm giờ" text span
+    > span:last-child {
+      display: none !important;
+    }
+  }
+
+  // RUNNING timer: already compact, keep elapsed "01:23:45" visible
+  .header-timer-trigger.active {
+    padding: 4px 8px !important;
+    gap: 4px !important;
+  }
+
+  // ── Dashboard ───────────────────────────────────────────────
+  .dashboard__stats {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .dashboard__stat-card {
+    padding: 14px;
+
+    &-value {
+      font-size: 22px !important;
+    }
+  }
+
+  .dashboard__grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .dashboard__greeting {
+    margin-bottom: 16px;
+
+    h1 {
+      font-size: 20px !important;
+    }
+  }
+
+  // ── Projects page ────────────────────────────────────────────
+  .projects-page__grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .projects-page__list-header,
+  .projects-page__list-row {
+    // Simplify columns: name | status | actions
+    grid-template-columns: 1fr 100px 60px !important;
+
+    // Hide middle columns
+    & > *:nth-child(n+3):not(:last-child):not(:nth-child(2)) {
+      display: none !important;
+    }
+  }
+
+  .projects-page__toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .projects-page__search {
+    flex: 1 1 100% !important;
+    order: -1;
+  }
+
+  // ── Project Detail ───────────────────────────────────────────
+  .project-detail__tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab {
+      padding: 12px 12px !important;
+      font-size: 12px !important;
+    }
+  }
+
+  .project-detail__header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 14px 0 !important;
+  }
+
+  .project-detail__toolbar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  // Kanban: horizontal scroll on mobile
+  .project-detail__board {
+    padding-bottom: 16px;
+  }
+
+  .project-detail__column {
+    flex: 0 0 280px !important;
+    min-width: 280px !important;
+  }
+
+  // Task panel: full screen on mobile
+  .project-detail__task-panel {
+    width: 100vw !important;
+    top: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  .project-detail__panel-body {
+    grid-template-columns: 1fr !important;
+  }
+
+  .project-detail__panel-sidebar {
+    border-right: none !important;
+    border-top: 1px solid var(--border-color);
+  }
+
+  // ── My Tasks page ────────────────────────────────────────────
+  .my-tasks__task-row {
+    // Simplify grid: checkbox | title | status | assignee | actions
+    grid-template-columns: 32px 1fr 90px 28px 32px !important;
+
+    // Hide date and labels columns
+    .my-tasks__task-labels,
+    .my-tasks__task-date {
+      display: none !important;
+    }
+  }
+
+  // Override for list view in ProjectDetail
+  .project-detail__tasks-list-view.my-tasks {
+    .my-tasks__task-row {
+      grid-template-columns: 32px 1fr 90px 28px 32px !important;
+
+      .my-tasks__task-labels,
+      .my-tasks__task-date {
+        display: none !important;
+      }
+    }
+  }
+
+  .my-tasks__toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .my-tasks__quick-filters {
+    flex-wrap: wrap;
+  }
+
+  // ── Members page ─────────────────────────────────────────────
+  .members-page__table-header,
+  .members-page__table-row {
+    grid-template-columns: 1fr 100px 32px !important;
+
+    & > *:nth-child(n+3):not(:last-child) {
+      display: none !important;
+    }
+  }
+
+  .members-page__toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .members-page__search {
+    flex: 1 1 100% !important;
+  }
+
+  .members-page__drawer {
+    width: 100vw !important;
+    border-radius: 0 !important;
+  }
+
+  .members-page__drawer-stats {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  // ── Settings ─────────────────────────────────────────────────
+  .settings-page__layout {
+    grid-template-columns: 1fr !important;
+    gap: 0 !important;
+  }
+
+  .settings-page__nav {
+    display: flex !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+    margin-bottom: 20px;
+    gap: 4px !important;
+    white-space: nowrap;
+
+    &::-webkit-scrollbar { display: none; }
+  }
+
+  .settings-page__content {
+    max-width: 100% !important;
+  }
+
+  .settings-page__field-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  // ── Analytics page ───────────────────────────────────────────
+  .analytics-page__grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .analytics-page__team-row-header,
+  .analytics-page__team-row {
+    grid-template-columns: 1fr repeat(2, 1fr) !important;
+
+    & > *:nth-child(n+4) {
+      display: none !important;
+    }
+  }
+
+  // ── Inbox ────────────────────────────────────────────────────
+  .inbox-page__tabs {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  // ── Task detail panel (when inside My Tasks or Dashboard) ─────
+  .task-detail-panel {
+    width: 100vw !important;
+    border-radius: 0 !important;
+  }
+
+  // ── AI sidebar ───────────────────────────────────────────────
+  .global-ai-sidebar {
+    width: 100vw !important;
+    border-radius: 0 !important;
+  }
+
+  // When AI sidebar is open, don't push content on mobile
+  .main-layout__content.ai-sidebar-open {
+    margin-right: 0 !important;
+  }
+
+  .header.ai-sidebar-open {
+    right: 0 !important;
+  }
+
+  // ── AI floating trigger ──────────────────────────────────────
+  .main-layout__ai-trigger {
+    bottom: 16px !important;
+    right: 16px !important;
+    width: 44px !important;
+    height: 44px !important;
+    font-size: 18px !important;
+  }
+
+  // ── Modals ───────────────────────────────────────────────────
+  .ant-modal {
+    max-width: calc(100vw - 24px) !important;
+    margin: 12px auto !important;
+  }
+
+  .ant-modal-content {
+    border-radius: 12px !important;
+  }
+
+  // ── Create Task Modal ────────────────────────────────────────
+  .create-task-modal__row {
+    grid-template-columns: 1fr !important;
+  }
+
+  // ── Notifications ────────────────────────────────────────────
+  .custom-notification {
+    min-width: 280px !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  // ── Evaluation page ──────────────────────────────────────────
+  .evaluations-page {
+    .ant-table {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+  }
+}
+
+// =============================================================
+//  ≤ 480px  —  SMALL PHONES
+// =============================================================
+@media (max-width: $bp-xs) {
+
+  .main-layout__page {
+    padding: 12px 10px;
+  }
+
+  // ── Dashboard: single column stats ──────────────────────────
+  .dashboard__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard__stat-card-value {
+    font-size: 20px !important;
+  }
+
+  // ── Header: uniform 32px icons, balanced layout ─────────────
+  // Pattern: [☰ ....flex-grows....] [🔍][+][⏱][🔔][👤]
+  .header {
+    padding: 0 10px;
+    gap: 4px;
+
+    // Left: grows to push right-side icons to far right
+    &__left {
+      flex: 1 !important;
+    }
+
+    // Search: 32px icon-only button, blends with other icons
+    &__search {
+      display: flex !important;
+      flex: 0 0 32px !important;
+      max-width: 32px !important;
+
+      &-input {
+        width: 32px !important;
+        height: 32px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+        background: none !important;
+        border: none !important;
+        border-radius: 8px !important;
+        color: var(--text-secondary);
+
+        > span:not(.anticon):not(.search-icon),
+        .search-shortcut {
+          display: none !important;
+        }
+
+        &:hover {
+          background: var(--bg-card-hover) !important;
+        }
+      }
+    }
+
+    // Create (+) button: 32px, keep primary color
+    &__create-btn {
+      width: 32px !important;
+      height: 32px !important;
+      min-width: 32px !important;
+      padding: 0 !important;
+      border-radius: 8px !important;
+
+      span:not(.anticon):not([role="img"]) {
+        display: none !important;
+      }
+    }
+
+    // Bell, other icon buttons: ensure 32px
+    &__icon-btn {
+      width: 32px !important;
+      height: 32px !important;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 1. PROJECT DETAIL
+  // ─────────────────────────────────────────────────────────────
+
+  // Header: stack vertically so buttons don't overlap title
+  .project-detail__header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+    padding: 12px 12px 0 !important;
+  }
+
+  .project-detail__header-left {
+    width: 100%;
+    gap: 8px !important;
+
+    .project-info h1 {
+      font-size: 14px !important;
+      line-height: 1.3;
+    }
+  }
+
+  // Header-right: buttons spread evenly (space-between / equal width)
+  .project-detail__header-right {
+    width: 100% !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+
+    .ant-btn {
+      flex: 1 !important;
+      justify-content: center !important;
+      font-size: 11px !important;
+      height: 28px !important;
+      padding: 0 6px !important;
+      text-align: center;
+    }
+  }
+
+  // Kanban column: slightly slimmer
+  .project-detail__column {
+    flex: 0 0 240px !important;
+    min-width: 240px !important;
+  }
+
+  // Tabs: smaller text
+  .project-detail__tabs .tab {
+    padding: 10px 10px !important;
+    font-size: 11px !important;
+  }
+
+  // Filter & Search Toolbar: reorganize for narrow screens
+  .project-detail__filter-toolbar {
+    padding: 10px 12px !important;
+    gap: 8px !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  // Left section: search + filter on one row, full width
+  .project-detail__filter-toolbar-left {
+    flex: 0 0 100% !important;
+    min-width: unset !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+
+    // Search takes remaining space
+    .search-task-board-input,
+    .ant-input-affix-wrapper {
+      max-width: 100% !important;
+      flex: 1 !important;
+      min-width: 0 !important;
+    }
+  }
+
+  // View toggles: center on its own row
+  .project-detail__view-toggles {
+    align-self: center !important;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 2. TASK DETAIL PANEL — SUBTASK BLOCK
+  // ─────────────────────────────────────────────────────────────
+
+  // Subtask item row: hide priority tag to give title more space
+  .subtask-item-row {
+    gap: 8px !important;
+    padding: 6px 10px !important;
+    flex-wrap: wrap;
+
+    // Hide the priority badge (TRUNG BÌNH / HIGH etc.) in subtask rows
+    // Title needs the space more than the badge at this width
+    > .ant-tag {
+      display: none !important;
+    }
+  }
+
+  // Keep the title area from being too cramped
+  .subtask-item-row > span:not(.anticon):not([class*="ant-"]) {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 3. MY TASKS
+  // ─────────────────────────────────────────────────────────────
+
+  // Task row: minimal (checkbox, title, actions only)
+  .my-tasks__task-row {
+    grid-template-columns: 28px 1fr 28px !important;
+
+    .my-tasks__task-status,
+    .my-tasks__task-labels,
+    .my-tasks__task-date,
+    .my-tasks__task-assignee {
+      display: none !important;
+    }
+  }
+
+  // Same in project list view
+  .project-detail__tasks-list-view.my-tasks {
+    .my-tasks__task-row {
+      grid-template-columns: 28px 1fr 28px !important;
+
+      .my-tasks__task-status,
+      .my-tasks__task-labels,
+      .my-tasks__task-date,
+      .my-tasks__task-assignee {
+        display: none !important;
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 4. TIMESHEET (BẢNG CÔNG)
+  // ─────────────────────────────────────────────────────────────
+
+  .timesheet-page {
+    padding: 12px 10px;
+  }
+
+  // Header: stack title above tabs
+  .timesheet-page__header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+
+    .header-title h1 {
+      font-size: 18px !important;
+    }
+
+    // Tab buttons: smaller
+    .timesheet-tabs .tab-btn {
+      padding: 5px 10px !important;
+      font-size: 12px !important;
+    }
+  }
+
+  // Toolbar: stack week selector above view toggles
+  .timesheet-toolbar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .timesheet-toolbar .toolbar-left {
+    flex-wrap: wrap;
+    gap: 10px !important;
+
+    .week-range-label {
+      font-size: 11px !important;
+    }
+  }
+
+  .timesheet-toolbar .toolbar-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px !important;
+
+    .view-toggles .toggle-btn {
+      padding: 4px 8px !important;
+      font-size: 11px !important;
+    }
+
+    // "Ghi nhận giờ" button
+    .log-time-main-btn {
+      padding: 6px 12px !important;
+      font-size: 12px !important;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 5. ĐÁNH GIÁ HIỆU SUẤT (EVALUATIONS)
+  // ─────────────────────────────────────────────────────────────
+
+  // Header: stack title above button
+  .evaluations-page__header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+
+    h1 {
+      font-size: 18px !important;
+    }
+
+    // "Ký đánh giá mới" button: full width
+    .evaluations-page__create-btn {
+      width: 100% !important;
+      justify-content: center !important;
+    }
+  }
+
+  // Toolbar: stack period selector above status tabs
+  .evaluations-page__toolbar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+
+    .evaluations-page__status-filters {
+      flex-wrap: wrap;
+    }
+  }
+
+  // Summary stats: 2 columns instead of 4
+  .evaluations-page__summary {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  // Table: enable horizontal scroll (too many columns for 480px)
+  .evaluations-page__table {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .evaluations-page__table-header,
+  .evaluations-page__table-row {
+    min-width: 600px; // forces scroll, keeps layout intact
+  }
+
+  // Drawer: full width on small phone
+  .evaluations-page__drawer {
+    width: 100vw !important;
+    border-radius: 0 !important;
+  }
+
+  // ── Members ──────────────────────────────────────────────────
+  .members-page__drawer-stats {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+}

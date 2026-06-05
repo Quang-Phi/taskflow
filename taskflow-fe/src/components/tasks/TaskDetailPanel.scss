@@ -871,3 +871,258 @@ html[data-theme="light"] {
     color: var(--danger, #ef4444) !important;
   }
 }
+
+// Time tracker pill — dark mode rõ hơn, light mode giữ nguyên
+.time-tracker-pill {
+  background: rgba(255, 255, 255, 0.06);  // dark: tạo contrast trên nền #1e2030
+  border: 1px solid var(--border-light);   // dark: #333654 rõ hơn #2a2d42
+}
+
+html[data-theme="light"] {
+  .time-tracker-pill {
+    background: rgba(120, 120, 120, 0.08); // light: xám nhạt trên nền trắng
+    border: 1px solid var(--border-color);  // light: #e2e8f0
+  }
+}
+
+
+// ─── Dark Mode Contrast Improvements ─────────────────────────────────────────
+
+// "Thêm công việc con" / "Thêm checklist" dashed buttons — brighter in dark mode
+.add-checklist-dashed-btn,
+.add-subtask-dashed-btn {
+  color: var(--text-secondary) !important;       // was text-muted (#505468) → now #b0b5c8
+  border-color: var(--border-light) !important;  // was border-color (#2a2d42) → now #333654
+
+  &:hover {
+    color: var(--primary-light) !important;
+    border-color: var(--primary-light) !important;
+    background: rgba(99, 102, 241, 0.08) !important;
+  }
+}
+
+// Panel icon buttons (close, delete, etc.)
+.panel-btn {
+  color: var(--text-secondary) !important; // was text-tertiary
+
+  &:hover {
+    color: var(--text-primary) !important;
+    background: var(--bg-card-hover) !important;
+  }
+}
+
+// Assign placeholder icon (dashed circle) — more visible
+.empty-placeholder-circle {
+  border-color: var(--text-tertiary, #8b91a8) !important; // brighter border
+  color: var(--text-tertiary, #8b91a8) !important;
+
+  &:hover {
+    border-color: var(--primary-light, #818cf8) !important;
+    color: var(--primary-light, #818cf8) !important;
+  }
+}
+
+// Comment action icon buttons (emoji, attach, send)
+.comment-action-icon {
+  color: var(--text-secondary) !important;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--text-primary) !important;
+  }
+}
+
+// Send comment button in active state
+.comment-send-btn {
+  color: var(--primary-light) !important; // #818cf8 — clearly visible
+
+  &:disabled {
+    color: var(--text-tertiary) !important;
+    opacity: 0.5;
+  }
+
+  &:hover:not(:disabled) {
+    color: #a5b4fc !important;
+  }
+}
+
+// Subtask row action buttons (open, assign, delete)
+.subtask-action-btn {
+  color: var(--text-secondary) !important; // brighter than primary (#6366f1 too bright)
+  border-color: var(--border-light) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+
+  &:hover {
+    color: var(--primary-light) !important;
+    border-color: var(--primary-light) !important;
+    background: rgba(99, 102, 241, 0.1) !important;
+  }
+}
+
+// Checklist/subtask item rows — stronger border
+.checklist-item-row,
+.subtask-item-row {
+  border-color: var(--border-light) !important; // #333654 instead of #2a2d42
+}
+
+// "Phản hồi" / "Thích" reply/like text buttons in comment thread
+.comment-text-btn {
+  color: var(--text-secondary) !important;
+  font-weight: 600;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--text-primary) !important;
+  }
+}
+
+// Section labels (Assignee, Priority, etc.) in properties panel
+.field-label {
+  color: var(--text-secondary) !important; // was text-secondary = #b0b5c8 now
+}
+
+// Status/type badge text — ensure legible
+.status-badge {
+  font-weight: 700 !important;
+  letter-spacing: 0.3px;
+}
+
+// Date range picker arrows
+.date-arrow {
+  color: var(--text-tertiary) !important;
+}
+
+// Light theme overrides — keep original contrast
+html[data-theme="light"] {
+  .add-checklist-dashed-btn,
+  .add-subtask-dashed-btn {
+    color: var(--text-muted) !important;
+    border-color: var(--border-color) !important;
+  }
+
+  .panel-btn {
+    color: var(--text-tertiary) !important;
+  }
+
+  .empty-placeholder-circle {
+    border-color: var(--text-tertiary) !important;
+    color: var(--text-tertiary) !important;
+  }
+
+  .subtask-action-btn {
+    color: var(--primary) !important;
+    border-color: var(--border-color) !important;
+    background: transparent !important;
+  }
+
+  .comment-text-btn {
+    color: var(--text-secondary) !important;
+  }
+}
+// ─── Modal.confirm Dark Mode ──────────────────────────────────────────────────
+// Ant Design Modal.confirm() doesn't inherit CSS variables automatically.
+// We target it via className="task-detail-modal" set in handleRenameAttachment.
+.task-detail-modal {
+  .ant-modal-content {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-light) !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5) !important;
+  }
+
+  .ant-modal-confirm-title {
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+  }
+
+  .ant-modal-confirm-content {
+    color: var(--text-secondary) !important;
+
+    .ant-input {
+      background: var(--bg-card-hover) !important;
+      border-color: var(--border-light) !important;
+      color: var(--text-primary) !important;
+
+      &::placeholder {
+        color: var(--text-muted) !important;
+      }
+
+      &:focus {
+        border-color: var(--primary) !important;
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+      }
+    }
+  }
+
+  .ant-modal-confirm-btns {
+    .ant-btn {
+      border-color: var(--border-light) !important;
+      color: var(--text-secondary) !important;
+      background: var(--bg-card-hover) !important;
+
+      &:hover {
+        border-color: var(--primary) !important;
+        color: var(--primary) !important;
+      }
+    }
+
+    .ant-btn-primary {
+      background: var(--primary) !important;
+      border-color: var(--primary) !important;
+      color: #fff !important;
+
+      &:hover {
+        background: var(--primary-dark) !important;
+        border-color: var(--primary-dark) !important;
+        color: #fff !important;
+      }
+    }
+  }
+}
+
+// ─── Comment Input Box Focus Effect ──────────────────────────────────────────
+.comment-input-box {
+  &:focus-within {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+  }
+}
+
+// ─── Mention Dropdown Slide-up Animation ─────────────────────────────────────
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ─── Checklist Item Delete Button ────────────────────────────────────────────
+.checklist-item-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 4px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  line-height: 1;
+
+  &:hover {
+    color: var(--danger, #ef4444) !important;
+    background: rgba(239, 68, 68, 0.1) !important;
+    opacity: 1 !important;
+  }
+}
+
+// Hiện nút xóa khi hover vào item
+.checklist-item-row:hover .checklist-item-delete-btn,
+.checklist-item-row .checklist-item-delete-btn:focus {
+  opacity: 1;
+}

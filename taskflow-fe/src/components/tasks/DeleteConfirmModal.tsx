@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Modal, Button } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
 import { useTranslation } from '../../utils/i18n';
@@ -39,6 +39,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
       className="delete-confirm-modal"
       centered
       zIndex={zIndex}
+      destroyOnClose
     >
       <div className="delete-confirm-modal__container">
         <div className="delete-confirm-modal__icon-wrapper">
@@ -86,27 +87,36 @@ export const useDeleteConfirm = () => {
   const [open, setOpen] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [options, setOptions] = useState<DeleteConfirmOptions | null>(null);
+  // Guard: prevent AntD Modal's onCancel from firing AFTER we already confirmed
+  const isConfirming = useRef(false);
 
   const showDeleteConfirm = useCallback((opts: DeleteConfirmOptions) => {
+    isConfirming.current = false;
     setOptions(opts);
     setOpen(true);
     setConfirmLoading(false);
   }, []);
 
   const hideDeleteConfirm = useCallback(() => {
+    // If we're mid-confirm, AntD may fire onCancel due to parent re-render — ignore it
+    if (isConfirming.current) return;
     setOpen(false);
   }, []);
 
   const handleConfirm = useCallback(async () => {
-    if (!options) return;
+    if (!options || isConfirming.current) return;
+    isConfirming.current = true;
     setConfirmLoading(true);
+    // Close modal FIRST before running callback.
+    // This prevents onClose() → parent re-render → Modal.onCancel double-fire.
+    setOpen(false);
     try {
       await options.onConfirm();
-      setOpen(false);
     } catch (err) {
       console.error('Delete confirmation callback failed:', err);
     } finally {
       setConfirmLoading(false);
+      isConfirming.current = false;
     }
   }, [options]);
 

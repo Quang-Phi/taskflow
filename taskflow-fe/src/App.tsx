@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ConfigProvider, theme } from 'antd';
+import AuthGate from './components/auth/AuthGate';
 import MainLayout from './components/layout/MainLayout';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import ProjectsPage from './pages/projects/ProjectsPage';
@@ -20,42 +21,6 @@ const App: React.FC = () => {
   });
 
   const [resolvedTheme, setResolvedTheme] = React.useState<'light' | 'dark'>('dark');
-
-  React.useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-    if (token) {
-      localStorage.setItem('taskflow_token', token);
-
-      // Check if this page is rendered inside an iframe (for silent refresh)
-      if (window.parent !== window) {
-        window.parent.postMessage({
-          type: 'SILENT_REFRESH_SUCCESS',
-          token: token
-        }, window.location.origin);
-        return;
-      }
-
-      const redirectPath = localStorage.getItem('taskflow_redirect_path') || '/';
-      localStorage.removeItem('taskflow_redirect_path');
-      window.location.href = redirectPath;
-      return;
-    }
-
-    const existingToken = localStorage.getItem('taskflow_token');
-    if (!existingToken) {
-      const currentFullPath = window.location.pathname + window.location.search + window.location.hash;
-      // Do not store redirect path if we are already at root or it's a token response url
-      if (currentFullPath && !currentFullPath.includes('token=')) {
-        localStorage.setItem('taskflow_redirect_path', currentFullPath);
-      }
-      const backendUrl = (process.env.REACT_APP_API_URL || 'http://localhost:8000/api')
-        .replace(/\/api\/?$/, '')
-        .replace(/\/+$/, '');
-      const publicUrl = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL) || '';
-      window.location.href = `${backendUrl}/auth/redirect?origin=${encodeURIComponent(window.location.origin + publicUrl)}`;
-    }
-  }, []);
 
   React.useEffect(() => {
     const handleThemeChange = () => {
@@ -108,23 +73,25 @@ const App: React.FC = () => {
         },
       }}
     >
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<MainLayout />}>
-            <Route index element={<DashboardPage />} />
-            <Route path="projects" element={<ProjectsPage />} />
-            <Route path="projects/:id" element={<ProjectDetailPage />} />
-            <Route path="my-tasks" element={<MyTasksPage />} />
-            <Route path="timesheet" element={<TimesheetPage />} />
-            <Route path="inbox" element={<InboxPage />} />
-            <Route path="analytics" element={<AnalyticsPage />} />
-            <Route path="evaluations" element={<EvaluationsPage />} />
-            <Route path="members" element={<MembersPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </ConfigProvider >
+      <AuthGate>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<MainLayout />}>
+              <Route index element={<DashboardPage />} />
+              <Route path="projects" element={<ProjectsPage />} />
+              <Route path="projects/:id" element={<ProjectDetailPage />} />
+              <Route path="my-tasks" element={<MyTasksPage />} />
+              <Route path="timesheet" element={<TimesheetPage />} />
+              <Route path="inbox" element={<InboxPage />} />
+              <Route path="analytics" element={<AnalyticsPage />} />
+              <Route path="evaluations" element={<EvaluationsPage />} />
+              <Route path="members" element={<MembersPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </AuthGate>
+    </ConfigProvider>
   );
 };
 

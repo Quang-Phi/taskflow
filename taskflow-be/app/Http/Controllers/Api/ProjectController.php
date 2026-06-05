@@ -755,7 +755,10 @@ class ProjectController extends Controller
         $wfModel = $project->workflow()->firstOrCreate([], [
             'mode' => $request->input('mode'),
         ]);
-        $wfModel->update(['mode' => $request->input('mode')]);
+        $wfModel->update([
+            'mode'           => $request->input('mode'),
+            'initial_status' => $request->input('initial_status'),
+        ]);
 
         DB::transaction(function () use ($request, $wfModel) {
             // Delete old transitions and rules

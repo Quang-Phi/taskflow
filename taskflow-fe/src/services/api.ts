@@ -11,6 +11,23 @@ const getApiBaseUrl = (): string => {
 };
 const API_BASE_URL = getApiBaseUrl();
 
+/**
+ * Dedicated base URL for the AI global chat endpoint.
+ * In development, this bypasses the CRA proxy and connects directly
+ * to the backend, so long-running AI requests don't block the proxy's
+ * shared connection pool (which would make all other API calls pending).
+ *
+ * In production both URLs point to the same server (REACT_APP_API_URL).
+ */
+const getAiBaseUrl = (): string => {
+  // Always use the real backend URL, never the proxy
+  const base = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+  let url = base.replace(/\/+$/, '');
+  if (!url.endsWith('/api')) url = `${url}/api`;
+  return url;
+};
+const AI_BASE_URL = getAiBaseUrl();
+
 const triggerSilentRefresh = (): Promise<string> => {
   return new Promise<string>((resolve, reject) => {
     const iframe = document.createElement('iframe');
@@ -49,6 +66,7 @@ const triggerSilentRefresh = (): Promise<string> => {
 class ApiClient {
   private client: AxiosInstance;
   private isRefreshing = false;
+  private isRedirecting = false; // guard against multiple 401 redirects
   private failedQueue: any[] = [];
 
   constructor() {
@@ -101,14 +119,13 @@ class ApiClient {
             return Promise.reject(error);
           }
 
-          // If running standalone (not embedded in an iframe), do not attempt silent refresh via iframe (it will be blocked by X-Frame-Options sameorigin)
+          // If running standalone (not embedded in an iframe), do not attempt silent refresh
           if (window.self === window.top) {
+            if (this.isRedirecting) return Promise.reject(error);
+            this.isRedirecting = true;
             localStorage.removeItem('taskflow_token');
-            message.error('Phiên đăng nhập đã hết hạn. Đang chuyển hướng...', 2);
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            const backendUrl = API_BASE_URL.replace(/\/api\/?$/, '').replace(/\/+$/, '');
-            const publicUrl = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL) || '';
-            window.location.href = `${backendUrl}/auth/redirect?origin=${encodeURIComponent(window.location.origin + publicUrl)}`;
+            // Let AuthGate handle the overlay + redirect via custom event
+            window.dispatchEvent(new CustomEvent('taskflow:session-expired'));
             return Promise.reject(error);
           }
 
@@ -141,15 +158,12 @@ class ApiClient {
             this.processQueue(refreshError, null);
             this.isRefreshing = false;
 
+            if (this.isRedirecting) return Promise.reject(error);
+            this.isRedirecting = true;
             localStorage.removeItem('taskflow_token');
 
-            // Notify user via Ant Design message before redirecting
-            message.error('Phiên đăng nhập đã hết hạn. Đang tải lại trang...', 2);
-
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            const backendUrl = API_BASE_URL.replace(/\/api\/?$/, '').replace(/\/+$/, '');
-            const publicUrl = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL) || '';
-            window.location.href = `${backendUrl}/auth/redirect?origin=${encodeURIComponent(window.location.origin + publicUrl)}`;
+            // Let AuthGate handle the overlay + redirect via custom event
+            window.dispatchEvent(new CustomEvent('taskflow:session-expired'));
 
             return Promise.reject(error);
           }
@@ -641,7 +655,9 @@ class ApiClient {
   }
 
   async chatGlobalAi(messages: { role: 'user' | 'ai'; content: string }[]) {
-    const res = await this.client.post('/ai/global/chat', { messages });
+    // Uses dedicated aiClient (direct backend connection, not proxy)
+    // so this long-running request never blocks other API calls.
+    const res = await aiClient.post('/ai/global/chat', { messages });
     return res.data;
   }
 
@@ -655,4 +671,38 @@ class ApiClient {
 }
 
 const api = new ApiClient();
+
+/**
+ * Standalone axios instance for AI global chat.
+ * Uses AI_BASE_URL directly → its own TCP connection pool,
+ * completely independent from the proxy used by `api`.
+ */
+const createAiClient = () => {
+  const instance = axios.create({
+    baseURL: AI_BASE_URL,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'ngrok-skip-browser-warning': 'true',
+    },
+    // Long timeout for AI completions
+    timeout: 120_000,
+  });
+
+  instance.interceptors.request.use((config) => {
+    const token = localStorage.getItem('taskflow_token');
+    if (token && config.headers) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    const lang = localStorage.getItem('taskflow_lang') || 'vi';
+    if (config.headers) {
+      config.headers['X-Language'] = lang;
+    }
+    return config;
+  });
+
+  return instance;
+};
+
+export const aiClient = createAiClient();
 export default api;

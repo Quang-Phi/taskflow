@@ -239,9 +239,11 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
 
            // Filter tasks overlapping this week
           const overlappingTasks = tasks.filter(task => {
-            if (!task.due_date) return false;
-            const taskStartStr = task.start_date ? toLocalYMD(task.start_date) : toLocalYMD(task.due_date);
-            const taskEndStr = toLocalYMD(task.due_date);
+            // Exclude tasks with no date info at all
+            if (!task.start_date && !task.due_date) return false;
+            // Use whichever date is available for start/end
+            const taskStartStr = task.start_date ? toLocalYMD(task.start_date) : toLocalYMD(task.due_date!);
+            const taskEndStr   = task.due_date   ? toLocalYMD(task.due_date)   : taskStartStr;
             return taskStartStr <= weekEndStr && taskEndStr >= weekStartStr;
           });
 
@@ -308,7 +310,8 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
                   <div key={trackIndex} className="task-calendar__track">
                     {track.map(task => {
                       const taskStartStr = task.start_date ? toLocalYMD(task.start_date) : toLocalYMD(task.due_date!);
-                      const taskEndStr = toLocalYMD(task.due_date!);
+                      // If no due_date, task renders as a single-day event on start_date
+                      const taskEndStr   = task.due_date   ? toLocalYMD(task.due_date)   : taskStartStr;
 
                       const taskStart = parseLocalYMD(taskStartStr);
                       const taskEnd = parseLocalYMD(taskEndStr);

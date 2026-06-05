@@ -102,10 +102,11 @@ class Project extends Model
             }
 
             return [
-                'mode' => $wf->mode,
-                'transitions' => $regularTransitions,
+                'mode'               => $wf->mode,
+                'initial_status'     => $wf->initial_status,
+                'transitions'        => $regularTransitions,
                 'global_transitions' => $globalTransitions,
-                'node_positions' => $nodePositions,
+                'node_positions'     => $nodePositions,
             ];
         }
 
