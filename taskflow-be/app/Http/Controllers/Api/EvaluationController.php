@@ -101,6 +101,9 @@ class EvaluationController extends Controller
             $paginated = $query->orderBy('period', 'desc')->orderBy('total_score', 'desc')->paginate($perPage);
             
             $items = collect($paginated->items())->map(function ($eval) {
+                if ($eval->status === 'draft') {
+                    $eval->refreshStats();
+                }
                 return $this->formatEvaluation($eval);
             });
 
@@ -128,6 +131,9 @@ class EvaluationController extends Controller
         $evaluations = $query->orderBy('period', 'desc')->orderBy('total_score', 'desc')->get();
 
         $data = $evaluations->map(function ($eval) {
+            if ($eval->status === 'draft') {
+                $eval->refreshStats();
+            }
             return $this->formatEvaluation($eval);
         });
 
@@ -228,6 +234,11 @@ class EvaluationController extends Controller
             return response()->json(['success' => false, 'message' => 'Evaluation not found'], 404);
         }
 
+        if ($eval->status === 'draft') {
+            $eval->refreshStats();
+            $eval->refresh();
+        }
+
         $user = $request->user();
         if ($user->role === 'employee') {
             if ($eval->employee_id !== $user->id || $eval->status !== 'published') {
@@ -264,10 +275,12 @@ class EvaluationController extends Controller
             }
         }
 
+        $lang = $request->header('X-Language', 'vi');
+
         $tasks = $tasksQuery->orderByRaw("CASE WHEN status = 'done' THEN 1 ELSE 0 END")
             ->orderBy('due_date', 'asc')
             ->get()
-            ->map(function ($task) {
+            ->map(function ($task) use ($lang) {
                 $isOnTime = true;
                 $statusLabel = '';
 
@@ -275,17 +288,42 @@ class EvaluationController extends Controller
                     $dueDate = Carbon::parse($task->due_date);
                     $completedAt = Carbon::parse($task->completed_at);
                     if ($completedAt->gt($dueDate)) {
-                        $daysLate = $completedAt->diffInDays($dueDate);
+                        $secondsLate = abs($completedAt->diffInSeconds($dueDate));
+                        $daysLate = round($secondsLate / 86400, 1);
                         $isOnTime = false;
-                        $statusLabel = "❌ Late {$daysLate}d";
+                        if ($lang === 'vi') {
+                            $statusLabel = "❌ Trễ {$daysLate} ngày";
+                        } elseif ($lang === 'ja') {
+                            $statusLabel = "❌ {$daysLate}日遅れ";
+                        } else {
+                            $statusLabel = "❌ Late {$daysLate}d";
+                        }
                     } else {
-                        $statusLabel = "✅ On time";
+                        if ($lang === 'vi') {
+                            $statusLabel = "✅ Đúng hạn";
+                        } elseif ($lang === 'ja') {
+                            $statusLabel = "✅ 予定通り";
+                        } else {
+                            $statusLabel = "✅ On time";
+                        }
                     }
                 } elseif ($task->status !== 'done') {
-                    $statusLabel = '⏳ In progress';
+                    if ($lang === 'vi') {
+                        $statusLabel = '⏳ Đang làm';
+                    } elseif ($lang === 'ja') {
+                        $statusLabel = '⏳ 進行中';
+                    } else {
+                        $statusLabel = '⏳ In progress';
+                    }
                     if ($task->due_date && Carbon::parse($task->due_date)->lt(Carbon::now())) {
                         $isOnTime = false;
-                        $statusLabel = '⚠️ Overdue';
+                        if ($lang === 'vi') {
+                            $statusLabel = '⚠️ Quá hạn';
+                        } elseif ($lang === 'ja') {
+                            $statusLabel = '⚠️ 期限切れ';
+                        } else {
+                            $statusLabel = '⚠️ Overdue';
+                        }
                     }
                 }
 
@@ -546,20 +584,18 @@ class EvaluationController extends Controller
             return [];
         }
 
-        // 4. Find all local users who belong to these departments
-        $users = User::all();
-        $subordinateIds = [];
-        foreach ($users as $u) {
-            if ((int)$u->id === (int)$manager->id) {
-                continue;
-            }
-            $uDepts = array_map('intval', $u->department_ids ?? []);
-            if (count(array_intersect($managedDeptIds, $uDepts)) > 0) {
-                $subordinateIds[] = (int)$u->id;
-            }
-        }
+        // 4. Find all local users who belong to these departments using DB query
+        $subordinateIds = User::where('id', '!=', $manager->id)
+            ->where(function ($q) use ($managedDeptIds) {
+                foreach ($managedDeptIds as $deptId) {
+                    $q->orWhereJsonContains('department_ids', (int)$deptId)
+                      ->orWhereJsonContains('department_ids', (string)$deptId);
+                }
+            })
+            ->pluck('id')
+            ->toArray();
 
-        return $subordinateIds;
+        return array_map('intval', $subordinateIds);
     }
 
 }

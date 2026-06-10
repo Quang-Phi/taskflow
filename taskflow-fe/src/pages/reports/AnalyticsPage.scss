@@ -106,4 +106,118 @@
       }
     }
   }
+
+  // Tabs
+  &__tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid $border-color;
+    padding-bottom: 1px;
+
+    .tab-btn {
+      background: none;
+      border: none;
+      color: $text-secondary;
+      font-size: $font-size-sm;
+      font-weight: 500;
+      padding: 10px 16px;
+      cursor: pointer;
+      position: relative;
+      transition: all $transition-fast;
+      outline: none;
+
+      &:hover {
+        color: $text-primary;
+      }
+
+      &.active {
+        color: $primary-light;
+        font-weight: 600;
+
+        &::after {
+          content: '';
+          position: absolute;
+          bottom: -2px;
+          left: 0;
+          right: 0;
+          height: 2px;
+          background: $primary;
+          border-radius: 2px;
+        }
+      }
+    }
+  }
+
+  // Process Performance metrics
+  &__metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  &__metric-card {
+    @include card-base;
+    padding: 18px 22px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+
+    .title {
+      font-size: $font-size-xs;
+      font-weight: 600;
+      color: $text-tertiary;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .value {
+      font-size: $font-size-3xl;
+      font-weight: 700;
+      color: $text-primary;
+      line-height: 1.2;
+    }
+
+    .subtext {
+      font-size: $font-size-xs;
+      color: $text-muted;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+  }
+
+  &__burndown-picker {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+
+    label {
+      font-size: $font-size-sm;
+      font-weight: 500;
+      color: $text-secondary;
+    }
+
+    select {
+      height: 36px;
+      min-width: 260px;
+      padding: 0 30px 0 12px;
+      background: $bg-input;
+      border: 1px solid $border-color;
+      border-radius: $radius-md;
+      color: $text-primary;
+      font-size: $font-size-sm;
+      font-family: $font-family;
+      outline: none;
+      appearance: none;
+      cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7084' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+    }
+  }
 }

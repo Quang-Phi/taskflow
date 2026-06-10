@@ -16,9 +16,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Ensure CORS runs first on every request (including OPTIONS preflight)
         $middleware->prepend(\Illuminate\Http\Middleware\HandleCors::class);
 
-        $middleware->alias([
-            'jwt.auth' => \App\Http\Middleware\JwtAuth::class,
-        ]);
+        // Add Security Headers globally
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
 
         $middleware->validateCsrfTokens(except: [
             'callback',

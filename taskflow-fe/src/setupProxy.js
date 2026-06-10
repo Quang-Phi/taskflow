@@ -55,4 +55,5 @@ module.exports = function (app) {
   app.use('/api', createProxyMiddleware(opts));
   app.use('/auth', createProxyMiddleware(opts));
   app.use('/callback', createProxyMiddleware(opts));
+  app.use('/storage', createProxyMiddleware(opts));
 };

@@ -189,6 +189,7 @@ const MembersPage: React.FC = () => {
         search: debouncedSearch.trim(),
         role: roleFilter,
         department_id: deptFilter,
+        scope: 'managed',
       });
       if (res.success) {
         setMembers(res.data);

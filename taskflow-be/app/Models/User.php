@@ -72,4 +72,98 @@ class User extends Authenticatable
             ->withPivot('role', 'joined_at')
             ->withTimestamps();
     }
+
+    /**
+     * Accessor and Mutator for bitrix_access_token with plaintext fallback.
+     */
+    protected function bitrixAccessToken(): \Illuminate\Database\Eloquent\Casts\Attribute
+    {
+        return \Illuminate\Database\Eloquent\Casts\Attribute::make(
+            get: function ($value) {
+                if (empty($value)) return null;
+                try {
+                    return decrypt($value);
+                } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
+                    return $value;
+                }
+            },
+            set: fn ($value) => $value ? encrypt($value) : null,
+        );
+    }
+
+    /**
+     * Accessor and Mutator for bitrix_refresh_token with plaintext fallback.
+     */
+    protected function bitrixRefreshToken(): \Illuminate\Database\Eloquent\Casts\Attribute
+    {
+        return \Illuminate\Database\Eloquent\Casts\Attribute::make(
+            get: function ($value) {
+                if (empty($value)) return null;
+                try {
+                    return decrypt($value);
+                } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
+                    return $value;
+                }
+            },
+            set: fn ($value) => $value ? encrypt($value) : null,
+        );
+    }
+
+    /**
+     * Get IDs of users managed by this user (including subordinates recursively).
+     */
+    public function getManagedUserIds(): array
+    {
+        if (in_array($this->role, ['admin', 'superadmin'])) {
+            return self::pluck('id')->toArray();
+        }
+
+        if ($this->role === 'employee') {
+            return [$this->id];
+        }
+
+        // For manager
+        $managedDeptIds = [];
+        try {
+            $bitrix = app(\App\Services\BitrixService::class);
+            $bitrix->ensureValidToken($this);
+            $departments = $bitrix->getDepartments();
+            foreach ($departments as $dept) {
+                $headId = $dept['UF_HEAD'] ?? null;
+                if ($headId && (int)$headId === (int)$this->id) {
+                    $managedDeptIds[] = (int)$dept['ID'];
+                }
+            }
+
+            // Recursively get sub-departments
+            if (!empty($managedDeptIds)) {
+                $allManagedIds = $managedDeptIds;
+                $added = true;
+                while ($added) {
+                    $added = false;
+                    foreach ($departments as $dept) {
+                        $deptId = (int)$dept['ID'];
+                        $parentId = isset($dept['PARENT']) ? (int)$dept['PARENT'] : null;
+                        if ($parentId && in_array($parentId, $allManagedIds, true) && !in_array($deptId, $allManagedIds, true)) {
+                            $allManagedIds[] = $deptId;
+                            $added = true;
+                        }
+                    }
+                }
+                $managedDeptIds = $allManagedIds;
+            }
+        } catch (\Exception $e) {
+            $managedDeptIds = $this->department_ids ?? [];
+        }
+
+        $query = self::query();
+        $query->where(function ($q) use ($managedDeptIds) {
+            $q->where('id', $this->id);
+            foreach ($managedDeptIds as $deptId) {
+                $q->orWhereJsonContains('department_ids', (int)$deptId);
+            }
+        });
+
+        return $query->pluck('id')->toArray();
+    }
 }

@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
@@ -80,7 +82,11 @@ class AuthController extends Controller
      */
     private function showHandlerPage()
     {
-        $html = <<<'HTML'
+        // FIX #4: postMessage target origin set to configured FRONTEND_URL instead of wildcard '*'
+        $allowedOrigin = rtrim(explode(',', env('FRONTEND_URL', 'http://localhost:3000'))[0], '/');
+        $nonce = base64_encode(random_bytes(16));
+
+        $html = <<<HTML
 <!DOCTYPE html>
 <html>
 <head>
@@ -89,15 +95,15 @@ class AuthController extends Controller
 </head>
 <body>
     <div id="status">Authenticating with Bitrix24...</div>
-    <script>
-        // BX24 JS SDK – get auth info from the iframe context
+    <script nonce="{$nonce}">
+        var ALLOWED_PARENT_ORIGIN = '{$allowedOrigin}';
+
         BX24.init(function() {
             var auth = BX24.getAuth();
 
             if (auth && auth.access_token) {
                 document.getElementById('status').innerText = 'Got token, logging in...';
 
-                // Send auth to our Laravel backend
                 fetch('/api/callback', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -113,13 +119,13 @@ class AuthController extends Controller
                 .then(data => {
                     if (data.success) {
                         document.getElementById('status').innerText = 'Welcome, ' + data.user.name + '!';
-                        // Store token and redirect to app
                         if (window.parent !== window) {
+                            // FIX #4: Use specific parent origin, NOT wildcard '*'
                             window.parent.postMessage({
                                 type: 'TASKFLOW_AUTH',
                                 token: data.token,
                                 user: data.user
-                            }, '*');
+                            }, ALLOWED_PARENT_ORIGIN);
                         } else {
                             localStorage.setItem('taskflow_token', data.token);
                             window.location.href = '/';
@@ -140,7 +146,9 @@ class AuthController extends Controller
 </html>
 HTML;
 
-        return response($html)->header('Content-Type', 'text/html');
+        return response($html)
+            ->header('Content-Type', 'text/html')
+            ->header('Content-Security-Policy', "script-src 'nonce-{$nonce}' https://api.bitrix24.com; default-src 'none'");
     }
 
     /**
@@ -150,56 +158,59 @@ HTML;
     private function handleAuthorizationCode(Request $request)
     {
         $code = $request->input('code');
-        
+
         $bitrixUrl = config('bitrix.url', 'https://bitrix.esuhai.org');
         $parsedUrl = parse_url($bitrixUrl);
         $defaultDomain = $parsedUrl['host'] ?? 'oauth.bitrix.info';
-        
-        $serverDomain = $request->input('server_domain', $defaultDomain);
+
+        // FIX #3: Validate server_domain against whitelist — prevent credential exfiltration
+        $requestedDomain = $request->input('server_domain', $defaultDomain);
+        $serverDomain = $this->isAllowedBitrixDomain($requestedDomain) ? $requestedDomain : $defaultDomain;
+
         $domain = $request->input('domain');
         $memberId = $request->input('member_id');
 
-        // Try oauth.bitrix.info first (standard Bitrix24)
         $tokenUrl = "https://{$serverDomain}/oauth/token/";
 
         $response = Http::get($tokenUrl, [
-            'grant_type' => 'authorization_code',
-            'client_id' => config('bitrix.client_id'),
+            'grant_type'    => 'authorization_code',
+            'client_id'     => config('bitrix.client_id'),
             'client_secret' => config('bitrix.client_secret'),
-            'code' => $code,
+            'code'          => $code,
         ]);
 
         $data = $response->json();
+        // FIX: Log only status, never log raw tokens
         Log::info('Bitrix OAuth token exchange', [
-            'url' => $tokenUrl,
-            'status' => $response->status(),
-            'data' => $data,
+            'domain'     => $serverDomain,
+            'status'     => $response->status(),
+            'has_token'  => isset($data['access_token']),
         ]);
 
         if ($data && isset($data['access_token'])) {
+            // FIX #4: Validate state/redirectUrl against allowed frontend origins
             $state = $request->input('state');
-            if (!$state) {
-                $origins = explode(',', env('FRONTEND_URL', 'http://localhost:3000'));
-                $state = $origins[0];
-            }
+            $defaultFrontend = explode(',', env('FRONTEND_URL', 'http://localhost:3000'))[0];
+            $redirectUrl = ($state && $this->isAllowedRedirectOrigin($state)) ? $state : $defaultFrontend;
 
             return $this->createUserAndToken(
-                accessToken: $data['access_token'],
+                accessToken:  $data['access_token'],
                 refreshToken: $data['refresh_token'] ?? null,
-                expiresIn: $data['expires_in'] ?? 3600,
-                domain: $data['domain'] ?? $domain,
-                memberId: $data['member_id'] ?? $memberId,
-                redirectUrl: $state
+                expiresIn:    $data['expires_in'] ?? 3600,
+                domain:       $data['domain'] ?? $domain,
+                memberId:     $data['member_id'] ?? $memberId,
+                redirectUrl:  $redirectUrl
             );
         }
 
-        // Fallback: return error with debug info
+        // FIX: Return generic error — do NOT expose internal URL or Bitrix raw response
+        Log::warning('Bitrix OAuth token exchange failed', [
+            'domain' => $serverDomain,
+            'status' => $response->status(),
+        ]);
         return response()->json([
             'success' => false,
-            'message' => 'Failed to exchange code for token',
-            'token_url' => $tokenUrl,
-            'bitrix_response' => $data,
-            'hint' => 'For on-premise Bitrix, try opening the app from Bitrix24 UI instead.',
+            'message' => 'Authentication failed. Please try again or open the app from Bitrix24.',
         ], 401);
     }
 
@@ -239,14 +250,19 @@ HTML;
 
         $existingUser = User::find($bitrixUser['ID']);
 
+        // FIX #1: Removed email-based admin escalation (str_contains 'admin' and hardcoded emails).
+        // FIX #2 (partial): Hardcoded user ID 632 is also removed here.
+        // Role logic: preserve existing DB role first, then check Bitrix dept head status.
+        // Superadmin/admin roles can ONLY be assigned manually through DB or seeder.
         $role = 'employee';
-        if ((int)$bitrixUser['ID'] === 632) {
-            $role = 'admin';
-        } else if ($existingUser && $existingUser->role === 'admin') {
-            $role = 'admin';
-        } else if (str_contains($bitrixUser['EMAIL'] ?? '', 'admin') || ($bitrixUser['EMAIL'] ?? '') === 'sa@esuhai.com') {
-            $role = 'admin';
+        if ($existingUser && in_array($existingUser->role, ['superadmin', 'admin'], true)) {
+            // Preserve existing privileged role — never downgrade on login
+            $role = $existingUser->role;
+        } elseif ($existingUser && $existingUser->role === 'manager') {
+            // Preserve manager role assigned in DB
+            $role = 'manager';
         } else {
+            // Auto-detect manager from Bitrix department head
             try {
                 $departments = $this->bitrix->getDepartments();
                 foreach ($departments as $dept) {
@@ -288,14 +304,22 @@ HTML;
 
         // Sync all users in the background/inline to ensure assignee/member lists are populated
         try {
-            $this->bitrix->setAccessToken($accessToken)->syncUsers();
+            \App\Jobs\SyncBitrixUsersJob::dispatch($accessToken);
         } catch (\Exception $e) {
-            Log::error('Bitrix user sync on login failed: ' . $e->getMessage());
+            Log::error('Bitrix user sync dispatch on login failed: ' . $e->getMessage());
         }
 
         if ($redirectUrl) {
+            // FIX #4: Never pass Sanctum token in URL (browser history/log leakage).
+            // Instead, issue a short-lived one-time code (TTL: 60s) stored in cache.
+            // The frontend exchanges this code for the actual token via POST.
             $redirectUrl = rtrim($redirectUrl, '/');
-            return redirect()->away($redirectUrl . '/?token=' . $sanctumToken->plainTextToken);
+            $oneTimeCode = Str::random(64);
+            Cache::put('auth_code:' . $oneTimeCode, [
+                'token'   => $sanctumToken->plainTextToken,
+                'user_id' => $user->id,
+            ], now()->addSeconds(60));
+            return redirect()->away($redirectUrl . '/?code=' . $oneTimeCode);
         }
 
         return response()->json([
@@ -318,6 +342,77 @@ HTML;
                 'notification_settings' => $user->notification_settings,
             ],
         ]);
+    }
+
+    /**
+     * POST /api/auth/exchange
+     * Exchange a short-lived one-time code (from OAuth redirect URL) for a Sanctum token.
+     * The code is stored in cache for 60 seconds only.
+     */
+    public function exchangeCode(Request $request): JsonResponse
+    {
+        $request->validate(['code' => 'required|string|size:64']);
+        $code = $request->input('code');
+        $cacheKey = 'auth_code:' . $code;
+        $payload = Cache::pull($cacheKey); // pull = get + delete (one-time use)
+
+        if (!$payload) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid or expired authentication code.',
+            ], 401);
+        }
+
+        return response()->json([
+            'success' => true,
+            'token'   => $payload['token'],
+        ]);
+    }
+
+    /**
+     * Check if a domain is an allowed Bitrix server domain.
+     * Prevents SSRF / credential exfiltration via server_domain parameter.
+     */
+    private function isAllowedBitrixDomain(string $domain): bool
+    {
+        $bitrixUrl = config('bitrix.url', '');
+        $parsedDefault = parse_url($bitrixUrl);
+        $defaultHost = $parsedDefault['host'] ?? '';
+
+        $allowedHosts = array_filter([
+            $defaultHost,
+            'oauth.bitrix.info',
+            env('BITRIX_ALLOWED_DOMAIN', ''),
+        ]);
+
+        return in_array($domain, $allowedHosts, true);
+    }
+
+    /**
+     * Check if a redirect URL belongs to an allowed frontend origin.
+     * Prevents Open Redirect attacks via the 'state' / 'origin' parameter.
+     */
+    private function isAllowedRedirectOrigin(string $url): bool
+    {
+        $allowedUrls = explode(',', env('FRONTEND_URL', 'http://localhost:3000'));
+        $parsedInput = parse_url(trim($url));
+        $inputHost = ($parsedInput['scheme'] ?? '') . '://' . ($parsedInput['host'] ?? '');
+        if (!empty($parsedInput['port'])) {
+            $inputHost .= ':' . $parsedInput['port'];
+        }
+
+        foreach ($allowedUrls as $allowed) {
+            $parsedAllowed = parse_url(trim($allowed));
+            $allowedHost = ($parsedAllowed['scheme'] ?? '') . '://' . ($parsedAllowed['host'] ?? '');
+            if (!empty($parsedAllowed['port'])) {
+                $allowedHost .= ':' . $parsedAllowed['port'];
+            }
+            if ($inputHost === $allowedHost) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function me(Request $request): JsonResponse
@@ -373,43 +468,10 @@ HTML;
             if ($currentUser->role === 'employee') {
                 $query->where('id', $currentUser->id);
             } elseif ($currentUser->role === 'manager') {
-                $managedDeptIds = [];
-                try {
-                    $departments = $this->bitrix->getDepartments();
-                    foreach ($departments as $dept) {
-                        $headId = $dept['UF_HEAD'] ?? null;
-                        if ($headId && (int)$headId === (int)$currentUser->id) {
-                            $managedDeptIds[] = (int)$dept['ID'];
-                        }
-                    }
-
-                    // Recursively get sub-departments
-                    if (!empty($managedDeptIds)) {
-                        $allManagedIds = $managedDeptIds;
-                        $added = true;
-                        while ($added) {
-                            $added = false;
-                            foreach ($departments as $dept) {
-                                $deptId = (int)$dept['ID'];
-                                $parentId = isset($dept['PARENT']) ? (int)$dept['PARENT'] : null;
-                                if ($parentId && in_array($parentId, $allManagedIds, true) && !in_array($deptId, $allManagedIds, true)) {
-                                    $allManagedIds[] = $deptId;
-                                    $added = true;
-                                }
-                            }
-                        }
-                        $managedDeptIds = $allManagedIds;
-                    }
-                } catch (\Exception $e) {
-                    $managedDeptIds = $currentUser->department_ids ?? [];
+                if ($request->input('scope') === 'managed') {
+                    $managedIds = $currentUser->getManagedUserIds();
+                    $query->whereIn('id', $managedIds);
                 }
-
-                $query->where(function ($q) use ($currentUser, $managedDeptIds) {
-                    $q->where('id', $currentUser->id);
-                    foreach ($managedDeptIds as $deptId) {
-                        $q->orWhereJsonContains('department_ids', (int)$deptId);
-                    }
-                });
             }
         }
 

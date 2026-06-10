@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
-import { Dropdown, message, Modal, Select, Button, Timeline, Tooltip, Spin, Popover, Input, DatePicker, InputNumber } from 'antd';
+import { Dropdown, message, Modal, Select, Button, Timeline, Tooltip, Spin, Popover, Input, DatePicker, InputNumber, Segmented } from 'antd';
 import dayjs from 'dayjs';
 import {
   RightOutlined,
@@ -30,12 +30,17 @@ import {
   ClockCircleOutlined,
   LockOutlined,
   GroupOutlined,
+  BranchesOutlined,
+  CopyOutlined,
+  LinkOutlined,
+  ExportOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from '../../utils/i18n';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import './MyTasksPage.scss';
 import { TaskDetailPanel } from '../../components/tasks/TaskDetailPanel';
+import { WorkflowTransitionModal } from '../../components/tasks/WorkflowTransitionModal';
 import { TaskCalendar } from '../../components/tasks/TaskCalendar';
 import ManualTimeLogModal from '../../components/tasks/ManualTimeLogModal';
 import TaskTypeBadge from '../../components/tasks/TaskTypeBadge';
@@ -55,6 +60,7 @@ interface Project {
   title?: string;
   members?: User[];
   statuses?: any[];
+  labels?: any[];
 }
 
 interface TaskComment {
@@ -700,32 +706,94 @@ const myFormatDuration = (seconds: number): string => {
   return `${s}s`;
 };
 
+const calculateWorkingMinutes = (start: string, due: string): number => {
+  if (!start || !due) return 0;
+  const startDate = new Date(start);
+  const dueVal = new Date(due);
+  if (isNaN(startDate.getTime()) || isNaN(dueVal.getTime()) || dueVal <= startDate) return 0;
+
+  const ICT_OFFSET = 7 * 60 * 60 * 1000;
+  const startIctMs = startDate.getTime() + ICT_OFFSET;
+  const dueIctMs = dueVal.getTime() + ICT_OFFSET;
+
+  const getIctDateKey = (ms: number) => {
+    const d = new Date(ms);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dt = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${dt}`;
+  };
+
+  const getWorkingMinutesForDay = (dayOfWeek: number, startMin: number, endMin: number): number => {
+    if (dayOfWeek === 0) return 0;
+    if (dayOfWeek === 6) {
+      return Math.max(0, Math.min(endMin, 720) - Math.max(startMin, 480));
+    }
+    const overlap1 = Math.max(0, Math.min(endMin, 720) - Math.max(startMin, 480));
+    const overlap2 = Math.max(0, Math.min(endMin, 1020) - Math.max(startMin, 780));
+    return overlap1 + overlap2;
+  };
+
+  const startDateKey = getIctDateKey(startIctMs);
+  const dueDateKey = getIctDateKey(dueIctMs);
+
+  if (startDateKey === dueDateKey) {
+    const d = new Date(startIctMs);
+    const dayOfWeek = d.getUTCDay();
+    const startMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+    
+    const dDue = new Date(dueIctMs);
+    const dueMin = dDue.getUTCHours() * 60 + dDue.getUTCMinutes();
+
+    return getWorkingMinutesForDay(dayOfWeek, startMin, dueMin);
+  }
+
+  let totalMinutes = 0;
+  const startMidnight = new Date(startDateKey + 'T00:00:00Z').getTime();
+  const dueMidnight = new Date(dueDateKey + 'T00:00:00Z').getTime();
+
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  for (let currentMidnight = startMidnight; currentMidnight <= dueMidnight; currentMidnight += oneDayMs) {
+    const currentIctDate = new Date(currentMidnight);
+    const dayOfWeek = currentIctDate.getUTCDay();
+    const currentDateKey = getIctDateKey(currentMidnight);
+
+    let startMin = 0;
+    let endMin = 24 * 60;
+
+    if (currentDateKey === startDateKey) {
+      const dStart = new Date(startIctMs);
+      startMin = dStart.getUTCHours() * 60 + dStart.getUTCMinutes();
+    }
+    if (currentDateKey === dueDateKey) {
+      const dDue = new Date(dueIctMs);
+      endMin = dDue.getUTCHours() * 60 + dDue.getUTCMinutes();
+    }
+
+    totalMinutes += getWorkingMinutesForDay(dayOfWeek, startMin, endMin);
+  }
+
+  return totalMinutes;
+};
+
 const calculateEstimateHours = (start: string, due: string): number | null => {
   if (!start || !due) return null;
-  const s = new Date(start).getTime();
-  const d = new Date(due).getTime();
-  if (isNaN(s) || isNaN(d) || d <= s) return null;
-  const diffMs = d - s;
-  return Math.round(diffMs / (1000 * 60 * 60));
+  const totalWorkingMinutes = calculateWorkingMinutes(start, due);
+  return Math.round(totalWorkingMinutes / 60);
 };
-
 const formatEstimate = (start: string, due: string): string => {
   if (!start || !due) return '—';
-  const s = new Date(start).getTime();
-  const d = new Date(due).getTime();
-  if (isNaN(s) || isNaN(d) || d <= s) return '—';
-  const diffMs = d - s;
-  const totalMinutes = Math.floor(diffMs / (1000 * 60));
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
+  const totalWorkingMinutes = calculateWorkingMinutes(start, due);
+  if (totalWorkingMinutes <= 0) return '—';
+
+  const hours = Math.floor(totalWorkingMinutes / 60);
+  const minutes = totalWorkingMinutes % 60;
+
   const parts: string[] = [];
-  if (days > 0) parts.push(`${days} ngày`);
   if (hours > 0) parts.push(`${hours} giờ`);
-  if (minutes > 0 && days === 0) parts.push(`${minutes} phút`);
+  if (minutes > 0) parts.push(`${minutes} phút`);
   return parts.length > 0 ? parts.join(' ') : '< 1 phút';
 };
-
 const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: () => void; disabled?: boolean }> = ({ taskId, timeEntries = [], onUpdate, disabled }) => {
   const [running, setRunning] = useState<any>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -858,7 +926,7 @@ const MyTimeTracker: React.FC<{ taskId: number; timeEntries: any[]; onUpdate: ()
         <div className="manual-time-datepicker">
           <DatePicker
             showTime
-            format="YYYY-MM-DD HH:mm"
+            format="DD/MM/YYYY HH:mm"
             value={manualDate}
             onChange={setManualDate}
             placeholder={t('tasks.panel.start_time')}
@@ -964,7 +1032,256 @@ const MyTasksPage: React.FC = () => {
     return !['done', 'backlog'].includes(t.status);
   };
   const [me, setMe] = useState<User | null>(null);
+  const [runningTimer, setRunningTimer] = useState<any>(null);
+
+  const fetchRunningTimer = async () => {
+    try {
+      const res = await api.getRunningTimer();
+      if (res && res.success) {
+        setRunningTimer(res.data);
+      } else {
+        setRunningTimer(null);
+      }
+    } catch (err) {
+      console.error(err);
+      setRunningTimer(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchRunningTimer();
+    window.addEventListener('timer-updated', fetchRunningTimer);
+    return () => {
+      window.removeEventListener('timer-updated', fetchRunningTimer);
+    };
+  }, []);
+
+  const handleStartTimer = async (taskId: string | number) => {
+    try {
+      await api.startTimer(taskId);
+      window.dispatchEvent(new Event('timer-updated'));
+      message.success(t('tasks.detail_toast.timer_start_success') || 'Bắt đầu tính giờ');
+      refreshTasks();
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.detail_toast.timer_start_err'));
+    }
+  };
+
+  const handleStopTimer = async (taskId: string | number) => {
+    try {
+      await api.stopTimer(taskId);
+      window.dispatchEvent(new Event('timer-updated'));
+      message.success(t('tasks.detail_toast.timer_stop_success') || 'Đã dừng tính giờ');
+      refreshTasks();
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.detail_toast.timer_stop_err'));
+    }
+  };
+
+  const handleCloneTask = async (taskId: string | number) => {
+    try {
+      const res = await api.cloneTask(taskId);
+      if (res.success) {
+        message.success(res.message || t('tasks.detail_toast.clone_success') || 'Nhân bản công việc thành công');
+        refreshTasks();
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.detail_toast.clone_err') || 'Không thể nhân bản công việc');
+    }
+  };
+
+  const getTaskMenuItems = (task: Task) => {
+    const editPerm = canEditTask(task);
+    const deletePerm = canDeleteTask(task);
+    const menuItems: any[] = [];
+
+    // 1. Details
+    menuItems.push({
+      key: 'details',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <InfoCircleOutlined style={{ fontSize: '13px' }} />
+          {t('tasks.panel.view_details')}
+        </span>
+      ),
+      onClick: () => setSelectedTask(task)
+    });
+
+    // 2. Add subtask (if editable)
+    if (editPerm) {
+      menuItems.push({
+        key: 'add_subtask',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <PlusOutlined style={{ fontSize: '13px' }} />
+            {t('tasks.panel.add_subtask')}
+          </span>
+        ),
+        onClick: () => setSelectedTask(task)
+      });
+    }
+
+    // 3. Mark Done / Log Time / Reassign (specific to My Tasks)
+    if (editPerm) {
+      if (!isTaskDone(task)) {
+        menuItems.push({
+          key: 'done',
+          label: (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <CheckCircleOutlined style={{ fontSize: '13px' }} />
+              {t('tasks.action.mark_done' as any)}
+            </span>
+          ),
+          onClick: () => handleMarkDone(task.id)
+        });
+        menuItems.push({
+          key: 'logtime',
+          label: (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ClockCircleOutlined style={{ fontSize: '13px' }} />
+              {t('tasks.panel.log_time')}
+            </span>
+          ),
+          onClick: () => setLogTimeTaskId(task.id)
+        });
+      }
+      menuItems.push({
+        key: 'reassign',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <UserOutlined style={{ fontSize: '13px' }} />
+            {t('tasks.action.reassign' as any)}
+          </span>
+        ),
+        onClick: () => handleReassignOpen(task.id, task.assignee_id, task.project_id)
+      });
+    }
+
+    // 4. Copy Link
+    menuItems.push({
+      key: 'copy_link',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <LinkOutlined style={{ fontSize: '13px' }} />
+          {t('tasks.panel.copy_url')}
+        </span>
+      ),
+      onClick: () => {
+        const link = `${window.location.origin}/projects/${task.project_id}?task_id=${task.id}`;
+        navigator.clipboard.writeText(link);
+        message.success(t('tasks.detail_toast.copy_url_success'));
+      }
+    });
+
+    // 5. Copy ID
+    menuItems.push({
+      key: 'copy_id',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <CopyOutlined style={{ fontSize: '13px' }} />
+          {t('tasks.panel.copy_id')}
+        </span>
+      ),
+      onClick: () => {
+        navigator.clipboard.writeText(`#${task.id}`);
+        message.success(t('tasks.detail_toast.copy_id_success'));
+      }
+    });
+
+    // 6. Open in New Tab
+    menuItems.push({
+      key: 'new_tab',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ExportOutlined style={{ fontSize: '13px' }} />
+          {t('tasks.panel.new_tab')}
+        </span>
+      ),
+      onClick: () => {
+        const link = `${window.location.origin}/projects/${task.project_id}?task_id=${task.id}`;
+        window.open(link, '_blank');
+      }
+    });
+
+    // 7. Watch/Unwatch
+    const isWatching = me?.id && task.watcher_ids?.includes(me.id);
+    if (Number(task.assignee_id) !== Number(me?.id)) {
+      menuItems.push({
+        key: 'toggle_watch',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isWatching ? (
+              <EyeInvisibleOutlined style={{ fontSize: '13px' }} />
+            ) : (
+              <EyeOutlined style={{ fontSize: '13px' }} />
+            )}
+            {isWatching ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
+          </span>
+        ),
+        onClick: () => handleToggleWatchTask(task.id)
+      });
+    }
+
+    // 8. Start/Stop Timer
+    const isTimerRunning = runningTimer && Number(runningTimer.task_id) === Number(task.id);
+    menuItems.push({
+      key: 'toggle_timer',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {isTimerRunning ? (
+            <PauseCircleOutlined style={{ fontSize: '13px', color: '#ef4444' }} />
+          ) : (
+            <PlayCircleOutlined style={{ fontSize: '13px', color: '#22c55e' }} />
+          )}
+          {isTimerRunning ? t('tasks.panel.stop_timer') : t('tasks.panel.start_timer')}
+        </span>
+      ),
+      onClick: () => isTimerRunning ? handleStopTimer(task.id) : handleStartTimer(task.id)
+    });
+
+    // 9. Duplicate (if editable)
+    if (editPerm) {
+      menuItems.push({
+        key: 'duplicate',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <BranchesOutlined style={{ fontSize: '13px' }} />
+            {t('tasks.panel.duplicate')}
+          </span>
+        ),
+        onClick: () => handleCloneTask(task.id)
+      });
+    }
+
+    // 10. Delete (if deletable)
+    if (deletePerm) {
+      menuItems.push({ type: 'divider' });
+      menuItems.push({
+        key: 'delete',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)' }}>
+            <DeleteOutlined style={{ fontSize: '13px' }} />
+            {t('tasks.panel.delete')}
+          </span>
+        ),
+        danger: true,
+        onClick: () => handleDeleteTask(task.id)
+      });
+    }
+
+    return menuItems;
+  };
   const [taskList, setTaskList] = useState<Task[]>([]);
+  const [taskSource, setTaskSource] = useState<'assigned_to_me' | 'delegated_by_me'>('assigned_to_me');
+  const [selectedProjectForReassign, setSelectedProjectForReassign] = useState<any>(null);
+
+  // Workflow guided transition states
+  const [wfModalOpen, setWfModalOpen] = useState(false);
+  const [wfTask, setWfTask] = useState<any>(null);
+  const [wfTargetStatus, setWfTargetStatus] = useState<string>('');
+  const [wfTargetStatusName, setWfTargetStatusName] = useState<string>('');
+  const [wfFailedRules, setWfFailedRules] = useState<any[]>([]);
+  const [onWfSuccessCallback, setOnWfSuccessCallback] = useState<((updatedTask: any) => void) | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -1243,11 +1560,6 @@ const MyTasksPage: React.FC = () => {
 
         const usersRes = await api.getLocalUsers();
         setUsers(usersRes.data || []);
-
-        if (meRes?.id) {
-          const tasksRes = await api.getTasks({ assignee_id: meRes.id });
-          setTaskList(tasksRes.data || []);
-        }
       } catch (err) {
         console.error('Error fetching tasks data:', err);
         message.error(t('tasks.toast.load_err' as any));
@@ -1319,12 +1631,28 @@ const MyTasksPage: React.FC = () => {
   const refreshTasks = useCallback(async () => {
     if (!me?.id) return;
     try {
-      const tasksRes = await api.getTasks({ assignee_id: me.id });
-      setTaskList(tasksRes.data || []);
+      if (taskSource === 'assigned_to_me') {
+        const tasksRes = await api.getTasks({ assignee_id: me.id });
+        setTaskList(tasksRes.data || []);
+      } else {
+        const tasksRes = await api.getTasks({ creator_id: me.id });
+        const delegated = (tasksRes.data || []).filter((t: any) => 
+          t.assignee_id !== null && 
+          t.assignee_id !== undefined && 
+          Number(t.assignee_id) !== Number(me.id)
+        );
+        setTaskList(delegated);
+      }
     } catch (err) {
       console.error('Error refreshing tasks:', err);
     }
-  }, [me]);
+  }, [me, taskSource]);
+
+  useEffect(() => {
+    if (me?.id) {
+      refreshTasks();
+    }
+  }, [taskSource, me, refreshTasks]);
 
   useEffect(() => {
     const handleClosePanels = () => {
@@ -1485,7 +1813,23 @@ const MyTasksPage: React.FC = () => {
         }
       }
     } catch (err: any) {
-      message.error(err.response?.data?.message || t('tasks.toast.status_err' as any));
+      if (err.response?.data?.workflow_error && err.response?.data?.failed_rules) {
+        const statusObj = task?.project?.statuses?.find((s: any) => s.id === nextStatus);
+        const statusName = statusObj ? statusObj.name : nextStatus;
+        setWfTask(taskList.find(t => t.id === id) || task);
+        setWfTargetStatus(nextStatus);
+        setWfTargetStatusName(statusName);
+        setWfFailedRules(err.response.data.failed_rules);
+        setOnWfSuccessCallback(() => (updatedTask: any) => {
+          setTaskList(prev => prev.map(t => t.id === id ? updatedTask : t));
+          if (selectedTask && selectedTask.id === id) {
+            setEditStatus(nextStatus);
+          }
+        });
+        setWfModalOpen(true);
+      } else {
+        message.error(err.response?.data?.message || t('tasks.toast.status_err' as any));
+      }
     }
   };
 
@@ -1504,7 +1848,23 @@ const MyTasksPage: React.FC = () => {
         }
       }
     } catch (err: any) {
-      message.error(err.response?.data?.message || t('tasks.toast.mark_done_err' as any));
+      if (err.response?.data?.workflow_error && err.response?.data?.failed_rules) {
+        const statusObj = task?.project?.statuses?.find((s: any) => s.id === 'done');
+        const statusName = statusObj ? statusObj.name : 'Done';
+        setWfTask(task);
+        setWfTargetStatus('done');
+        setWfTargetStatusName(statusName);
+        setWfFailedRules(err.response.data.failed_rules);
+        setOnWfSuccessCallback(() => (updatedTask: any) => {
+          setTaskList(prev => prev.map(t => t.id === id ? updatedTask : t));
+          if (selectedTask && selectedTask.id === id) {
+            setEditStatus('done');
+          }
+        });
+        setWfModalOpen(true);
+      } else {
+        message.error(err.response?.data?.message || t('tasks.toast.mark_done_err' as any));
+      }
     }
   };
 
@@ -1529,12 +1889,14 @@ const MyTasksPage: React.FC = () => {
     setActionTaskId(id);
     setNewAssigneeId(currentAssigneeId);
     setReassignModalOpen(true);
+    setSelectedProjectForReassign(null);
     // Fetch project members for the reassign dropdown
     if (projectId) {
       try {
         const projRes = await api.getProject(projectId);
         if (projRes.success) {
           setProjectMembers(projRes.data.members || []);
+          setSelectedProjectForReassign(projRes.data);
         }
       } catch (e) {
         console.error('Error fetching project members:', e);
@@ -1587,18 +1949,27 @@ const MyTasksPage: React.FC = () => {
   };
 
   const handleDeleteTask = async (id: number) => {
-    try {
-      const res = await api.deleteTask(id);
-      if (res.success) {
-        message.success(t('tasks.toast.delete_success' as any));
-        setTaskList(prev => prev.filter(t => t.id !== id));
-        if (selectedTask && selectedTask.id === id) {
-          setSelectedTask(null);
+    Modal.confirm({
+      title: t('project_detail.confirm.delete_task') || 'Xóa công việc',
+      content: t('project_detail.confirm.delete_task_content') || 'Bạn có chắc chắn muốn xóa công việc này? Hành động này không thể hoàn tác.',
+      okText: t('project_detail.confirm.delete_btn') || 'Xóa',
+      cancelText: t('tasks.modal.cancel') || 'Hủy',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          const res = await api.deleteTask(id);
+          if (res.success) {
+            message.success(t('tasks.toast.delete_success' as any));
+            setTaskList(prev => prev.filter(t => t.id !== id));
+            if (selectedTask && selectedTask.id === id) {
+              setSelectedTask(null);
+            }
+          }
+        } catch (err) {
+          message.error(t('tasks.toast.delete_err' as any));
         }
       }
-    } catch (err) {
-      message.error(t('tasks.toast.delete_err' as any));
-    }
+    });
   };
 
   const cleanupDragClasses = () => {
@@ -1780,7 +2151,22 @@ const MyTasksPage: React.FC = () => {
       } catch (err: any) {
         console.error('[DragDnD MyTasks] API error, reverting taskList:', err);
         setTaskList(prevTaskList);
-        message.error(err.response?.data?.message || t('tasks.toast.status_err' as any));
+        if (err.response?.data?.workflow_error && err.response?.data?.failed_rules) {
+          const statusId = resolvedStatus;
+          const statusObj = task.project?.statuses?.find((s: any) => s.id === statusId);
+          const statusName = statusObj ? statusObj.name : statusId;
+
+          setWfTask(task);
+          setWfTargetStatus(statusId);
+          setWfTargetStatusName(statusName);
+          setWfFailedRules(err.response.data.failed_rules);
+          setOnWfSuccessCallback(() => (updatedTask: any) => {
+            setTaskList(prev => prev.map(t => String(t.id) === String(updatedTask.id) ? updatedTask : t));
+          });
+          setWfModalOpen(true);
+        } else {
+          message.error(err.response?.data?.message || t('tasks.toast.status_err' as any));
+        }
       }
     }, 50);
   };
@@ -2154,6 +2540,12 @@ const MyTasksPage: React.FC = () => {
         if (!groups[dStr]) groups[dStr] = [];
         groups[dStr].push(task);
       });
+    } else if (groupBy === 'assignee') {
+      filtered.forEach((task) => {
+        const aName = task.assignee?.name || t('tasks.panel.unassigned' as any) || 'Unassigned';
+        if (!groups[aName]) groups[aName] = [];
+        groups[aName].push(task);
+      });
     }
     return groups;
   })();
@@ -2185,6 +2577,15 @@ const MyTasksPage: React.FC = () => {
     if (groupBy === 'priority') return priorityConfig[key]?.color || '#6b7084';
     const statusColors: Record<string, string> = { backlog: '#6b7084', todo: '#9ca0b0', in_progress: '#3b82f6', review: '#a855f7', done: '#22c55e' };
     if (groupBy === 'status') return statusColors[key] || '#6b7084';
+    if (groupBy === 'assignee') {
+      if (key === t('tasks.panel.unassigned' as any)) return '#6b7084';
+      let hash = 0;
+      for (let i = 0; i < key.length; i++) {
+        hash = key.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const h = Math.abs(hash % 360);
+      return `hsl(${h}, 70%, 60%)`;
+    }
     const matchingTask = taskList.find(t => (t.project?.name || t.project?.title || t.project?.id) === key);
     return matchingTask?.project?.color || '#6b7084';
   };
@@ -2207,10 +2608,21 @@ const MyTasksPage: React.FC = () => {
 
   return (
     <div className="project-detail my-tasks">
-      <div className="my-tasks__header">
+      <div className="my-tasks__header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1>{t('tasks.title')}</h1>
-          <p>{t('tasks.sub_title', { count: counts.active })}</p>
+          <p>{t(taskSource === 'assigned_to_me' ? 'tasks.sub_title' : ('tasks.delegated_sub_title' as any), { count: counts.active })}</p>
+        </div>
+        <div className="my-tasks__source-switcher" style={{ marginRight: '16px' }}>
+          <Segmented
+            value={taskSource}
+            onChange={(val: any) => setTaskSource(val)}
+            options={[
+              { label: t('tasks.source.assigned_to_me' as any), value: 'assigned_to_me' },
+              { label: t('tasks.source.delegated_by_me' as any), value: 'delegated_by_me' },
+            ]}
+            size="middle"
+          />
         </div>
       </div>
 
@@ -2247,6 +2659,7 @@ const MyTasksPage: React.FC = () => {
               { value: 'status', label: t('tasks.group.status') },
               { value: 'project', label: t('tasks.group.project') },
               { value: 'due_date', label: t('tasks.group.due_date' as any) },
+              { value: 'assignee', label: t('tasks.group.assignee' as any) || 'Người nhận việc' },
             ] as const;
 
             const groupPanel = (
@@ -2353,6 +2766,12 @@ const MyTasksPage: React.FC = () => {
                   const priorityOrder = ['urgent', 'high', 'medium', 'low', 'none'];
                   return priorityOrder.indexOf(keyA) - priorityOrder.indexOf(keyB);
                 }
+                if (groupBy === 'assignee') {
+                  const unassignedKey = t('tasks.panel.unassigned' as any);
+                  if (keyA === unassignedKey) return 1;
+                  if (keyB === unassignedKey) return -1;
+                  return keyA.localeCompare(keyB, locale);
+                }
                 return 0;
               });
 
@@ -2414,9 +2833,9 @@ const MyTasksPage: React.FC = () => {
                             )}
                           </div>
                           <div className="my-tasks__task-info">
-                            <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div className="title" style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                               <TaskTypeBadge type={task.type || 'task'} size="icon" />
-                              {task.title}
+                              <span style={{ flex: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{task.title}</span>
                             </div>
                             <div className="subtitle">
                               <span className="task-id">#{task.id}</span>
@@ -2451,91 +2870,9 @@ const MyTasksPage: React.FC = () => {
                               <UserOutlined style={{ color: 'var(--text-muted, #9ca0b0)', fontSize: '10px' }} />
                             </div>
                           )}
-                          <div className="my-tasks__task-actions" onClick={(e) => e.stopPropagation()}>
+                           <div className="my-tasks__task-actions" onClick={(e) => e.stopPropagation()}>
                             {(() => {
-                              const editPerm = canEditTask(task);
-                              const deletePerm = canDeleteTask(task);
-                              const menuItems: any[] = [];
-
-                              menuItems.push({
-                                key: 'details',
-                                label: (
-                                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <InfoCircleOutlined style={{ fontSize: '13px' }} />
-                                    {t('tasks.panel.view_details')}
-                                  </span>
-                                ),
-                                onClick: () => setSelectedTask(task)
-                              });
-
-                              const isWatching = me?.id && task.watcher_ids?.includes(me.id);
-                              if (Number(task.assignee_id) !== Number(me?.id)) {
-                                menuItems.push({
-                                  key: 'toggle_watch',
-                                  label: (
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                      {isWatching ? (
-                                        <EyeInvisibleOutlined style={{ fontSize: '13px' }} />
-                                      ) : (
-                                        <EyeOutlined style={{ fontSize: '13px' }} />
-                                      )}
-                                      {isWatching ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
-                                    </span>
-                                  ),
-                                  onClick: () => handleToggleWatchTask(task.id)
-                                });
-                              }
-
-                              if (editPerm) {
-                                if (!isTaskDone(task)) {
-                                  menuItems.push({
-                                    key: 'done',
-                                    label: (
-                                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <CheckCircleOutlined style={{ fontSize: '13px' }} />
-                                        {t('tasks.action.mark_done' as any)}
-                                      </span>
-                                    ),
-                                    onClick: () => handleMarkDone(task.id)
-                                  });
-                                  menuItems.push({
-                                    key: 'logtime',
-                                    label: (
-                                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <ClockCircleOutlined style={{ fontSize: '13px' }} />
-                                        {t('tasks.panel.log_time')}
-                                      </span>
-                                    ),
-                                    onClick: () => setLogTimeTaskId(task.id)
-                                  });
-                                }
-                                menuItems.push({
-                                  key: 'reassign',
-                                  label: (
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                      <UserOutlined style={{ fontSize: '13px' }} />
-                                      {t('tasks.action.reassign' as any)}
-                                    </span>
-                                  ),
-                                  onClick: () => handleReassignOpen(task.id, task.assignee_id, task.project_id)
-                                });
-                              }
-                              if (deletePerm) {
-                                if (menuItems.length > 0) {
-                                  menuItems.push({ type: 'divider' });
-                                }
-                                menuItems.push({
-                                  key: 'delete',
-                                  label: (
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                      <DeleteOutlined style={{ fontSize: '13px' }} />
-                                      {t('tasks.action.delete')}
-                                    </span>
-                                  ),
-                                  danger: true,
-                                  onClick: () => handleDeleteTask(task.id)
-                                });
-                              }
+                              const menuItems = getTaskMenuItems(task);
                               if (menuItems.length === 0) return null;
                               return (
                                 <Dropdown
@@ -2604,7 +2941,36 @@ const MyTasksPage: React.FC = () => {
                     >
                       <div className="project-detail__task-card-top">
                         <span className="project-detail__task-card-id">#{task.id}</span>
-                        <div className={`project-detail__task-card-priority project-detail__task-card-priority--${task.priority}`} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} onClick={(e) => e.stopPropagation()}>
+                          <div className={`project-detail__task-card-priority project-detail__task-card-priority--${task.priority}`} />
+                          {(() => {
+                            const menuItems = getTaskMenuItems(task);
+                            if (menuItems.length === 0) return null;
+                            return (
+                              <Dropdown
+                                menu={{ items: menuItems }}
+                                trigger={['click']}
+                              >
+                                <button 
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    padding: '2px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: 'var(--text-muted)',
+                                    outline: 'none',
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreOutlined style={{ fontSize: '14px' }} />
+                                </button>
+                              </Dropdown>
+                            );
+                          })()}
+                        </div>
                       </div>
                       <div className="project-detail__task-card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <TaskTypeBadge type={task.type || 'task'} size="icon" />
@@ -2653,6 +3019,31 @@ const MyTasksPage: React.FC = () => {
         />
       )}
 
+      {/* Workflow Transition Guided Modal */}
+      {wfModalOpen && wfTask && (
+        <WorkflowTransitionModal
+          open={wfModalOpen}
+          task={wfTask}
+          targetStatus={wfTargetStatus}
+          targetStatusName={wfTargetStatusName}
+          failedRules={wfFailedRules}
+          projectMembers={projectMembers.length > 0 ? projectMembers : (wfTask.project?.members || [])}
+          projectLabels={wfTask.project?.labels || []}
+          onCancel={() => {
+            setWfModalOpen(false);
+            setWfTask(null);
+          }}
+          onSuccess={(updatedTask) => {
+            setWfModalOpen(false);
+            setWfTask(null);
+            refreshTasks();
+            if (onWfSuccessCallback) {
+              onWfSuccessCallback(updatedTask);
+            }
+          }}
+        />
+      )}
+
       {/* Action Modals */}
       <Modal
         title={t('tasks.modal.reassign_title' as any)}
@@ -2676,7 +3067,17 @@ const MyTasksPage: React.FC = () => {
               String(option?.title ?? '').toLowerCase().includes(input.toLowerCase())
             }
           >
-            {projectMembers.map(u => (
+            {projectMembers.filter(u => {
+              const taskToReassign = taskList.find(t => t.id === actionTaskId);
+              const isSubtask = taskToReassign?.parent_task_id !== null && taskToReassign?.parent_task_id !== undefined;
+              
+              const userProjectRole = selectedProjectForReassign?.members?.find((pm: any) => pm.id === me?.id)?.pivot?.role || 'member';
+              const isProjCreator = selectedProjectForReassign?.created_by === me?.id;
+              const isManager = userProjectRole === 'manager' || isProjCreator || me?.role === 'admin';
+              
+              if (isManager || isSubtask) return true;
+              return Number(u.id) === Number(me?.id);
+            }).map(u => (
               <Select.Option key={u.id} value={u.id} label={u.name} title={`${u.name} ${u.email}`}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0' }}>
                   <div style={{

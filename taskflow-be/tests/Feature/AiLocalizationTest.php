@@ -748,6 +748,22 @@ class AiLocalizationTest extends TestCase
 
         $_ENV['OPENAI_API_KEY'] = '';
     }
+
+    public function testStripConversationalIntro()
+    {
+        $service = app(\App\Services\OpenAiService::class);
+
+        $input1 = "Dưới đây là bản mô tả chi tiết và chuyên nghiệp cho tác vụ \"Test\" (Kiểm thử), được thiết kế để áp dụng trong quy trình quản lý dự án:\n\nTên tác vụ: Kiểm thử (Test)\n1. Mục tiêu (Objective)\n...";
+        $expected1 = "Tên tác vụ: Kiểm thử (Test)\n1. Mục tiêu (Objective)\n...";
+        $this->assertEquals($expected1, $service->stripConversationalIntro($input1));
+
+        $input2 = "Here is a professional description for the task 'test':\n\n### Overview\nDescription text";
+        $expected2 = "### Overview\nDescription text";
+        $this->assertEquals($expected2, $service->stripConversationalIntro($input2));
+
+        $input3 = "### Overview\nThis is a standard description without intro.";
+        $this->assertEquals($input3, $service->stripConversationalIntro($input3));
+    }
 }
 
 

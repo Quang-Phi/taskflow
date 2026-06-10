@@ -350,7 +350,7 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
                       const isClosed = statusInfo.isClosed;
 
                       const popoverContent = (
-                        <div style={{ minWidth: '220px', padding: '4px' }}>
+                        <div style={{ minWidth: '220px', maxWidth: '360px', padding: '4px' }}>
                           <h4 style={{ 
                             margin: '0 0 10px 0', 
                             fontSize: '13px', 
@@ -359,11 +359,13 @@ export const TaskCalendar: React.FC<TaskCalendarProps> = ({ tasks, onSelectTask,
                             borderBottom: '1px solid var(--border-color)', 
                             paddingBottom: '6px',
                             display: 'flex',
-                            alignItems: 'center',
+                            alignItems: 'flex-start',
                             gap: '6px'
                           }}>
-                            <TaskTypeBadge type={task.type || 'task'} size="icon" />
-                            <span>{task.title}</span>
+                            <span style={{ display: 'inline-flex', marginTop: '2px', flexShrink: 0 }}>
+                              <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                            </span>
+                            <span style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>{task.title}</span>
                           </h4>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px' }}>
                             {/* Status */}

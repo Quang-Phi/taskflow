@@ -15,12 +15,16 @@ class WorkflowTransition extends Model
         'from',
         'to',
         'allowed_roles',
+        'allowed_task_roles',
+        'require_all_reviewers',
         'is_global',
     ];
 
     protected $casts = [
-        'allowed_roles' => 'array',
-        'is_global' => 'boolean',
+        'allowed_roles'       => 'array',
+        'allowed_task_roles'  => 'array',
+        'is_global'           => 'boolean',
+        'require_all_reviewers' => 'boolean',
     ];
 
     public function workflow(): BelongsTo

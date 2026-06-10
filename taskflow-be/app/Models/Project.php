@@ -49,12 +49,41 @@ class Project extends Model
     }
 
     /**
-     * Accessor for workflow attribute.
-     * Returns a default unrestricted workflow with auto-generated transitions when null.
+     * Single workflow (HasOne) – kept for backward compatibility.
      */
     public function workflow(): HasOne
     {
         return $this->hasOne(Workflow::class);
+    }
+
+    /**
+     * All workflows for this project (HasMany) – used for I8 per-task-type.
+     */
+    public function workflows(): HasMany
+    {
+        return $this->hasMany(Workflow::class);
+    }
+
+    /**
+     * I8: Find the workflow that applies to a given task type.
+     * Falls back to the default (applies_to = null) workflow if none found.
+     */
+    public function getWorkflowForTaskType(?string $taskType): ?Workflow
+    {
+        $allWorkflows = $this->hasMany(Workflow::class)->get();
+
+        // Find workflow specific for this task type
+        $specific = $allWorkflows->first(function ($wf) use ($taskType) {
+            $appliesTo = $wf->applies_to;
+            return !empty($appliesTo) && $taskType && in_array($taskType, $appliesTo);
+        });
+
+        if ($specific) {
+            return $specific;
+        }
+
+        // Fallback: workflow with applies_to = null (default for all types)
+        return $allWorkflows->first(fn($wf) => empty($wf->applies_to));
     }
 
     public function getWorkflowAttribute()
@@ -82,6 +111,7 @@ class Project extends Model
                     'from' => $t->from,
                     'to' => $t->to,
                     'allowed_roles' => $t->allowed_roles ?? [],
+                    'allowed_task_roles' => $t->allowed_task_roles ?? [],
                     'rules' => $rules,
                 ];
 
@@ -172,7 +202,7 @@ class Project extends Model
      * @param bool $isAdmin Whether the user is a system admin (bypasses all restrictions)
      * @return array List of available transitions
      */
-    public function getAvailableTransitions(string $fromStatus, string $userRole, bool $isAdmin = false, $userId = null): array
+    public function getAvailableTransitions(string $fromStatus, string $userRole, bool $isAdmin = false, $userId = null, $task = null): array
     {
         $workflow = $this->workflow;
         $mode = $workflow['mode'] ?? 'unrestricted';
@@ -212,6 +242,24 @@ class Project extends Model
 
             // Admin bypasses all role restrictions
             if ($isAdmin || empty($allowedRoles) || in_array($userRole, $allowedRoles)) {
+                // Check allowed_task_roles if specified
+                $allowedTaskRoles = $transition['allowed_task_roles'] ?? [];
+                if (!empty($allowedTaskRoles) && !$isAdmin) {
+                    if (!$task) {
+                        continue;
+                    }
+                    $userMatchesTaskRole = false;
+                    if (in_array('assignee', $allowedTaskRoles, true) && (int)$task->assignee_id === (int)$userId) {
+                        $userMatchesTaskRole = true;
+                    }
+                    if ((in_array('reporter', $allowedTaskRoles, true) || in_array('creator', $allowedTaskRoles, true)) && (int)$task->creator_id === (int)$userId) {
+                        $userMatchesTaskRole = true;
+                    }
+                    if (!$userMatchesTaskRole) {
+                        continue;
+                    }
+                }
+
                 // ALSO check restrict_role rules if userId is provided
                 $rules = $transition['rules'] ?? [];
                 $allowedByRules = true;
@@ -250,6 +298,24 @@ class Project extends Model
             $allowedRoles = $globalTransition['allowed_roles'] ?? [];
 
             if ($isAdmin || empty($allowedRoles) || in_array($userRole, $allowedRoles)) {
+                // Check allowed_task_roles if specified
+                $allowedTaskRoles = $globalTransition['allowed_task_roles'] ?? [];
+                if (!empty($allowedTaskRoles) && !$isAdmin) {
+                    if (!$task) {
+                        continue;
+                    }
+                    $userMatchesTaskRole = false;
+                    if (in_array('assignee', $allowedTaskRoles, true) && (int)$task->assignee_id === (int)$userId) {
+                        $userMatchesTaskRole = true;
+                    }
+                    if ((in_array('reporter', $allowedTaskRoles, true) || in_array('creator', $allowedTaskRoles, true)) && (int)$task->creator_id === (int)$userId) {
+                        $userMatchesTaskRole = true;
+                    }
+                    if (!$userMatchesTaskRole) {
+                        continue;
+                    }
+                }
+
                 // ALSO check restrict_role rules if userId is provided
                 $rules = $globalTransition['rules'] ?? [];
                 $allowedByRules = true;
@@ -306,5 +372,10 @@ class Project extends Model
     public function customFields(): HasMany
     {
         return $this->hasMany(CustomField::class);
+    }
+
+    public function milestones(): HasMany
+    {
+        return $this->hasMany(Milestone::class);
     }
 }

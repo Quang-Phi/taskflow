@@ -267,6 +267,16 @@ const DashboardPage: React.FC = () => {
           </>
         );
       }
+      const autoMatch = details.match(/Auto-transitioned status from '(.*)' to '(.*)' after all reviews approved/);
+      if (autoMatch) {
+        const fromName = getStatusText(autoMatch[1]);
+        const toName = getStatusText(autoMatch[2]);
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã tự động chuyển trạng thái của' : 'auto-transitioned status of'} {taskLink} {lang === 'vi' ? `từ "${fromName}" sang "${toName}" sau khi toàn bộ phê duyệt được thông qua` : `from "${fromName}" to "${toName}" after all reviews approved`}
+          </>
+        );
+      }
       return (
         <>
           <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đổi trạng thái của' : 'changed status of'} {taskLink}
@@ -459,6 +469,275 @@ const DashboardPage: React.FC = () => {
       );
     }
 
+    if (act.action === 'added_attachment') {
+      const match = details.match(/Attached file "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đính kèm tệp' : 'attached file'} <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span> {lang === 'vi' ? 'vào công việc' : 'to task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'renamed_attachment') {
+      const match = details.match(/Renamed attachment "(.*)" to "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đổi tên tệp đính kèm' : 'renamed attachment'} <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span> {lang === 'vi' ? 'thành' : 'to'} <span style={{ fontStyle: 'italic' }}>"{match[2]}"</span> {lang === 'vi' ? 'trong công việc' : 'in task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'deleted_attachment') {
+      const match = details.match(/Deleted attachment "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã xóa tệp đính kèm' : 'deleted attachment'} <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span> {lang === 'vi' ? 'khỏi công việc' : 'from task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'created_checklist') {
+      const match = details.match(/Created checklist: "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã tạo checklist' : 'created checklist'} <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span> {lang === 'vi' ? 'trong công việc' : 'in task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'updated_checklist') {
+      const match = details.match(/Renamed checklist to "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đổi tên checklist thành' : 'renamed checklist to'} <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span> {lang === 'vi' ? 'trong công việc' : 'in task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'deleted_checklist') {
+      const match = details.match(/Deleted checklist "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã xóa checklist' : 'deleted checklist'} <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span> {lang === 'vi' ? 'khỏi công việc' : 'from task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'created_checklist_item') {
+      const match = details.match(/Added item "(.*)" to checklist "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã thêm mục' : 'added item'} <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span> {lang === 'vi' ? 'vào checklist' : 'to checklist'} <span style={{ fontStyle: 'italic' }}>"{match[2]}"</span> {lang === 'vi' ? 'của công việc' : 'of task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'updated_checklist_item') {
+      const checkedMatch = details.match(/Marked item "(.*)" as (checked|unchecked)/);
+      if (checkedMatch) {
+        const itemName = checkedMatch[1];
+        const isChecked = checkedMatch[2] === 'checked';
+        if (lang === 'vi') {
+          return (
+            <>
+              <strong>{act.user_name}</strong> đã đánh dấu mục <span style={{ fontStyle: 'italic' }}>"{itemName}"</span> là {isChecked ? 'đã hoàn thành' : 'chưa hoàn thành'} trong công việc {taskLink}
+            </>
+          );
+        } else {
+          return (
+            <>
+              <strong>{act.user_name}</strong> marked item <span style={{ fontStyle: 'italic' }}>"{itemName}"</span> as {isChecked ? 'checked' : 'unchecked'} in task {taskLink}
+            </>
+          );
+        }
+      }
+
+      const renameMatch = details.match(/Renamed checklist item "(.*)" to "(.*)"/);
+      if (renameMatch) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã đổi tên mục checklist' : 'renamed checklist item'} <span style={{ fontStyle: 'italic' }}>"{renameMatch[1]}"</span> {lang === 'vi' ? 'thành' : 'to'} <span style={{ fontStyle: 'italic' }}>"{renameMatch[2]}"</span> {lang === 'vi' ? 'trong công việc' : 'in task'} {taskLink}
+          </>
+        );
+      }
+
+      const updateMatch = details.match(/Updated item "(.*)" in checklist "(.*)"/);
+      if (updateMatch) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã cập nhật mục' : 'updated item'} <span style={{ fontStyle: 'italic' }}>"{updateMatch[1]}"</span> {lang === 'vi' ? 'trong checklist' : 'in checklist'} <span style={{ fontStyle: 'italic' }}>"{updateMatch[2]}"</span> {lang === 'vi' ? 'của công việc' : 'of task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'deleted_checklist_item') {
+      const match = details.match(/Deleted item "(.*)" from checklist "(.*)"/);
+      if (match) {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? 'đã xóa mục' : 'deleted item'} <span style={{ fontStyle: 'italic' }}>"{match[1]}"</span> {lang === 'vi' ? 'khỏi checklist' : 'from checklist'} <span style={{ fontStyle: 'italic' }}>"{match[2]}"</span> {lang === 'vi' ? 'của công việc' : 'of task'} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'converted_checklist_item') {
+      const match = details.match(/Converted item "(.*)" to (task|subtask)/);
+      if (match) {
+        const typeLabel = match[2] === 'subtask' ? (lang === 'vi' ? 'công việc con' : 'subtask') : (lang === 'vi' ? 'công việc' : 'task');
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? `đã chuyển đổi mục "${match[1]}" thành ${typeLabel} của công việc` : `converted item "${match[1]}" to ${typeLabel} of task`} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'linked_task') {
+      const match = details.match(/Linked this task \((.*)\) to #(\d+) '(.*)'/);
+      if (match) {
+        const type = match[1];
+        const targetId = match[2];
+        const targetTitle = match[3];
+        const typeLabels: Record<string, string> = lang === 'vi' ? {
+          'blocks': 'chặn',
+          'is blocked by': 'bị chặn bởi',
+          'relates to': 'liên quan đến',
+          'duplicates': 'trùng lặp với',
+          'is duplicated by': 'bị trùng lặp bởi',
+          'clones': 'nhân bản',
+          'is cloned from': 'được nhân bản từ',
+          'causes': 'nguyên nhân của',
+          'is caused by': 'gây ra bởi'
+        } : {};
+        const typeLabel = typeLabels[type] || type;
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? `đã liên kết công việc này (${typeLabel}) với công việc #${targetId} "${targetTitle}"` : `linked this task (${type}) to task #${targetId} "${targetTitle}"`}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'unlinked_task') {
+      const match = details.match(/Removed link \((.*)\) to #(\d+) '(.*)'/);
+      if (match) {
+        const type = match[1];
+        const targetId = match[2];
+        const targetTitle = match[3];
+        const typeLabels: Record<string, string> = lang === 'vi' ? {
+          'blocks': 'chặn',
+          'is blocked by': 'bị chặn bởi',
+          'relates to': 'liên quan đến',
+          'duplicates': 'trùng lặp với',
+          'is duplicated by': 'bị trùng lặp bởi',
+          'clones': 'nhân bản',
+          'is cloned from': 'được nhân bản từ',
+          'causes': 'nguyên nhân của',
+          'is caused by': 'gây ra bởi'
+        } : {};
+        const typeLabel = typeLabels[type] || type;
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? `đã gỡ bỏ liên kết (${typeLabel}) với công việc #${targetId} "${targetTitle}"` : `removed link (${type}) to task #${targetId} "${targetTitle}"`}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'added_assignee' || act.action === 'added_reviewer' || act.action === 'added_reporter') {
+      const match = details.match(/Added (.*) as (assignee|reviewer|reporter)/);
+      if (match) {
+        const name = match[1];
+        const role = match[2];
+        const roleLabels: Record<string, string> = lang === 'vi' ? {
+          'assignee': 'người thực hiện',
+          'reviewer': 'người phê duyệt',
+          'reporter': 'người báo cáo'
+        } : {};
+        const roleLabel = roleLabels[role] || role;
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? `đã thêm ${name} làm ${roleLabel} cho công việc` : `added ${name} as ${role} to task`} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'removed_assignee' || act.action === 'removed_reviewer' || act.action === 'removed_reporter') {
+      const match = details.match(/Removed (.*) from task/);
+      if (match) {
+        const name = match[1];
+        const role = act.action.replace('removed_', '');
+        const roleLabels: Record<string, string> = lang === 'vi' ? {
+          'assignee': 'người thực hiện',
+          'reviewer': 'người phê duyệt',
+          'reporter': 'người báo cáo'
+        } : {};
+        const roleLabel = roleLabels[role] || role;
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? `đã xóa ${name} khỏi vai trò ${roleLabel} của công việc` : `removed ${name} (${role}) from task`} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'changed_role') {
+      const match = details.match(/Changed (.*)'s role from (assignee|reviewer|reporter) to (assignee|reviewer|reporter)/);
+      if (match) {
+        const name = match[1];
+        const fromRole = match[2];
+        const toRole = match[3];
+        const roleLabels: Record<string, string> = lang === 'vi' ? {
+          'assignee': 'người thực hiện',
+          'reviewer': 'người phê duyệt',
+          'reporter': 'người báo cáo'
+        } : {};
+        return (
+          <>
+            <strong>{act.user_name}</strong> {lang === 'vi' ? `đã đổi vai trò của ${name} từ ${roleLabels[fromRole] || fromRole} thành ${roleLabels[toRole] || toRole} trong công việc` : `changed ${name}'s role from ${fromRole} to ${toRole} in task`} {taskLink}
+          </>
+        );
+      }
+    }
+
+    if (act.action === 'review_approved' || act.action === 'review_rejected') {
+      const isApproved = act.action === 'review_approved';
+      const commentMatch = details.match(/Comment: (.*)/);
+      const commentText = commentMatch ? `: "${commentMatch[1]}"` : '';
+      const transitionMatch = details.match(/transition '(.*)'/);
+      const transitionLabel = transitionMatch ? ` (${transitionMatch[1]})` : '';
+      if (lang === 'vi') {
+        return (
+          <>
+            <strong>{act.user_name}</strong> đã {isApproved ? 'phê duyệt' : 'từ chối'} yêu cầu review cho bước chuyển{transitionLabel} của công việc {taskLink}{commentText}
+          </>
+        );
+      } else {
+        return (
+          <>
+            <strong>{act.user_name}</strong> {isApproved ? 'approved' : 'rejected'} review for transition{transitionLabel} on task {taskLink}{commentText}
+          </>
+        );
+      }
+    }
+
     // Default fallback
     const fallbackMap: Record<string, string> = lang === 'vi' ? {
       created: 'đã tạo',
@@ -603,7 +882,10 @@ const DashboardPage: React.FC = () => {
                       );
                     })()}
                     <div className="dashboard__task-item-content">
-                      <div className="dashboard__task-item-title"><TaskTypeBadge type={task.type || 'task'} size="icon" />{task.title}</div>
+                      <div className="dashboard__task-item-title">
+                        <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                        <span style={{ flex: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{task.title}</span>
+                      </div>
                       <div className="dashboard__task-item-meta">
                         <span className="dashboard__task-item-project">
                           <span className="dot" style={{ background: task.project_color }} />

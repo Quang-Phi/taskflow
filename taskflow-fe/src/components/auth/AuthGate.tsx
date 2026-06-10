@@ -29,13 +29,30 @@ const PUBLIC_URL = (typeof process !== 'undefined' && process.env && process.env
  */
 const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   const [overlayStep, setOverlayStep] = useState<AuthOverlayStep | null>(() => {
-    // Handle ?token= in URL (OAuth callback from backend)
+    // FIX #4: Backend now sends ?code= (short-lived one-time code) instead of ?token=
+    // We exchange the code via POST to never have the token in the URL / browser history.
     const params = new URLSearchParams(window.location.search);
-    const urlToken = params.get('token');
-    if (urlToken) {
-      localStorage.setItem('taskflow_token', urlToken);
+    const urlCode = params.get('code');
+    if (urlCode) {
+      // Strip the code from URL immediately (before async exchange)
       window.history.replaceState({}, document.title, window.location.pathname);
-      return null; // authenticated, no overlay
+      // Exchange the one-time code for a token via POST (async, show overlay during exchange)
+      fetch(`${BACKEND_URL}/api/auth/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ code: urlCode }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.token) {
+            localStorage.setItem('taskflow_token', data.token);
+            window.location.reload();
+          }
+        })
+        .catch(() => {
+          // If exchange fails, the overlay will stay and trigger redirect
+        });
+      return 'authenticating'; // show overlay during exchange
     }
     const existingToken = localStorage.getItem('taskflow_token');
     return existingToken ? null : 'preparing'; // show overlay if no token

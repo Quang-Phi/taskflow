@@ -224,14 +224,13 @@
 
     &-title {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 6px;
       font-size: $font-size-base;
       color: $text-primary;
       font-weight: 500;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
+      white-space: normal;
+      word-break: break-word;
     }
 
     &-meta {

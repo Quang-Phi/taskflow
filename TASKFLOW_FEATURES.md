@@ -1,663 +1,795 @@
 # TASKFLOW – MÔ TẢ CHI TIẾT CHỨC NĂNG
 
-## SIDEBAR (Thanh điều hướng trái)
-
-**Luôn hiển thị, thu gọn được (icon-only mode)**
-
-| Icon | Mục           | Mô tả                    |
-| ---- | -------------- | -------------------------- |
-| 🏠   | Home/Dashboard | Trang tổng quan           |
-| 📋   | Projects       | Danh sách dự án         |
-| ✅   | My Tasks       | Task được giao cho tôi |
-| 📥   | Inbox          | Thông báo & yêu cầu    |
-| 📊   | Analytics      | Báo cáo & thống kê     |
-| ⭐   | Evaluations    | Đánh giá nhân viên    |
-| 👥   | Members        | Quản lý nhân viên      |
-| ⚙️ | Settings       | Cài đặt hệ thống      |
-
-**Phần "Projects" trong sidebar:**
-
-- Hiển thị danh sách dự án lấy động từ API backend `/projects`
-- Mỗi dự án: màu dot + tên + badge số task active (số task chưa ở trạng thái 'done')
-- Nhấn dự án → chuyển hướng trực tiếp đến trang chi tiết dự án `/projects/:id`
-- Nút **"+ New Project"** ở cuối danh sách mở form tạo dự án mới tại `/projects?create=true`
+> Tài liệu này được tạo bằng cách quét toàn bộ codebase thực tế (Frontend & Backend).  
+> Cập nhật lần cuối: **2026-06-08**
 
 ---
 
-## 1. DASHBOARD (Trang chủ)
+## LAYOUT & ĐIỀU HƯỚNG CHUNG
 
-Trang tổng quan cung cấp cái nhìn toàn diện về các chỉ số dự án, công việc cá nhân, tiến độ chung và các hoạt động mới nhất của đội ngũ.
+### Header (Thanh tiêu đề trên cùng)
 
-### 1.1 Khung lời chào động (Personalized Greeting)
+Thanh header hiển thị trên toàn bộ các trang sau khi đăng nhập, bao gồm:
 
-- Hiển thị lời chào cá nhân hóa động ở đầu trang dựa trên thời gian thực trong ngày (Sáng ☀️, Trưa ☕, Chiều ☀️, Tối 🌙).
-- Nội dung câu chào được chọn ngẫu nhiên từ danh sách các câu chào độc đáo (4 mẫu câu chào khác nhau cho mỗi khoảng thời gian trong ngày) bằng cả Tiếng Việt và Tiếng Anh tùy theo ngôn ngữ hệ thống hiện tại.
-- Kèm theo dòng tóm tắt số lượng công việc đang hoạt động của người dùng (ví dụ: `Bạn đang có X công việc cần xử lý.`).
-
-### 1.2 Khung thẻ chỉ số (Overview Stat Cards)
-
-Hệ thống cung cấp 4 thẻ số liệu thống kê lớn, hỗ trợ click chuột để chuyển hướng và lọc nhanh:
-
-- **Tổng dự án (Total Projects)**: Tổng số dự án hiện có trong hệ thống. Click để chuyển hướng tới danh sách dự án `/projects`.
-- **Đang làm (Active Tasks)**: Số lượng công việc chưa ở trạng thái 'Hoàn thành' (Done). Click để chuyển hướng tới `/my-tasks?filter=active`.
-- **Trễ hạn (Overdue Tasks)**: Số lượng công việc có hạn chót trước ngày hiện tại và chưa hoàn thành. Hiển thị badge xu hướng đỏ kèm số lượng cụ thể. Click để chuyển hướng tới `/my-tasks?filter=overdue`.
-- **Đã hoàn thành (Completed Tasks)**: Số lượng công việc đã hoàn thành. Hiển thị badge xu hướng xanh lá kèm số lượng cụ thể. Click để chuyển hướng tới `/my-tasks?filter=done`.
-
-### 1.3 Hệ thống Widget chức năng (Dashboard Grid)
-
-Giao diện được tổ chức theo bố cục Grid thông minh 2 cột:
-
-#### Cột Trái (My Tasks & Recent Activity)
-
-- **Công việc (My Tasks)**:
-  - Hiển thị danh sách các công việc được giao cho tài khoản hiện tại.
-  - Mỗi dòng công việc hiển thị:
-    - Dải màu cạnh trái tương ứng với Mức độ ưu tiên (Khẩn cấp `urgent`, Cao `high`, Trung bình `medium`, Thấp `low`, Không ưu tiên `none`).
-    - Vòng tròn tiến độ trạng thái: Hiển thị icon dấu tick xanh lục tròn đầy đối với task đã hoàn thành. Đối với task chưa hoàn thành, hiển thị vòng tròn tiến độ vẽ bằng `conic-gradient` tương ứng với vị trí/tỷ lệ của trạng thái hiện tại trong quy trình dự án.
-    - Tiêu đề công việc kèm Badge Loại công việc (Task, Bug, Feature).
-    - Tên dự án kèm chấm tròn màu đại diện của dự án đó.
-    - Ngày hạn chót (tô màu đỏ nếu công việc bị trễ hạn).
-    - Avatar của người được giao.
-  - Click vào một công việc → Mở Drawer chi tiết công việc (**Task Detail Panel** trượt từ cạnh phải).
-  - Nút **"Xem tất cả →"** ở đầu widget để chuyển sang trang `/my-tasks`.
-- **Hoạt động gần đây (Recent Activity)**:
-  - Hiển thị dòng thời gian các tương tác mới nhất của các thành viên trong đội ngũ.
-  - Mỗi dòng hoạt động hiển thị: Avatar người thực hiện, Tên người thực hiện, Hành động tương ứng (đã tạo, đã cập nhật, đã đổi trạng thái, đã giao lại, đã bình luận vào, đã xóa), Tiêu đề công việc đính kèm, Chi tiết thay đổi cụ thể và Thời gian tương đối (ví dụ: `vừa xong`, `15 phút trước`, `2 ngày trước`).
-
-#### Cột Phải (Project Progress & Upcoming Deadlines)
-
-- **Tiến độ dự án (Project Progress)**:
-  - Liệt kê các dự án đang hoạt động kèm thanh tiến độ hoàn thành dạng phần trăm (`%`).
-  - Thanh tiến độ được tô màu đồng bộ theo màu nhận diện của từng dự án.
-  - Click vào một dòng dự án → Chuyển hướng trực tiếp tới trang chi tiết dự án đó (`/projects/:id`).
-- **Thời hạn sắp tới (Upcoming Deadlines)**:
-  - Danh sách các công việc sắp đến hạn trong vòng 7 ngày tới.
-  - Hiển thị tiêu đề công việc, dự án đi kèm và nhãn thời gian thông minh (hiển thị `Hôm nay` nếu hạn chót là ngày hiện tại, hiển thị `Ngày mai` nếu hạn chót là ngày kế tiếp, hoặc hiển thị ngày tháng rút gọn).
-  - Click vào một dòng công việc → Mở Drawer chi tiết công việc (**Task Detail Panel**).
+- **Breadcrumb trái**: Hiển thị tên mục hiện tại (Dashboard).
+- **Thanh tìm kiếm toàn cục (Global Search)**: Click vào thanh tìm kiếm hoặc nhấn `Cmd+K` (Mac) / `Ctrl+K` (Windows) để mở Search Modal (`SearchModal.tsx`). Tìm kiếm tasks, projects, members, comments theo từ khóa và nhảy tới kết quả.
+- **Nút "+ Thêm mới"** (Create): Dropdown menu với 2 lựa chọn:
+  - **New Task**: Kích hoạt sự kiện `open-create-task-modal` để mở modal tạo task toàn cục từ bất kỳ trang nào.
+  - **New Project**: Điều hướng tới `/projects?create=true`.
+- **Bộ đếm giờ (Timer Widget)**: Nằm giữa thanh header, hiển thị trạng thái bộ đếm hiện tại:
+  - **Không có timer chạy**: Hiển thị nút "Bắt đầu tính giờ" (đồng hồ + text). Click mở Popover chi tiết.
+  - **Đang chạy timer**: Hiển thị badge đỏ có chấm nhấp nháy (pulse animation) kèm thời gian đang đếm dạng `HH:MM:SS` và nút ■ Stop. Click mở Popover chi tiết gồm:
+    - Thanh tiến độ hôm nay (`X.XXh / 8.0h`).
+    - Thông tin task đang chạy timer: tên task, tên project, thời gian đếm.
+    - Nút Stop timer.
+    - Danh sách các time log hôm nay (tên task, project, thời lượng), có thể tái khởi động từng log hoặc xóa.
+    - Nút điều hướng nhanh: Dashboard / My Tasks.
+  - Timer đồng bộ qua WebSocket (`Laravel Echo` / `Reverb`). Sử dụng `taskflow_server_time_offset` (localStorage) để bù lệch thời gian client-server.
+- **Nút thông báo** (chuông 🔔): Hiển thị badge số unread notifications. Click → điều hướng tới trang `/inbox`.
+- **Avatar người dùng**: Dropdown menu:
+  - **Hồ sơ của tôi** → Mở Modal hồ sơ (Profile Modal) hiển thị avatar/tên/email/phone/work_position/vai trò (chỉ xem, dữ liệu đồng bộ từ Bitrix24).
+  - **Cài đặt hệ thống** → `/settings`.
+- **Nhận thông báo real-time**: Header lắng nghe kênh WebSocket private `App.Models.User.{user.id}`:
+  - Sự kiện `.notification.received`: Tự động tăng badge unread, dispatch `notification-received-global` event và hiển thị **toast thông báo** (Ant Design Notification) ở góc dưới phải với icon màu tương ứng loại thông báo.
+  - Sự kiện `.timer.updated`: Refresh timer data ngay lập tức.
 
 ---
 
-## 2. PROJECTS (Quản lý dự án)
+### Sidebar (Thanh điều hướng trái)
 
-Hệ thống quản lý, phân bổ và theo dõi các dự án của doanh nghiệp theo hai chế độ xem Grid và List trực quan, hỗ trợ phân quyền và các bộ lọc tìm kiếm mạnh mẽ.
+**Có thể thu gọn (icon-only mode)** bằng nút Collapse ở cuối sidebar. Trạng thái được áp dụng cho toàn bộ layout.
 
-### 2.1 Trang danh sách dự án (Projects Page)
+| Icon | Mục | Đường dẫn |
+|------|-----|-----------|
+| 🏠 | Dashboard | `/` |
+| 📋 | Projects | `/projects` |
+| ✅ | My Tasks | `/my-tasks` |
+| 🕐 | Timesheet | `/timesheet` |
+| 📥 | Inbox | `/inbox` (kèm badge số unread) |
+| 📊 | Analytics | `/analytics` |
+| ⭐ | Evaluations | `/evaluations` |
+| 👥 | Members | `/members` |
+| ⚙️ | Settings | `/settings` |
 
-- **Đầu trang (Header)**:
-  - Tiêu đề chính: "Dự án" kèm phụ đề hiển thị tổng số lượng dự án (`t('projects.subtitle', { count: totalProjects })`).
-  - Nút hành động: **"+ Tạo dự án"** (`Create Project`) màu nổi bật để mở Modal tạo dự án mới.
-- **Thanh công cụ (Toolbar)**:
-  - Ô tìm kiếm dự án theo tên với cơ chế Debounce tự động (300ms) giúp tối ưu hóa hiệu năng tải dữ liệu.
-  - Bộ nút lọc nhanh trạng thái dự án: **Tất cả**, **Đang hoạt động** (Active), **Tạm dừng** (On Hold), **Đã hoàn thành** (Completed).
-  - Bộ chuyển đổi chế độ xem (View Toggle) giữa **Lưới (Grid)** 🔲 và **Danh sách (List)** ☰.
-- **Chế độ Lưới (Grid View)**:
-  - Hiển thị danh sách dự án dưới dạng các thẻ (Cards) trực quan.
-  - Mỗi thẻ dự án hiển thị:
-    - Dải màu nhận diện dự án chạy ngang đầu thẻ.
-    - Icon dự án tùy chỉnh hoặc chữ cái viết tắt tên dự án được bọc trong vòng tròn màu tương ứng.
-    - Tên dự án và Mã dự án (`#ID`).
-    - Mô tả ngắn của dự án (tự động hiển thị "Không có mô tả" nếu để trống).
-    - Thanh tiến độ hoàn thành dạng phần trăm (`%`) được tính toán động dựa trên tỷ lệ số công việc đã xong (`done`) trên tổng số công việc của dự án.
-    - Danh sách avatar thành viên tham gia (tối đa hiển thị stack 3 avatar đầu, kèm badge số lượng thành viên dư `+N` nếu có).
-    - Badge thông tin thống kê số lượng: công việc đã hoàn thành/tổng số công việc.
-    - Hạn chót của dự án (hiển thị màu đỏ nếu quá hạn).
-    - Badge trạng thái màu sắc riêng biệt: Đang hoạt động (`active` - màu xanh), Tạm dừng (`on-hold` - màu vàng), Đã hoàn thành (`completed` - màu xanh lá).
-    - Nút hành động **Chỉnh sửa** (bút chì ✏️) hiển thị nhanh nếu người dùng có quyền chỉnh sửa dự án (`canEditProject`).
-- **Chế độ Danh sách (List View)**:
-  - Hiển thị bảng dữ liệu với các cột rõ ràng: Tên dự án (kèm icon và ID), Tiến độ (thanh progress bar + % số), Trạng thái, Thành viên (avatar stack), Hạn chót, và Cột Hành động.
-  - Nút menu **⋮** ở cuối dòng mở dropdown cho phép: Chỉnh sửa (Edit) hoặc Xóa (Delete - yêu cầu xác nhận qua hộp thoại xóa của hệ thống).
-- **Tải thêm dữ liệu (Infinite Scroll)**:
-  - Trang danh sách dự án hỗ trợ tải thêm dữ liệu tự động khi cuộn chuột xuống cuối màn hình dựa trên kích thước trang (12 dự án/trang).
-
-### 2.2 Tạo và Chỉnh sửa dự án (Create/Edit Project Modal)
-
-- **Modal Tạo dự án mới (Create Project)**:
-  - **Chọn biểu tượng và màu sắc (ProjectIconPicker)**: Bộ chọn màu sắc chủ đạo và icon đại diện riêng biệt cho từng dự án để dễ dàng nhận diện trên hệ thống.
-  - **Tên dự án**: Ô nhập văn bản (bắt buộc, hiển thị dấu `*`).
-  - **Mô tả dự án**: Khung nhập thông tin chi tiết.
-  - **Thời gian thực hiện**: Ô chọn Ngày bắt đầu và Ngày kết thúc (tự động kiểm tra tính hợp lệ: ngày kết thúc không được nhỏ hơn ngày bắt đầu).
-  - **Thành viên (Members)**:
-    - Ô chọn thành viên tích hợp tìm kiếm theo tên hoặc email thông qua Popover.
-    - Hiển thị danh sách avatar các thành viên đã chọn kèm nút xóa nhanh `x` màu đỏ ở góc avatar.
-    - Nếu số lượng thành viên chọn vượt quá 10, các thành viên còn lại sẽ được thu gọn vào badge `+N` dạng popover cho phép xem chi tiết và xóa.
-  - **Footer**: Nút hủy (`Cancel`) để đóng modal và nút tạo mới (`Create Project`) màu nổi bật.
-- **Modal Chỉnh sửa dự án (Edit Project Modal)**:
-  - Cho phép chỉnh sửa toàn bộ các thông tin của dự án hiện tại bao gồm: Icon, màu sắc, tên, mô tả, ngày bắt đầu, ngày kết thúc, trạng thái dự án.
-  - Nút **"Xóa dự án"** (chỉ hiển thị đối với Admin hoặc người tạo dự án) kèm hộp thoại xác nhận xóa nhằm tránh thao tác nhầm lẫn gây mất dữ liệu.
-
-### 2.3 Trang Chi tiết dự án (Project Detail Page)
-
-Trang chi tiết dự án được thiết kế với giao diện cao cấp, hiển thị tiêu đề, icon và mã dự án kèm bộ quản lý trạng thái (`Manage Statuses`) ở đầu trang. Nội dung trang được tổ chức thành 3 tab điều hướng ngang:
-
-1. **Công việc (Tasks)**: Quản lý và lập kế hoạch công việc theo 3 chế độ xem: Danh sách (List), Bảng (Board), và Lịch biểu (Calendar).
-2. **Bảng công (Timesheet)**: Theo dõi chi tiết thời gian làm việc của các thành viên trong dự án.
-3. **Thành viên (Members)**: Quản lý danh sách thành viên dự án và vai trò của họ.
+**Phần "Projects" mở rộng trong sidebar:**
+- Có mũi tên `▶` để toggle expand/collapse danh sách project.
+- Hiển thị danh sách dự án tải từ API `/api/projects` (lazy load khi cần, refresh khi có sự kiện `projects-changed`).
+- Mỗi project: icon màu nhỏ (14×14px) + tên project + badge số task **active** (task chưa done và không phải subtask).
+- Click dự án → `/projects/:id`.
+- Nút **"+ New Project"** ở cuối danh sách → `/projects?create=true`.
+- Badge unread inbox cập nhật realtime qua sự kiện `unread-count-changed`.
 
 ---
 
-### 2.4 Tab: Công việc (Sub-tab Tasks)
+## 1. DASHBOARD (Trang chủ – `/`)
 
-Hệ thống quản lý công việc của dự án hỗ trợ bộ lọc mạnh mẽ và 3 chế độ xem linh hoạt:
+### 1.1 Lời chào cá nhân hóa (Personalized Greeting)
 
-- **Thanh công cụ lọc và tìm kiếm**:
-  - Ô tìm kiếm nhanh công việc theo tiêu đề.
-  - Nút lọc nâng cao **Filter** mở Popover 4 danh mục:
-    - **Assignee**: Lọc theo người được giao (Giao cho tôi / Tìm thành viên / Không giao cho ai / Chỉ công việc chưa giao).
-    - **Status**: Lọc theo trạng thái công việc (chọn nhiều trạng thái).
-    - **Priority**: Lọc theo mức độ ưu tiên (Khẩn cấp, Cao, Trung bình, Thấp).
-    - **Type**: Lọc theo loại công việc (Task hoặc Bug).
-  - Nút **Nhóm theo (Group By)** (chỉ hỗ trợ khi ở chế độ xem List): Cho phép nhóm danh sách công việc theo **Trạng thái (Status)**, **Độ ưu tiên (Priority)**, hoặc **Hạn chót (Due Date)**.
-- **Chế độ xem Danh sách (List View)**:
-  - Danh sách công việc được chia nhóm theo cấu hình đã chọn (mặc định nhóm theo Trạng thái). Mỗi nhóm hỗ trợ nút đóng/mở (Collapse/Expand) và nút **"+"** để tạo nhanh công việc inline trong nhóm đó.
-  - Mỗi dòng công việc hiển thị:
-    - Checkbox trạng thái: Click vào checkbox sẽ tự động thay đổi trạng thái công việc qua các bước tiếp theo trong quy trình.
-    - Badge loại công việc: Icon đặc trưng của Task (tích xanh) hoặc Bug (con bọ đỏ).
-    - Mã công việc (ví dụ: `ACME-23`) có màu tương ứng theo mức độ ưu tiên.
-    - Tiêu đề công việc (click để mở **Task Detail Panel** trượt từ cạnh phải).
-    - Nhãn dán công việc (Labels/Tags) dạng chip màu sắc.
-    - Avatar của người được giao.
-    - Hạn chót của công việc (hiển thị màu đỏ nếu bị trễ hạn).
-    - Icon cờ mức độ ưu tiên.
-    - Nút hành động **⋮** hiển thị khi hover để mở menu tương tác nhanh (Ghi nhận thời gian, Theo dõi, Đánh dấu hoàn thành, Xóa).
-- **Chế độ xem Bảng (Board View - Kanban)**:
-  - Phân chia công việc thành các cột trạng thái tương ứng trong dự án (ví dụ: To Do, In Progress, Review, Done).
-  - Nút **"Add Task"** ở cuối mỗi cột để tạo nhanh công việc mới thuộc trạng thái đó.
-  - Hỗ trợ kéo thả (Drag and Drop) các thẻ công việc (Task Cards) để cập nhật trạng thái trực quan, hoặc cập nhật nhanh qua menu của card.
-  - Nhấp chuột vào thẻ công việc để mở panel chi tiết từ cạnh phải.
-- **Chế độ xem Lịch biểu (Calendar View)**:
-  - Xem mục **2.6** để biết chi tiết tính năng lưới lịch biểu tháng, dải băng công việc (event bars), thuật toán xếp track song song và popover xem nhanh.
+- Lời chào dựa trên giờ hiện tại trong ngày: **Sáng** ☀️ (5–11h), **Trưa** ☕ (11–13h), **Chiều** ☀️ (13–18h), **Tối** 🌙 (18–5h).
+- Nội dung chào được chọn ngẫu nhiên từ mảng 4 câu chào cho mỗi khung giờ, hỗ trợ song ngữ Việt/Anh theo ngôn ngữ hiện tại của user.
+- Dòng phụ: `Bạn đang có X công việc cần xử lý.` (số lượng task active của user).
 
----
+### 1.2 Thẻ chỉ số tổng quan (Stat Cards)
 
-### 2.5 Tab: Bảng công (Sub-tab Timesheet)
+4 thẻ số liệu lớn, mỗi thẻ có thể click để điều hướng và lọc:
 
-Bảng công tích hợp biểu đồ trực quan giúp theo dõi hiệu quả phân bổ thời gian thực tế:
+- **Tổng dự án**: Tổng số project trong hệ thống. Click → `/projects`.
+- **Đang làm**: Số task chưa ở trạng thái closed (type='closed'). Click → `/my-tasks?filter=active`.
+- **Trễ hạn**: Task có `due_date < hôm nay` và chưa hoàn thành. Hiển thị badge xu hướng đỏ. Click → `/my-tasks?filter=overdue`.
+- **Đã hoàn thành**: Số task đã done/closed. Badge xu hướng xanh lá. Click → `/my-tasks?filter=done`.
 
-- **Bộ lọc báo cáo**:
-  - Khoảng thời gian: Hôm nay, Tuần này, Tháng này, hoặc Chọn khoảng ngày tùy chỉnh (`Custom`).
-  - Thành viên: Lọc bảng công của tất cả thành viên hoặc một thành viên cụ thể.
-  - Nút **"Ghi nhận thời gian"** mở modal ghi công việc thủ công.
-- **Thẻ chỉ số tổng quan (Timesheet Stats)**:
-  - **Tổng giờ (Total Time)**: Tổng số giờ làm việc đã ghi nhận kèm số lượng bản ghi logs.
-  - **Tích cực nhất (Most Active)**: Tên thành viên đóng góp nhiều thời gian làm việc nhất cùng số giờ cụ thể.
-  - **Tốn thời gian nhất (Most Logged Task)**: Tên công việc tiêu hao nhiều thời gian thực hiện nhất.
-- **Biểu đồ phân tích (Recharts)**:
-  - Biểu đồ **Thời gian theo thành viên** (Horizontal Bar Chart): So sánh số giờ đóng góp của từng người.
-  - Biểu đồ **Thời gian theo công việc** (Pie Chart): Phân tích tỷ trọng thời gian tiêu hao của tối đa 7 công việc hàng đầu.
-- **Bảng chi tiết nhật ký thời gian (Time Logs Table)**:
-  - Hiển thị các cột: Thành viên (avatar + tên), Công việc (link click mở chi tiết task), Ghi chú/Mô tả, Thời gian bắt đầu, Thời lượng (h), và cột Hành động.
-  - Hỗ trợ xóa dòng nhật ký thời gian nếu là Admin hoặc chính người ghi nhận bản ghi đó.
+### 1.3 Widget Công việc của tôi (My Tasks Widget)
+
+- Hiển thị danh sách task được giao cho user hiện tại.
+- Mỗi dòng task hiển thị:
+  - **Dải màu trái** theo priority: `urgent` = đỏ, `high` = cam, `medium` = vàng, `low` = xanh dương.
+  - **Vòng tròn trạng thái**: Icon ✅ nếu task đã closed. Nếu chưa: vòng tròn vẽ bằng `conic-gradient` tương ứng với % vị trí của status hiện tại trong workflow project (ví dụ: status thứ 2/4 = 50%).
+  - **Badge loại**: `TaskTypeBadge` cho Task hoặc Bug.
+  - Tên project (chấm màu + tên).
+  - Hạn chót (đỏ nếu quá hạn).
+  - Avatar assignee.
+- Click task → Mở **Task Detail Panel** (drawer trượt phải).
+- Nút **"Xem tất cả →"** → `/my-tasks`.
+
+### 1.4 Widget Tiến độ dự án (Project Progress)
+
+- Liệt kê các project đang active kèm thanh progress bar % hoàn thành.
+- Màu thanh progress đồng bộ với màu nhận diện project.
+- Click project → `/projects/:id`.
+
+### 1.5 Widget Thời hạn sắp tới (Upcoming Deadlines)
+
+- Danh sách task có due_date trong vòng **7 ngày tới**.
+- Nhãn thông minh: `Hôm nay` / `Ngày mai` / ngày tháng rút gọn.
+- Click task → Mở Task Detail Panel.
+
+### 1.6 Widget Hoạt động gần đây (Recent Activity)
+
+- Timeline các hoạt động mới nhất của toàn team: tạo task, đổi trạng thái, giao lại, bình luận, xóa,...
+- Mỗi dòng: avatar + tên người thực hiện + hành động + tên task + chi tiết thay đổi + thời gian tương đối (`vừa xong`, `15 phút trước`, `2 ngày trước`,...).
 
 ---
 
-### 2.6 Tab: Thành viên (Sub-tab Members)
+## 2. PROJECTS (Quản lý dự án – `/projects`)
 
-Trang quản lý nhân sự tham gia dự án:
+### 2.1 Danh sách dự án (Projects Page)
 
-- **Bảng danh sách thành viên**:
-  - Hiển thị danh sách thành viên gồm: Avatar, Tên thành viên, Địa chỉ email, Vai trò trong dự án, Số lượng công việc đang được giao trong dự án này, Ngày tham gia dự án, và Cột Hành động.
-- **Phân quyền và Vai trò**:
-  - Người tạo dự án được gắn nhãn cố định là **Owner** (Chủ sở hữu).
-  - Manager/Admin dự án có quyền thay đổi vai trò của các thành viên khác trực tiếp thông qua hộp chọn dropdown Select (giữa vai trò `Manager` và `Member`). Các thay đổi được đồng bộ ngay xuống cơ sở dữ liệu.
-- **Hành động quản lý**:
-  - Nút **"Thêm thành viên"** (`Add Member`) để tìm kiếm và mời người dùng khác trong workspace vào dự án.
-  - Nút xóa thành viên khỏi dự án kèm hộp thoại xác nhận hủy tư cách thành viên.
+**Header:**
+- Tiêu đề "Dự án" + phụ đề tổng số project.
+- Nút **"+ Tạo dự án"** → mở `CreateProjectModal`.
 
----
+**Toolbar:**
+- Ô tìm kiếm theo tên (Debounce 300ms).
+- Bộ lọc nhanh: **Tất cả** / **Đang hoạt động** (`active`) / **Tạm dừng** (`on-hold`) / **Đã hoàn thành** (`completed`).
+- Chuyển đổi **Lưới (Grid) 🔲 / Danh sách (List) ☰**.
 
-## 3. MY TASKS (Task của tôi)
+**Grid View:**
+- Mỗi thẻ project gồm:
+  - Dải màu ngang đầu thẻ.
+  - Icon project (tùy chỉnh hoặc chữ cái viết tắt, bo tròn).
+  - Tên + `#ID`.
+  - Mô tả ngắn (hiện "Không có mô tả" nếu trống).
+  - Thanh progress bar % hoàn thành (task `status='done'` / tổng task).
+  - Avatar stack thành viên (tối đa 3, kèm `+N` nếu nhiều hơn).
+  - Số liệu: `✅ done/total`, hạn chót project.
+  - Badge trạng thái màu (active/on-hold/completed).
+  - Nút ✏️ chỉnh sửa (chỉ nếu `canEditProject` = admin/creator/manager dự án).
 
-Hiển thị toàn bộ các công việc được giao cho người dùng hiện tại (bản thân). Hỗ trợ chuyển đổi qua lại giữa **3 chế độ xem (View modes)**: List (Danh sách), Board (Bảng Kanban), và Calendar (Lịch biểu).
+**List View:**
+- Bảng cột: Tên + icon, Tiến độ (bar + %), Trạng thái, Thành viên (avatar stack, tối đa 4), Hạn chót, Cột hành động.
+- Nút `⋮` mở dropdown: Chỉnh sửa / Xóa (với confirm dialog).
 
-### 3.1 Giao diện và các Bộ lọc chung (Header)
+**Phân quyền:**
+- `canEditProject`: Admin **hoặc** creator project **hoặc** thành viên có role `manager`.
+- `canDeleteProject`: Chỉ Admin **hoặc** creator project.
 
-- **Tiêu đề**: "My tasks" kèm dòng mô tả số lượng công việc đang thực hiện.
-- **Thanh công cụ**:
-  - Ô tìm kiếm nhanh công việc theo tên.
-  - Nút **Lọc (Filter)**: Lọc nhanh danh sách công việc theo trạng thái, độ ưu tiên, hoặc loại công việc.
-  - Toggle View (góc phải): Cho phép chuyển đổi giữa **Danh sách (List)** ☰, **Bảng (Board)** 🔲, và **Lịch biểu (Calendar)** 📅.
+**Tải thêm (Infinite Scroll):**
+- Ngưỡng 150px từ đáy trang → tự động tăng page.
+- 12 project/trang, hỗ trợ pagination từ API.
 
----
+### 2.2 Tạo dự án (Create Project Modal)
 
-### 3.2 Các Chế độ xem chi tiết
+Fields:
+- **Icon & Màu sắc** (`ProjectIconPicker`): Chọn màu + upload ảnh icon (base64) hoặc chọn emoji/icon từ thư viện.
+- **Tên dự án** (bắt buộc, `*`).
+- **Mô tả**.
+- **Ngày bắt đầu** và **Ngày kết thúc** (validate: end >= start).
+- **Thành viên**: Popover tìm kiếm + avatar stack (tối đa hiển thị 10, phần còn lại thu gọn vào badge `+N`). Mỗi avatar có nút `x` xóa nhanh.
+- Footer: Nút Hủy + Nút "Tạo dự án".
 
-#### A. Chế độ Danh sách (List View)
+### 2.3 Chỉnh sửa dự án (Edit Project Modal)
 
-*Là chế độ xem mặc định, hiển thị công việc dạng danh sách phân nhóm.*
-
-- **Tính năng Gom nhóm (Groupby)**: Tương tự như ở trang chi tiết dự án (hỗ trợ nhóm theo Trạng thái, Độ ưu tiên, Hạn chót), ở trang My Tasks người dùng có thể gom nhóm công việc thêm theo tiêu chí **Dự án (Project)** để dễ dàng phân biệt các nguồn công việc:
-  - **Độ ưu tiên (Priority)**: Khẩn cấp / Cao / Trung bình / Thấp / Không ưu tiên.
-  - **Trạng thái (Status)**: Cần làm / Đang thực hiện / Hoàn thành,...
-  - **Dự án (Project)**: Phân nhóm công việc theo từng dự án tham gia.
-  - **Hạn chót (Due date)**: Quá hạn / Hôm nay / Tuần này / Tuần tới / Không có hạn chót.
-- **Thông tin trên mỗi dòng công việc**:
-  - Checkbox trạng thái: Click để thay đổi nhanh trạng thái công việc.
-  - Icon loại công việc (Task/Bug).
-  - Tiêu đề công việc kèm ID task (click → mở Drawer chi tiết).
-  - Tên dự án sở hữu công việc đó kèm dot màu đại diện.
-  - Badge trạng thái hiện tại.
-  - Hạn chót công việc (hiển thị màu đỏ nếu quá hạn).
-  - Avatar của người thực hiện (chính user).
-  - Nút **⋮** hành động nhanh → {Xem chi tiết, Theo dõi/Bỏ theo dõi (ẩn đối với các công việc đã gán cho bản thân), Giao lại, Đánh dấu hoàn thành, Ghi nhận giờ làm, Xoá}.
-
-#### B. Chế độ Bảng (Board View)
-
-- **Cấu trúc**: Phân chia công việc thành các cột trạng thái dọc (Cần làm / Đang thực hiện / Hoàn thành).
-- **Điểm tương đồng**: Tương tự như Kanban Board của dự án, hỗ trợ kéo thả card để đổi trạng thái nhanh, click card để mở Drawer chi tiết.
-- **Điểm khác biệt**: Board này hiển thị các công việc được giao cho bản thân **tổng hợp từ tất cả các dự án khác nhau** đang tham gia chứ không giới hạn trong một dự án duy nhất. Mỗi task card sẽ hiển thị rõ tên dự án bên dưới tiêu đề để nhận biết.
-
-#### C. Chế độ Lịch biểu (Calendar View)
-
-- **Cấu trúc**: Hiển thị lưới ngày tháng (gồm 6 tuần - 42 ngày) đồng bộ qua component `TaskCalendar.tsx`.
-- **Điểm tương đồng**: Sử dụng đầy đủ tính năng của Lịch biểu dự án (Chọn tháng/năm, Today, chuyển tháng bằng `<`/`>`, dải băng công việc xếp track song song tránh chồng lấn, popover xem nhanh thông tin khi hover).
-- **Điểm khác biệt**: Lịch biểu này hiển thị toàn bộ lịch trình các công việc được giao cho bản thân **thuộc tất cả các dự án** trong hệ thống. Tương tự, nút **"+"** khi hover vào ô ngày cho phép tạo nhanh công việc mới.
+- Chỉnh sửa: icon, màu, tên, mô tả, ngày bắt đầu, ngày kết thúc, trạng thái project.
+- Nút **"Xóa dự án"** (chỉ Admin/Creator), kèm `DeleteConfirmModal` xác nhận.
 
 ---
 
-## 4. TASK DETAIL (Chi tiết task)
+## 3. PROJECT DETAIL (Chi tiết dự án – `/projects/:id`)
 
-Mở dưới dạng **right panel slide-in (Drawer)** từ cạnh phải màn hình.
+### 3.1 Header dự án
 
-### Header (Thanh đầu Drawer)
+- Icon + tên + `#ID` dự án.
+- Badge trạng thái dự án.
+- Nút **"Manage Statuses"** → mở `WorkflowEditor` (`/projects/:id/workflow`).
+- Nút **Chỉnh sửa** (✏️) và **Xóa** (🗑️) với phân quyền `canEditProject` / `canDeleteProject`.
+- Nút Back ← quay về `/projects`.
 
-- **Mã số công việc**: Dạng `#ID` của task (ví dụ: `#23`).
-- **Mục người theo dõi (Watchers)**:
-  - Hiển thị số lượng người theo dõi task: `Người theo dõi ({count})`.
-  - **Nút Theo dõi / Bỏ theo dõi (Watch / Unwatch)**: Cho phép user đăng ký nhận notification khi task thay đổi. *Đặc biệt: Ẩn nút theo dõi này nếu task đã được gán cho chính bản thân user (self-assigned tasks) để tránh dư thừa.*
-  - **Danh sách avatar**: Hiển thị avatar của các thành viên đang theo dõi task.
-- **Hành động xóa task**: Nút icon thùng rác màu đỏ, kích hoạt Modal xác nhận xóa chuyên dụng (`DeleteConfirmModal.tsx`) để thực hiện Soft Delete (Xóa mềm).
-- **Nút đóng drawer**: Icon đóng (X) ở góc phải.
+### 3.2 Tabs điều hướng
 
-### Layout 2 cột chính
+Trang chi tiết dự án có **3 tab chính** (sử dụng Ant Design Tabs hoặc radio buttons):
 
-#### CỘT TRÁI (Nội dung chính & Thuộc tính):
+#### Tab 1: Công việc (Tasks)
 
-- **Đường dẫn vị trí (Breadcrumb)**: Tên dự án / Tên task cha (nếu là task con) / Loại task (Task/Bug) + ID.
-- **Tương tác loại công việc**: Click vào badge `TaskTypeBadge` để đổi nhanh loại công việc giữa Task và Bug.
-- **Tiêu đề công việc (Task Title)**: Nhập văn bản trực tiếp (Tự động co giãn dòng, click để sửa), tự động lưu khi focus out hoặc nhấn Enter.
-- **Bảng thuộc tính (Properties Grid)**: Được thiết kế trong một khung xám nền tối premium, bao gồm:
-  - **Trạng thái (Status)**: Lựa chọn trạng thái công việc qua `ClickUpStatusPicker`.
-  - **Người thực hiện (Assignee)**: Dropdown chọn thành viên tham gia dự án để gán task.
-  - **Độ ưu tiên (Priority)**: Flag icon picker lựa chọn mức độ ưu tiên (Khẩn cấp / Cao / Trung bình / Thấp / Không ưu tiên).
-  - **Ước tính (Estimate)**: Tự động hiển thị thời gian ước tính dựa trên Start Date và Due Date.
-  - **Thời gian (Time)**: Date picker kép để chọn ngày giờ bắt đầu (`start_date`) và hạn chót (`due_date`). Bị khóa không cho sửa khi đã có ghi nhận thời gian bấm giờ để tránh sai lệch dữ liệu.
-  - **Theo dõi thời gian (Time Tracking)**: Bộ tính giờ chạy trực tiếp (Time Tracker) với nút Play/Stop hoặc cho phép log tay thủ công (Manual Time Log).
-  - **Trường tự định nghĩa (Custom Fields)**: Hiển thị các trường dữ liệu động của dự án (Text, Date, Dropdown, Number, Checkbox...) hỗ trợ chỉnh sửa và xóa trực tiếp.
-- **Mô tả công việc (Description)**: Cho phép click để soạn thảo trực tiếp, hỗ trợ tự động lưu.
-- **Tính năng Trí tuệ nhân tạo (AI Assistant)**:
-  - Nhấp vào nút "Viết bằng AI" (được trang bị tại các phần Mô tả, Công việc con, và Danh sách kiểm tra) để mở khung nhập liệu thông minh (AI Brain modal).
-  - Cho phép tự động tạo mô tả chi tiết, sinh danh sách công việc con (subtasks), hoặc lập danh sách kiểm tra (checklists) tối ưu theo ngữ cảnh.
-- **Danh sách công việc con (Subtasks)**: Cho phép tạo nhanh task con trực tiếp, hiển thị tiến độ hoàn thành dạng checkbox, giao người làm và đặt độ ưu tiên cho từng task con.
-- **Danh sách kiểm tra (Checklists)**: Danh sách kiểm tra có thể tạo nhiều nhóm, check hoàn thành hoặc chuyển đổi checklist item trực tiếp thành subtask hoặc task độc lập.
-- **Tài liệu đính kèm (Attachments)**:
-  - Kéo thả tệp hoặc click tải file, quản lý tải xuống/đổi tên/xoá file đính kèm.
-  - **Xem trước trực tuyến (Preview)**: Tích hợp trình xem trực tiếp các tệp tin dạng hình ảnh (jpg, png, git, webp,...), PDF hoặc tài liệu văn phòng trực tiếp trong Drawer mà không cần tải về máy.
+**Toolbar lọc & tìm kiếm:**
+- Ô tìm kiếm theo tiêu đề task (DebouncedSearchInput, 300ms).
+- Nút **Filter** (Popover 4 danh mục, có badge active count):
+  - **Assignee**: My Tasks (chỉ task của tôi), Unassigned (chưa giao), chọn từng thành viên project.
+  - **Status**: Chọn nhiều trạng thái (hiển thị màu dot tương ứng).
+  - **Priority**: Urgent / High / Medium / Low.
+  - **Type**: Task / Bug.
+  - Footer popover: Nút "Clear filter" + hiển thị số lượng bộ lọc đang active.
+- Nút **Group By** (chỉ List View): Dropdown nhóm theo **Status** / **Priority** / **Due Date**.
+- Bộ chuyển đổi View: **List** ☰ / **Board** 🔲 / **Calendar** 📅.
+- Nút **"+ Add task"** → mở `CreateTaskModal`.
 
-#### CỘT PHẢI (Hoạt động & Thảo luận - Sidebar):
+**Chế độ List View:**
+- Danh sách task nhóm theo cấu hình chọn (mặc định: Status).
+- Mỗi nhóm có thể collapse/expand, kèm nút `+` tạo task inline trong nhóm.
+- Mỗi dòng task:
+  - **Checkbox trạng thái**: Click chuyển sang status tiếp theo trong workflow (có workflow modal nếu cần thêm thông tin).
+  - Badge type (Task/Bug).
+  - Mã task (`PROJECT-ID` dạng `ACME-23`, màu theo priority).
+  - Tiêu đề (click → mở Task Detail Panel).
+  - Labels (chip màu).
+  - Avatar assignee.
+  - Hạn chót (đỏ nếu quá hạn).
+  - Icon cờ priority.
+  - Nút `⋮` khi hover: **Ghi nhận thời gian** / **Theo dõi (Watch)** / **Đánh dấu hoàn thành** / **Xóa**.
+- Hỗ trợ kéo thả (Drag & Drop) reorder task trong cùng nhóm hoặc chuyển nhóm.
 
-Giao diện tab chuyển đổi linh hoạt:
+**Chế độ Board View (Kanban):**
+- Mỗi cột = một status trong project workflow.
+- Nút **"+ Add Task"** ở đầu/cuối cột tạo task nhanh với status đó.
+- Hỗ trợ kéo thả card giữa các cột (cập nhật status ngay).
+- Mỗi thẻ task: tên, type badge, priority icon, assignee avatar, due date (đỏ nếu quá hạn), label chips.
+- Click card → Mở Task Detail Panel.
+- **Kéo thả realtime**: Sử dụng `@dnd-kit/core` kết hợp với WebSocket broadcast để đồng bộ vị trí task.
 
-- **Bình luận (Comments)**: Đăng bình luận dạng văn bản (hỗ trợ Emoji picker, đính kèm hình ảnh/tài liệu và nhắc tên thành viên `@mention`). Hiển thị danh sách bình luận, trả lời (Replies), và thả biểu cảm (Reactions) trên từng bình luận.
-- **Lịch sử hoạt động (Lịch sử / Activity History)**: Timeline log chi tiết ghi lại toàn bộ hoạt động CRUD, thay đổi người phụ trách, thời gian, trạng thái, người cập nhật,... giúp theo dõi tiến độ chính xác.
+**Chế độ Calendar View:**
+- Lưới 6 tuần / 42 ngày (component `TaskCalendar.tsx`).
+- Dải băng event task (event bars) trải dài theo date range (start_date → due_date).
+- **Thuật toán xếp track song song**: Tự động tính toán position (track row) để các task có date range chồng lấn không bị đè lên nhau.
+- Hover ô ngày → nút `+` tạo task nhanh với ngày được chọn.
+- Click task bar → Popover xem nhanh (tên, status, assignee, due date).
+- Điều hướng: Nút `<` `>` chuyển tháng + chọn tháng/năm từ Dropdown + nút "Hôm nay" về tháng hiện tại.
 
-### Tự động lưu (Auto-save)
+#### Tab 2: Bảng công (Timesheet – Sub-tab)
 
-Mọi chỉnh sửa thuộc tính ở cả cột trái và mô tả/tiêu đề đều được tự động lưu về cơ sở dữ liệu qua các API call tức thời mà không cần nút "Save" thủ công.
+*(Tích hợp tương tự trang Timesheet toàn cục nhưng giới hạn trong phạm vi dự án)*
 
-*Lưu ý: Tất cả các thao tác xóa dự án và xóa công việc đều được thực hiện dưới dạng Soft Delete (xóa mềm) bằng cách cập nhật trường `deleted_at` trong cơ sở dữ liệu.*
+- Bộ lọc: Khoảng thời gian (Hôm nay / Tuần này / Tháng này / Tùy chỉnh), Thành viên.
+- Thẻ thống kê: Tổng giờ + số logs, Thành viên active nhất, Task tốn thời gian nhất.
+- **Biểu đồ (Recharts)**:
+  - Horizontal Bar Chart: Thời gian theo thành viên.
+  - Pie Chart: Phân tích top 7 task tốn nhiều giờ nhất.
+- Bảng chi tiết log: Thành viên, Task (link mở detail), Ghi chú, Thời gian bắt đầu, Thời lượng (h), Xóa (Admin hoặc chính người ghi).
 
----
+#### Tab 3: Thành viên (Members – Sub-tab)
 
-## 5. TẠO TASK MỚI
+- Bảng danh sách thành viên dự án: Avatar, Tên, Email, Vai trò trong project, Số task đang giao, Ngày tham gia.
+- Dropdown đổi vai trò: `Manager` ↔ `Member` (chỉ Manager/Admin/Owner có thể thay đổi, đồng bộ ngay xuống DB).
+- Nhãn **Owner** cố định cho người tạo project.
+- Nút **"+ Thêm thành viên"**: Popover tìm kiếm user trong workspace và mời vào project.
+- Nút xóa thành viên (kèm confirm dialog).
 
-Hệ thống hỗ trợ 3 cách để tạo một công việc mới:
+### 3.3 Task Detail Panel (Right Drawer – Dùng chung toàn hệ thống)
 
-**Cách 1: Tạo nhanh (Quick create)** – Nhấn nút **"+"** trực tiếp tại tiêu đề cột Kanban → hiển thị inline form nhỏ:
+*Component `TaskDetailPanel.tsx` (274KB), dùng chung cho Dashboard, My Tasks, Project Detail, Inbox.*
 
-```
-[Nhập tiêu đề công việc] [Assignee] [Due date] [Nhấn Enter để tạo nhanh]
-```
+**Header Panel:**
+- `#ID` task.
+- **Watchers**: Số người theo dõi + danh sách avatar. Nút **Watch/Unwatch** (ẩn nếu task đang gán cho chính user).
+- Nút **Xóa task** (🗑️, mở `DeleteConfirmModal`, thực hiện Soft Delete).
+- Nút đóng `×`.
 
-**Cách 2: Tạo đầy đủ (Full create)** – Nhấp vào nút **"+ Tạo mới"** (hoặc nút **"+"** trên ô ngày lịch biểu) → mở **Modal Tạo công việc**:
+**Layout 2 cột:**
 
-- **Header (Dòng đầu)**:
-  - Dropdown **Chọn dự án...** để chỉ định dự án chứa công việc mới.
-  - Dấu phân cách `/`.
-  - Dropdown **Loại công việc** chọn nhanh giữa **Công việc (Task)** hoặc **Lỗi (Bug)** kèm icon phân biệt.
-- **Nội dung công việc**:
-  - Nhập **Tên công việc...** (Trường bắt buộc).
-  - Nhập **Viết mô tả hoặc chi tiết công việc...** (Textarea soạn thảo mô tả).
-- **Khung thuộc tính (Properties Grid)**: Nằm trong một hộp xám nền nhạt bo góc:
-  - **Trạng thái**: Dropdown chọn trạng thái (mặc định hiển thị trạng thái đầu tiên như "CẦN LÀM").
-  - **Người thực hiện**: Dropdown chọn thành viên dự án phụ trách công việc.
-  - **Độ ưu tiên**: Flag icon picker chọn độ ưu tiên (mặc định hiển thị "Trung bình").
-  - **Thời gian**: Chọn khoảng thời gian thực hiện (`Bắt đầu` -> `Hạn chót`).
-- **Footer (Nút dưới cùng)**:
-  - Nút **Hủy** (Cancel) để đóng modal.
-  - Nút **Tạo công việc** (Submit) để hoàn tất việc tạo mới.
+**Cột trái (Nội dung chính):**
+- **Breadcrumb**: `[Project Name] / [Parent Task tên] (nếu là subtask) / [Type Badge + ID]`.
+- **TaskTypeBadge**: Click đổi nhanh type (Task ↔ Bug).
+- **Tiêu đề task**: Textarea tự động co giãn, auto-save khi blur hoặc Enter.
+- **Bảng thuộc tính (Properties Grid)**:
+  - **Status** (`ClickUpStatusPicker`): Dropdown search + nhóm statuses (Not Started / Active / Closed). Nút mũi tên → chuyển sang status tiếp theo. Hỗ trợ `allowedStatusIds` khi workflow ở chế độ restricted.
+  - **Assignee**: Dropdown chọn thành viên project. Phân quyền: Standard member chỉ có thể assign cho bản thân (trừ subtask).
+  - **Priority** (`PriorityPicker`): Flag icon picker (Urgent/High/Medium/Low + Clear).
+  - **Estimate**: Tự động tính từ start_date → due_date (giờ).
+  - **Thời gian (Date Range)**: DatePicker kép cho `start_date` và `due_date`. **Bị khóa** nếu task đang có time entry đang chạy.
+  - **Time Tracking** (`TimeTracker`): 
+    - Nút Play ▶ (xanh lá) / Pause ⏸ (đỏ) bắt đầu/dừng timer.
+    - Hiển thị thời gian đang chạy (đỏ, nhấp nháy pulse dot) hoặc tổng giờ đã log.
+    - Popover **Add Manual Time**: nhập giờ/phút + ghi chú, nút Save.
+  - **Custom Fields**: Hiển thị các trường tùy chỉnh của project (`text`, `number`, `date`, `dropdown`, `checkbox`). Click để chỉnh sửa inline, nút xóa giá trị.
+  - **Milestone**: Dropdown chọn milestone của project (nếu có).
+- **Mô tả (Description)**: Click để soạn thảo (TipTap editor). Nút **"✨ Viết bằng AI"** → Mở AI Input để sinh mô tả tự động.
+- **Subtasks**: Danh sách task con, mỗi dòng có checkbox, tiêu đề, assignee, priority. Nút tạo subtask mới. Nút **"AI → Sinh subtask"**.
+- **Checklists**: Nhiều nhóm checklist, mỗi item có checkbox + tên + assignee. Convert item thành subtask/task độc lập. Nút **"AI → Sinh checklist"**.
+- **Attachments**: Drag & drop hoặc click để upload. Xem trước ảnh inline (jpg, png, gif, webp). Nút Download / Rename / Delete.
+- **Dependencies**: Hiển thị danh sách dependencies (blocks / is blocked by / clones / is cloned by / relates to). Nút thêm dependency, nút xóa.
 
-**Cách 3: Tạo toàn cục (Global create)** – Nhấp vào nút **"+ Thêm mới"** trên thanh Header chính → chọn **"Task"** từ menu xổ xuống.
+**Cột phải (Activity & Discussion):**
+- Tab **Bình luận (Comments)**:
+  - Ô nhập comment: Emoji picker, @mention thành viên, đính kèm ảnh/file.
+  - Danh sách comment theo thứ tự mới nhất → cũ nhất.
+  - Mỗi comment: avatar, tên, nội dung, thời gian, nút Reply, Reactions (thả emoji), Edit/Delete (nếu là tác giả).
+  - Hiển thị luồng reply lồng nhau (threaded).
+- Tab **Lịch sử hoạt động (Activity)**:
+  - Timeline đầy đủ: tạo task, đổi title/status/priority/assignee/dates/description, bắt đầu/dừng timer, comment, upload file,...
+  - Mỗi dòng: avatar + tên + hành động + chi tiết thay đổi + thời gian tương đối.
 
----
-
-## 6. GIAO TASK (Manager → Employee)
-
-### Từ Task Detail
-
-1. Manager mở task → nhấn vào **"Assignees"**
-2. Dropdown hiện ra danh sách nhân viên trong project
-3. Search theo tên
-4. Click nhân viên → assign
-5. Hệ thống:
-   - Cập nhật assignee trên task
-   - Gửi in-app notification cho nhân viên
-   - Ghi vào Activity: *"Manager A assigned this task to Employee B"*
-   - Email notification (optional, cấu hình được)
-
-### Từ Board/List view
-
-- Hover vào task → click avatar slot → dropdown chọn người
-
-## 7. INBOX / NOTIFICATIONS (Hộp thư của tôi)
-
-Trang hiển thị và quản lý toàn bộ các thông báo, cập nhật trong hệ thống liên quan đến người dùng hiện tại.
-
-### 7.1 Giao diện Header Inbox
-
-- **Tiêu đề trang**: "Hộp thư của tôi".
-- **Dòng phụ đề**: `Bạn có {count} thông báo chưa đọc` hiển thị trực quan số lượng thông báo unread hiện tại.
-- **Thanh phân loại (Tabs)**:
-  - **Tất cả**: Hiển thị toàn bộ thông báo.
-  - **Chưa đọc**: Chỉ lọc ra các thông báo chưa được đọc (hiển thị kèm badge số lượng unread màu đỏ).
-  - **Nhắc tên**: Lọc các thông báo mà bạn được tag nhắc tên (`@mention`) trong bình luận.
-  - **Được giao**: Lọc các thông báo liên quan đến việc bạn được giao nhiệm vụ mới (`task_assigned`).
-- **Nút hành động nhanh**: Nút **"Đánh dấu tất cả đã đọc"** nằm ở phía bên phải thanh Tabs.
-
-### 7.2 Chi tiết mỗi mục thông báo (Notification Item)
-
-Mỗi thông báo hiển thị là một dòng ngang tương ứng, bao gồm các thành phần:
-
-- **Avatar gửi**: Vòng tròn hiển thị avatar (ảnh đại diện) của người thực hiện hành động, hoặc hiển thị chữ cái viết tắt tên của họ trên nền màu ngẫu nhiên.
-- **Nội dung thông báo**:
-  - Dạng text: `[Tên người thực hiện] [hành động] [tên công việc hoặc dự án liên quan]`
-  - Xem trước (preview): Hiển thị phần nội dung bình luận, phản hồi hoặc cảm xúc sau dấu gạch ngang `—`.
-  - Liên kết: Tên công việc (`target`) hiển thị màu tím nổi bật (click để xem chi tiết).
-- **Thời gian**: Hiển thị thời gian tương đối ngay dưới nội dung (ví dụ: `3 ngày trước`).
-- **Biểu tượng loại hành động (Type Icon)**: Nằm ở ngoài cùng bên phải dòng thông báo, hiển thị icon phân loại đi kèm màu nền mờ:
-  - Icon bình luận 💬 nền cam: Đối với hành động viết bình luận, trả lời bình luận, nhắc tên.
-  - Icon nút thích 👍 nền xanh dương: Đối với hành động bày tỏ cảm xúc trên bình luận.
-  - Icon giao việc 👤 nền tím: Đối với hành động giao việc hoặc thêm vào dự án.
-  - Icon check 📋 nền xanh dương: Đối với hành động đổi trạng thái công việc.
-  - Icon đồng hồ ⏰ nền đỏ: Đối với thông báo sắp đến hạn chót (deadline).
-  - Icon ngôi sao ⭐ nền xanh lá: Đối với thông báo đánh giá kết quả công việc.
-- **Trạng thái đọc**: Các thông báo chưa đọc hiển thị với nền sáng nhạt đặc trưng (`.unread`). Khi click vào thông báo, hệ thống tự động đánh dấu đã đọc (làm mờ nền) và chuyển hướng tới công việc liên quan.
-
-### 7.3 Tương tác và Tải thêm dữ liệu
-
-- **Cuộn vô hạn (Infinite Scroll)**: Danh sách thông báo tự động phát hiện cuộn chuột xuống đáy để tải thêm thông báo cũ hơn. Hiển thị dòng chữ `Đã tải hết thông báo` ở cuối danh sách khi đã tải xong toàn bộ.
-- **Điều hướng thông minh**: Click vào thông báo sẽ tự động chuyển hướng người dùng đến trang chi tiết:
-  - Nếu là thông báo đánh giá: Chuyển đến trang Evaluations (`/evaluations`).
-  - Nếu là thông báo thuộc task/project: Chuyển đến trang dự án tương ứng đồng thời tự động kích hoạt slide Drawer mở chi tiết công việc đó (`/projects/:project_id?task_id=:task_id`).
+**Auto-save:** Mọi thay đổi (title, status, assignee, priority, dates, description, custom fields) được lưu ngay lập tức qua API call, không cần nút Save thủ công.
 
 ---
 
-## 8. MEMBERS (Quản lý thành viên)
+## 4. WORKFLOW EDITOR (Trình chỉnh sửa quy trình – `/projects/:id/workflow`)
 
-Trang quản lý danh sách thành viên trong hệ thống và theo dõi tiến độ công việc/lịch sử đánh giá của từng cá nhân.
+### 4.1 Toolbar
 
-### 8.1 Danh sách thành viên (Members List)
+- Nút ← quay về project detail.
+- Tiêu đề: "Thiết lập Workflow – [Tên dự án]".
+- **Toggle chế độ**:
+  - **Unrestricted**: Tất cả status đều có thể chuyển sang nhau tự do (mặc định).
+  - **Restricted**: Chỉ cho phép chuyển status theo transitions đã định nghĩa. Nếu vi phạm, backend trả về lỗi và frontend hiển thị `WorkflowTransitionModal` yêu cầu nhập thêm thông tin.
+- **⇌ Thêm Transition**: Bật chế độ vẽ mũi tên. Click node nguồn → click node đích để tạo transition.
+- **⚡ Tạo nhanh (Preset)** dropdown:
+  - **All**: Tạo transition 2 chiều giữa mọi cặp status.
+  - **Linear (Chỉ tiến)**: Tuyến tính từ trái sang phải (1 chiều).
+  - **Linear Back (Tiến + Lùi)**: Tuyến tính 2 chiều.
+  - **Clear**: Xóa toàn bộ transitions.
+- Nút **Lưu Workflow** (💾): Lưu statuses, transitions, global_transitions, node positions và initial_status.
+- Nút **Hủy bỏ**: Thoát không lưu.
 
-- **Tiêu đề trang**: "Thành viên" kèm tổng số lượng thành viên hiện tại trong hệ thống.
-- **Thanh công cụ (Toolbar)**:
-  - Ô tìm kiếm: Cho phép tìm kiếm nhanh thành viên theo Tên hoặc Email, có nút "X" để xóa nhanh nội dung tìm kiếm.
-  - Bộ lọc phòng ban (Department): Dropdown chọn hiển thị thành viên thuộc một phòng ban cụ thể hoặc Tất cả.
-  - Bộ lọc vai trò (Role): Dropdown lọc theo vai trò (Tất cả / Quản trị viên / Quản lý / Nhân viên).
-- **Bảng danh sách thành viên (Columns)**:
-  - **Thành viên**: Ảnh đại diện (avatar) hoặc chữ cái viết tắt, Tên thành viên và Email.
-  - **Phòng ban**: Hiển thị các tag phòng ban tham gia (nếu tham gia nhiều hơn 2 phòng ban, hiển thị tag rút gọn `+N` kèm tooltip danh sách chi tiết các phòng ban còn lại khi hover).
-  - **Vai trò**: Badge chỉ vai trò (`admin`, `manager`, `employee`) với thiết kế màu sắc riêng biệt.
-  - **Công việc**: Thanh tiến độ (Progress bar) biểu diễn tỷ lệ hoàn thành công việc kèm số liệu trực quan `[Số task hoàn thành] / [Tổng số task được giao]`.
-  - **Trạng thái**: Nhãn chỉ trạng thái tài khoản (Hoạt động `active` kèm dot xanh lá, hoặc Ngưng hoạt động `inactive` kèm dot xám).
-  - **Hành động (`⋮`)**: Menu thao tác nhanh.
-- **Menu hành động nhanh (`⋮`)**:
-  - **Xem chi tiết**: Mở slide Drawer chi tiết thông tin của thành viên.
-  - **Chỉnh sửa**: Chỉ hiển thị đối với tài khoản là SuperAdmin (và ID thành viên khác 632). Cho phép chỉnh sửa thông tin vai trò, phòng ban của thành viên qua Edit Modal.
-- **Phân trang (Pagination)**:
-  - Nút phân trang chuyên dụng nằm ở cuối bảng.
-  - Hỗ trợ đổi số bản ghi trên mỗi trang (10, 20, 50, 100 dòng) và tự động ghi nhớ cấu hình này vào `localStorage` cho những lần truy cập sau.
+### 4.2 Canvas (Sơ đồ kéo thả)
 
-### 8.2 Drawer chi tiết thành viên (Profile Drawer)
+- Mỗi node = một status: Tên, màu sắc, badge `Initial` (nếu là status ban đầu).
+- Kéo thả node tự do để bố trí sơ đồ.
+- **Transitions** hiển thị dạng mũi tên cong giữa các node.
+- **Global Transitions**: Một số status có thể được chuyển đến từ bất kỳ status nào (ví dụ: "Cancelled").
+- Click transition → chọn xóa.
 
-Kích hoạt mở slide-in từ cạnh phải màn hình khi click vào hàng thành viên hoặc chọn hành động "Xem chi tiết".
+### 4.3 Panel bên phải (Status Management)
 
-- **Thông tin cá nhân (Header & Profile)**:
-  - Avatar đại diện lớn, Tên đầy đủ, Vai trò.
-  - Chi tiết liên lạc: Email, Số điện thoại, và ngày bắt đầu tham gia hệ thống.
-  - Nút Chỉnh sửa (chỉ hiển thị cho tài khoản SuperAdmin).
-- **Khung thống kê số liệu công việc (Stats Grid)**:
-  - **Tổng số task**: Tổng số công việc được giao.
-  - **Task đang làm**: Số lượng công việc chưa ở trạng thái 'done'.
-  - **Tỷ lệ hoàn thành**: Tỷ lệ phần trăm công việc đã hoàn thành.
-  - **Task đã xong**: Số lượng công việc đã hoàn thành (`done`).
-- **Nội dung Tab chi tiết**:
-  - **Công việc (Tasks)**: Danh sách chi tiết các công việc hiển thị: màu chấm trạng thái, tiêu đề công việc, tên dự án đính kèm và hạn chót.
-  - **Đánh giá (Evaluations)**: Danh sách kỳ đánh giá năng lực hiển thị: điểm số đánh giá, badge xếp loại (Xuất sắc ⭐, Tốt ✅, Khá 🔵, Trung bình 🟡, Yếu 🔴) cùng tên người chấm.
+- **Danh sách statuses**: Reorder bằng kéo thả (HolderOutlined handle). Mỗi status: màu dot, tên, type (not_started/active/closed), nút đổi tên, nút xóa.
+- **Thêm status mới**: Input tên + Color picker + chọn type.
+- **Templates**: Dropdown chọn mẫu status sẵn có (từ bảng `status_templates`) để load nhanh.
+- **Rules cho Transition**: Click một transition → Cấu hình các hành động tự động khi transition xảy ra:
+  - `assign_user`: Gán task cho `current_user` hoặc clear assignee.
+  - `update_field`: Cập nhật field (`priority`, `assignee_id`, `start_date`, `labels`,...).
 
 ---
 
-## 9. EVALUATIONS (Đánh giá hiệu suất)
+## 5. MY TASKS (Task của tôi – `/my-tasks`)
 
-Trang đánh giá năng lực làm việc của nhân viên theo từng kỳ dựa trên số lượng công việc được giao, tỷ lệ hoàn thành đúng hạn và nhận xét từ người quản lý.
+### 5.1 Header & Toolbar
 
-### 9.1 Giao diện và Bộ lọc (Evaluations Page)
+- Tiêu đề "My tasks" + số lượng task đang active.
+- Bộ lọc: Search (debounce), Filter Popover (giống Project Detail), nút Group By.
+- Group By bổ sung: **Dự án (Project)** và **Hạn chót (Due Date)** (ngoài Status và Priority).
+  - Due Date groups: **Quá hạn** / **Hôm nay** / **Tuần này** / **Tuần tới** / **Không có hạn**.
+- Bộ chuyển đổi View: **List** / **Board** / **Calendar**.
 
-- **Phân quyền truy cập**:
-  - **Manager / Admin**: Quản lý và thực hiện đánh giá cho toàn bộ nhân viên cấp dưới.
-  - **Employee (Nhân viên)**: Chỉ xem được danh sách kết quả đánh giá của chính bản thân mình sau khi đã được công bố (Published), ở chế độ chỉ đọc (Read-only).
-- **Đầu trang (Header)**:
-  - Tiêu đề: "Đánh giá hiệu suất" kèm tên kỳ đang lọc ở phụ đề.
-  - Nút **"+ Tạo kỳ đánh giá mới"** (chỉ hiển thị cho Manager/Admin) dùng để tự động quét dữ liệu task và tạo các bản ghi đánh giá cho kỳ được chọn.
-- **Khung số liệu tổng hợp (Summary Cards)**:
-  - **Nhân viên**: Tổng số nhân viên tham gia đánh giá.
-  - **Đã công bố**: Số lượng đánh giá đã gửi chính thức cho nhân viên (màu xanh lá).
-  - **Chưa đánh giá**: Số lượng đánh giá đang ở dạng bản nháp (màu vàng).
-  - **Điểm trung bình**: Điểm đánh giá trung bình toàn hệ thống trong kỳ (màu tím).
-- **Thanh công cụ (Toolbar)**:
-  - Dropdown chọn kỳ đánh giá (ví dụ: `Tháng 5 năm 2026`).
-  - Nút lọc nhanh theo trạng thái: **Tất cả**, **Bản nháp**, **Đã công bố**.
-- **Bảng danh sách đánh giá (Table Columns)**:
-  - **Nhân viên**: Avatar màu đại diện, Tên nhân viên và Tên phòng ban phụ trách.
-  - **Số công việc hoàn thành**: Tỷ lệ số công việc đã hoàn thành trên tổng số công việc được giao (`completed_tasks / total_tasks`).
-  - **Đúng hạn**: Tỷ lệ phần trăm hoàn thành công việc đúng hạn. Tự động tô màu trực quan: màu xanh lá (>= 80%), màu xanh dương (>= 60%), và màu đỏ (< 60%).
-  - **Điểm gợi ý**: Điểm số trung bình do hệ thống tự động tính toán dựa trên tiến độ và hạn chót (từ 1 đến 10), tô màu tương ứng (>= 8 xanh lá, >= 6 xanh dương, >= 4 vàng, dưới 4 đỏ).
-  - **Xếp loại**: Xếp loại tự động dựa trên điểm số:
-    - Điểm từ 9 - 10: ⭐ Xuất sắc (Excellent)
-    - Điểm từ 7 - 8.9: ✅ Tốt (Good)
-    - Điểm từ 5 - 6.9: 🔵 Khá (Fair)
-    - Điểm từ 3 - 4.9: 🟡 Trung bình (Average)
-    - Điểm dưới 3: 🔴 Yếu (Poor)
-  - **Trạng thái**: Nhãn trạng thái Bản nháp (`draft`) hoặc Đã gửi (`published`).
-  - Nút **"Xem chi tiết →"** để mở Drawer chi tiết đánh giá.
-- **Tải thêm dữ liệu (Infinite Scroll)**:
-  - Danh sách sử dụng Intersection Observer để phát hiện cuộn chuột xuống đáy trang và tự động tải thêm dữ liệu (phân trang 10 dòng/trang). Hiển thị spinner và dòng chữ `Đang tải thêm...` khi đang tải.
+### 5.2 List View
 
-### 9.2 Drawer chi tiết đánh giá (Evaluation Detail Drawer)
+- Nhóm task theo cấu hình chọn. Mỗi nhóm collapse/expand.
+- Mỗi dòng task (tương tự Project Detail List, bổ sung):
+  - Tên project (chấm màu + tên).
+  - Badge status hiện tại.
+- Nút `⋮` hành động: Xem chi tiết / Theo dõi / Bỏ theo dõi / Giao lại / Đánh dấu hoàn thành / Ghi nhận giờ / Xóa.
 
-Mở dạng slide-in từ cạnh phải màn hình khi click vào hàng nhân viên hoặc chọn "Xem chi tiết".
+### 5.3 Board View
 
-- **Thông tin thống kê công việc (Task Summary)**:
-  - Hiển thị 4 thẻ số liệu: Tổng số task, Đã hoàn thành, Đúng hạn, Chưa hoàn thành.
-  - Bảng danh sách công việc trong kỳ: Tiêu đề công việc, Hạn chót, Ngày hoàn thành, Trạng thái (hiển thị chấm tròn xanh lá đối với task đúng hạn, chấm tròn đỏ đối với task trễ hạn).
-- **Kết quả đánh giá**: Điểm số gợi ý kèm badge nhãn xếp loại màu sắc tương ứng.
-- **Nhận xét của Manager**:
-  - Nếu trạng thái là bản nháp (**Draft**): Hiển thị ô nhập nhận xét (Textarea) cho phép Manager viết nội dung đánh giá chi tiết.
-  - Nếu trạng thái đã công bố (**Published**): Hiển thị text tĩnh (Read-only), không cho phép chỉnh sửa.
-- **Nút hành động (Footer)** (Chỉ hiển thị cho Manager/Admin khi ở trạng thái Draft):
-  - Nút **Lưu nháp**: Lưu nhận xét tạm thời.
-  - Nút **Công bố (Publish)**: Gửi chính thức kết quả đánh giá cho nhân viên, khóa chỉnh sửa và gửi thông báo in-app cho nhân viên đó.
+- Các cột là các status **tổng hợp từ tất cả project** của user.
+- Mỗi task card hiển thị **tên project** bên dưới tiêu đề.
+- Hỗ trợ kéo thả.
+
+### 5.4 Calendar View
+
+- Hiển thị **toàn bộ task của user** từ tất cả project.
+- Dùng component `TaskCalendar.tsx` (giống Project Calendar).
+- Tính năng đầy đủ: navigation, event bars, track algorithm, hover popup, tạo task nhanh.
 
 ---
 
-## 10. ANALYTICS / REPORTS (Báo cáo & Phân tích)
+## 6. TẠO TASK MỚI (Create Task)
 
-Trang phân tích số liệu công việc và đánh giá hiệu suất hoạt động của toàn dự án hoặc từng cá nhân.
+### Cách 1: Quick Create (Inline)
 
-### 10.1 Bộ lọc và Xuất dữ liệu (Toolbar)
+- Nhấn `+` ở đầu/cuối cột Kanban hoặc tiêu đề nhóm trong List View → Inline form nhỏ xuất hiện ngay tại cột:
+  ```
+  [Nhập tiêu đề task...] [Assignee] [Due date] [Enter để tạo]
+  ```
 
-- **Bộ lọc dự án**: Dropdown cho phép lọc hiển thị số liệu theo một Dự án (Project) cụ thể hoặc xem tổng quan từ tất cả các dự án (`All projects`).
-- **Xuất báo cáo (Export CSV)**: Nút xuất báo cáo ra file CSV (UTF-8 có BOM giúp không lỗi font chữ tiếng Việt trên Microsoft Excel). File CSV kết xuất chứa đầy đủ số liệu tổng quan công việc theo trạng thái, theo mức độ ưu tiên, khối lượng chưa hoàn thành của từng thành viên và bảng hiệu suất chi tiết của đội ngũ.
+### Cách 2: Full Create Modal (`CreateTaskModal.tsx`)
 
-### 10.2 Hệ thống Biểu đồ Phân tích (Charts)
+Mở từ: nút `+` trên ô ngày Calendar / nút Global Header / event `open-create-task-modal`.
 
-- **Tổng quan công việc (Donut Chart)**: Biểu đồ hình tròn khuyết hiển thị tỷ lệ phần trăm số lượng công việc theo các trạng thái (Done, In Progress, Review, Todo, Overdue).
-- **Mức độ ưu tiên (Priority Bar Chart)**: Biểu đồ cột đứng biểu diễn số lượng công việc theo các mức độ ưu tiên (Khẩn cấp, Cao, Trung bình, Thấp, Không ưu tiên).
-- **Xu hướng hoàn thành (Line Chart)**: Biểu đồ đường so sánh tương quan số lượng công việc được tạo mới và số lượng công việc hoàn thành theo các tuần gần đây.
-- **Khối lượng công việc (Horizontal Bar Chart)**: Biểu đồ cột ngang hiển thị số lượng công việc chưa hoàn thành hiện tại của từng thành viên.
-- **Vòng tròn tiến độ hoàn thành (Progress Circle)**: Thể hiện trực quan tỷ lệ % công việc đã hoàn thành trên tổng số công việc kèm danh sách số lượng chi tiết cho từng trạng thái.
+**Header Modal:**
+- Dropdown **Chọn dự án** (bắt buộc chọn trước).
+- Dấu `/`.
+- Dropdown **Loại**: Task (icon tích xanh) / Bug (icon con bọ đỏ).
 
-### 10.3 Hiệu suất đội ngũ (Team Performance Table)
+**Nội dung:**
+- **Tên task** (bắt buộc).
+- **Mô tả** (textarea).
+- **Template**: Dropdown chọn từ danh sách task templates. Tự động điền description, type, priority, checklists, subtasks.
 
-- Bảng hiển thị thông tin thành viên (Avatar + Tên) kèm các chỉ số:
-  - Tổng số công việc được giao.
-  - Số công việc đã hoàn thành.
-  - Tỷ lệ hoàn thành đúng hạn (%) (Tô màu tự động: màu xanh lá >= 80%, màu vàng >= 60%, màu đỏ < 60%).
-  - Thời gian xử lý trung bình.
+**Properties Grid:**
+- **Status**: Dropdown chọn status (mặc định: status đầu tiên của project, hoặc `initial_status` của workflow).
+- **Assignee**: Dropdown chọn thành viên project.
+- **Priority**: Mặc định `medium`.
+- **Dates**: Bắt đầu → Hạn chót (tự động tính `estimated_hours`).
+- **Milestone**: Dropdown chọn milestone (nếu project có milestone).
+- **Recurring Task** (Task định kỳ): Toggle bật/tắt, chọn tần suất:
+  - **Daily** (hàng ngày): Interval (mỗi N ngày), Giờ thực hiện.
+  - **Weekly** (hàng tuần): Interval, Các ngày trong tuần (checkbox Mon–Sun), Giờ.
+  - **Monthly** (hàng tháng): Interval, Ngày trong tháng (1–31), Giờ.
+  - **Yearly** (hàng năm): Interval, Giờ.
 
----
+**Footer:** Nút Hủy + Nút "Tạo công việc".
 
-## 11. SETTINGS (Cài đặt hệ thống)
+**Backend xử lý tạo task:**
+- Nếu project có workflow và `initial_status`, backend **bỏ qua** status frontend gửi và dùng `initial_status`.
+- Nếu task dùng template: apply checklists và subtasks từ template.
+- Nếu task recurring: tính `recurring_next_trigger` ngay.
+- Gửi notification `task_assigned` cho assignee.
+- Broadcast event `TaskUpdated` qua WebSocket.
 
-Trang quản lý cấu hình cá nhân và thiết lập chung của hệ thống. Hỗ trợ chuyển đổi nhanh qua Sidebar điều hướng trái và lưu cấu hình đồng bộ xuống DB qua API cũng như lưu cục bộ.
+### Cách 3: Global Create
 
-### 11.1 Các nội dung cấu hình (Tabs)
-
-- **Thông báo (Notifications)**: Cho phép bật/tắt các công tắc (Toggle switches) nhận thông báo in-app hoặc email đối với 5 loại sự kiện chính:
-  - Khi được giao công việc mới (`taskAssigned`).
-  - Khi có bình luận mới trong công việc (`taskComment`).
-  - Khi công việc sắp đến hạn chót (`deadline`).
-  - Khi kết quả đánh giá hiệu suất được công bố (`evaluation`).
-  - Khi dự án có cập nhật mới (`projectUpdate`).
-- **Giao diện (Appearance)**: Lựa chọn 3 chủ đề hiển thị hệ thống:
-  - **Sáng (Light)** ☀️.
-  - **Tối (Dark)** 🌙.
-  - **Hệ thống (System)** 💻.
-  - *Thay đổi được áp dụng ngay lập tức lên toàn bộ giao diện mà không cần tải lại trang.*
-- **Không gian làm việc (Workspace)**:
-  - Thay đổi **Tên không gian làm việc** (Workspace Name).
-  - Chọn **Múi giờ** hiển thị hệ thống (Asia/Ho_Chi_Minh, America/New_York, Europe/London,...).
-  - Chọn **Ngôn ngữ hiển thị** chính của hệ thống (Tiếng Việt `vi`, English `en`, 日本語 `ja`).
-
----
-
-## 12. GLOBAL SEARCH
-
-- Nhấn **Search bar** ở header hoặc phím tắt `Cmd+K`
-- Tìm kiếm: Tasks / Projects / Members / Comments
-- Gợi ý realtime khi gõ
-- Kết quả nhóm theo loại
-- Click kết quả → navigate đến màn hình
+- Header → `+` → **New Task** → Dispatch event `open-create-task-modal` → mở Full Create Modal.
 
 ---
 
-## 13. PHÍM TẮT (Keyboard Shortcuts)
+## 7. QUẢN LÝ TASK - PHÂN QUYỀN
 
-| Phím     | Hành động       |
-| --------- | ------------------ |
-| `Cmd+K` | Mở global search  |
-| `Esc`   | Đóng modal/panel |
+Hệ thống TaskFlow áp dụng cơ chế phân quyền ma trận 2 lớp kết hợp đồng bộ cơ cấu tổ chức từ Bitrix24 để tối ưu bảo mật và tăng hiệu quả quản lý dự án.
+
+### 7.1 Bản đồ Phân quyền Hệ thống (System-Level Roles)
+
+Xác định dựa trên cột `role` trong bảng `users` (`admin`/`superadmin`, `manager`, `employee`), liên kết chặt chẽ với sơ đồ phòng ban từ Bitrix24.
+
+| Hành động / Tính năng | Admin / Super Admin | Bitrix Manager (Trưởng phòng) | Employee (Nhân viên) |
+| :--- | :---: | :---: | :---: |
+| **Xem danh sách thành viên** | ✅ Toàn quyền hệ thống | ⚠️ Chỉ xem cấp dưới thuộc phòng ban mình quản lý | ❌ Chỉ xem chính mình trên danh mục chung |
+| **Tìm kiếm thành viên (Global Search)** | ✅ Tìm kiếm toàn bộ | ⚠️ Chỉ tìm thấy cấp dưới hoặc thành viên chung dự án | ❌ Chỉ tìm thấy chính mình |
+| **Tạo dự án mới** | ✅ Được phép | ✅ Được phép | ✅ Được phép |
+| **Gán vai trò khi thêm vào dự án** | ✅ Có thể gán bất kỳ ai làm `manager`/`member` | ⚠️ Thành viên thuộc phòng ban mình quản lý $\rightarrow$ `manager`/`member`. Thành viên ngoài phòng ban $\rightarrow$ tự động chuyển thành `collaborator` (Cor) | ❌ Không được phép (chỉ có thể tự thêm mình) |
+| **Thiết lập hệ thống & cấu hình AI** | ✅ Được phép | ❌ Không được phép | ❌ Không được phép |
+
+*   **Trưởng phòng (Bitrix Manager)**: Hệ thống tự động xác định Trưởng phòng dựa trên trường `UF_HEAD` từ Bitrix24. Trưởng phòng được quyền quản lý toàn bộ nhân viên thuộc phòng ban đó và các phòng ban con cấp dưới theo cấu trúc cây thư mục.
+*   **Cơ chế tự động hạ quyền thành Collaborator**: Nhằm bảo vệ thông tin nội bộ của các phòng ban, khi Trưởng phòng ban này thêm nhân sự thuộc phòng ban khác vào dự án của mình, hệ thống sẽ tự động hạ quyền của nhân sự đó xuống mức **Collaborator (Cộng tác viên - Cor)** để giới hạn quyền truy cập.
 
 ---
 
-## 14. WORKFLOW EDITOR (Trình chỉnh sửa quy trình)
+### 7.2 Bản đồ Phân quyền Dự án (Project-Level Roles)
 
-Cho phép Manager/Admin thiết lập **quy trình chuyển trạng thái (workflow)** của từng dự án trực quan trên sơ đồ kéo thả. Truy cập từ trang chi tiết dự án → nút **"Manage Statuses"** ở đầu trang → vào `/projects/:id/workflow`.
+Thành viên tham gia dự án được gán một trong các vai trò thuộc bảng liên kết `project_members`:
 
-### 14.1 Thanh công cụ (Toolbar)
+| Hành động | Project Manager (PM) | Project Member | Collaborator (Cộng tác viên - Cor) |
+| :--- | :---: | :---: | :---: |
+| **Chỉnh sửa thông tin dự án** | ✅ Được phép | ❌ Không được phép | ❌ Không được phép |
+| **Xóa dự án** | ✅ Chỉ người tạo dự án (Owner) | ❌ Không được phép | ❌ Không được phép |
+| **Quản lý trạng thái (Workflow)** | ✅ Được phép | ❌ Không được phép | ❌ Không được phép |
+| **Thêm/Xóa/Sửa vai trò thành viên** | ✅ Được phép | ❌ Không được phép | ❌ Không được phép |
+| **Tạo công việc chính (Main Task)** | ✅ Được phép | ✅ Được phép | ✅ Được phép |
+| **Gán công việc chính (Assignee)** | ✅ Gán cho bất kỳ ai trong dự án | ⚠️ Chỉ được tự gán cho chính mình | ⚠️ Chỉ được tự gán cho chính mình |
+| **Tạo & Gán công việc con (Subtask)** | ✅ Được phép | ✅ Được phép | ✅ Được phép |
+| **Xem danh sách & chi tiết công việc** | ✅ Xem toàn bộ | ✅ Xem toàn bộ | ⚠️ Chỉ xem công việc do mình tạo, được giao, đang theo dõi (Watcher) hoặc công việc con (Subtask) thuộc công việc chính mình phụ trách |
+| **Chuyển trạng thái công việc** | ✅ Theo workflow dự án | ✅ Theo workflow dự án | ⚠️ Chỉ được chuyển trạng thái của công việc được giao cho mình |
+| **Xóa công việc** | ✅ Được phép (Soft Delete) | ❌ Không được phép | ❌ Không được phép |
 
-Thanh ngang đầu trang gồm:
+---
 
-- **Nút quay lại (←)**: Thoát về trang chi tiết dự án, hủy thay đổi chưa lưu.
-- **Tiêu đề**: "Thiết lập Workflow" + tên dự án.
-- **⇌ Thêm Transition**: Bật/tắt chế độ vẽ transition. Khi bật, click vào node nguồn rồi click node đích để tạo liên kết chuyển trạng thái.
-- **⚡ Tạo nhanh (Preset)**: Dropdown 4 tùy chọn tạo hàng loạt:
-  - **Tất cả (All)**: Tạo transition giữa mọi cặp trạng thái (2 chiều).
-  - **Chỉ tiến (Linear)**: Tạo theo thứ tự tuyến tính từ trái sang phải.
-  - **Tiến + Lùi (Linear Back)**: Tuyến tính 2 chiều.
-  - **Xóa hết (Clear)**: Xóa toàn bộ transition hiện có.
-- **Hủy bỏ**: Thoát không lưu.
-- **💾 Lưu Workflow**: Lưu toàn bộ thay đổi (vị trí node, transitions, global transitions).
+### 7.3 Quyền quản lý Tệp đính kèm (Attachments) và Nhập giờ (Timesheet)
 
-### 14.2 Canvas (Sơ đồ kéo thả)
+*   **Tệp đính kèm (Attachments)**:
+    *   **Thêm mới**: Tất cả thành viên dự án (kể cả Collaborator) đều được phép tải tệp lên công việc.
+    *   **Chỉnh sửa tên / Xóa tệp**: Chỉ có **người tải lên (uploader)**, **Project Manager** hoặc **Admin/Super Admin** mới có quyền chỉnh sửa tên hoặc xóa tệp đính kèm khỏi công việc.
+*   **Bảng công (Timesheet)**:
+    *   **Nhập giờ làm việc (Log time)**: Thành viên được gán công việc hoặc có trong grid mới được log giờ.
+    *   **Xóa Log time**: Chỉ có **người tạo log** hoặc **Admin/Super Admin** mới có quyền xóa.
+    *   **Xem Timesheet**: Nhân viên thường chỉ xem được bảng công của chính mình. Admin và Manager hệ thống có quyền xem và lọc bảng công của tất cả thành viên.
 
-Vùng canvas trung tâm hiển thị sơ đồ workflow tương tác:
+---
 
-- **Node trạng thái**: Mỗi trạng thái (status) của dự án là một node hình chữ nhật, hiển thị badge phân nhóm (NOT_STARTED / ACTIVE / CLOSED) và tên trạng thái. Node "BẮT ĐẦU" (Start) là điểm xuất phát đặc biệt hình tròn.
-- **Kéo thả node**: Giữ và kéo bất kỳ node nào để thay đổi vị trí trên canvas, tự động lưu tọa độ.
-- **Đường transition (mũi tên)**: Các mũi tên kết nối giữa các node thể hiện đường đi hợp lệ. Transition 2 chiều (A↔B) dùng chung 1 đường có mũi tên cả 2 đầu.
-- **Pan (kéo canvas)**: Click giữ nền canvas và kéo để di chuyển toàn bộ sơ đồ.
-- **Highlight khi hover/chọn**:
-  - Hover hoặc click vào một node → tất cả transition nối với node đó sáng lên (màu hover).
-  - Transition 2 chiều được highlight cả 2 mũi tên khi node được kích hoạt.
-- **Badge số transition**: Góc trên phải mỗi node hiển thị số lượng transition kết nối.
-- **Xóa**: Chọn một node hoặc transition rồi nhấn `Delete` để xóa.
+### 7.4 AI Chat & Cơ chế Xác nhận (Dry-run)
 
-### 14.3 Controls bar (Thanh điều khiển)
+Để tránh trường hợp Trợ lý AI thực hiện trực tiếp các hành động thay đổi dữ liệu nhạy cảm mà không có sự kiểm soát của người dùng, hệ thống áp dụng cơ chế **Dry-run**:
+*   Khi người dùng trò chuyện với AI toàn cục và yêu cầu thực hiện hành động sửa đổi (như tạo dự án, tạo công việc, cập nhật công việc):
+    1. AI sẽ gọi tool tương ứng với tham số `confirmed = false` (hoặc omit).
+    2. Backend trả về trạng thái `requires_confirmation = true` kèm thông tin kế hoạch hành động dưới dạng JSON.
+    3. Giao diện Frontend nhận thông tin kế hoạch và hiển thị giao diện xác nhận (nút "Đồng ý/Xác nhận") chuyên nghiệp cho người dùng.
+    4. Khi người dùng nhấn xác nhận, Frontend mới gửi yêu cầu thực thi chính thức với tham số `confirmed = true` lên Backend để cập nhật cơ sở dữ liệu.
 
-Thanh nổi góc dưới trái canvas:
+---
 
-- **Nút ? (Hướng dẫn)**: Mở modal hướng dẫn 6 mục giải thích cách dùng sơ đồ.
-- **☑ Hiển thị nhãn transition**: Checkbox bật/tắt hiển thị tên transition trên các đường mũi tên.
 
-### 14.4 Sidebar thuộc tính (Properties Sidebar)
+---
 
-Panel bên phải, collapse/expand bằng nút tròn dính vào viền trái sidebar:
+## 8. TIMESHEET (Bảng công – `/timesheet`)
 
-#### Trạng thái chưa chọn (Empty state)
-- Hiển thị biểu tượng và hướng dẫn: "Click vào một trạng thái hoặc transition trên sơ đồ để xem chi tiết".
+### 8.1 Header & Tabs
 
-#### Khi chọn node trạng thái
-- **Tên trạng thái**: Hiển thị tên và dot màu.
-- **Phân nhóm**: Badge loại (NOT_STARTED / ACTIVE / CLOSED).
-- **Thiết lập**: Checkbox "Khởi tạo công việc từ trạng thái này" – đặt làm trạng thái mặc định khi tạo task mới.
-- **Danh sách Transitions**: Liệt kê tất cả transition đi ra từ node, hiển thị `[Từ] → [Đến]`. Click một transition → sidebar chuyển sang xem transition đó.
-- **Nút "+ Thêm Global Transition"**: Tạo global transition đến node này.
-- **Danh sách Global Transitions**: Liệt kê các global transition hiện có, cho phép xóa từng cái.
+- Tiêu đề "Bảng công" + phụ đề.
+- **Tab My Timesheet**: Xem timesheet của bản thân.
+- **Tab All Timesheets** (chỉ Admin/Manager): Xem timesheet của tất cả members.
 
-#### Khi chọn transition (mũi tên)
-- **Breadcrumb**: Tên node cha → quay lại xem node khi click.
-- **Tên transition**: Ô nhập tên (tự động lưu khi blur).
-- **Phân quyền (Allowed Roles)**: Multi-select vai trò được phép thực hiện transition này (nếu để trống = tất cả).
-- **Quy tắc (Rules)**: Danh sách các ràng buộc khi thực hiện transition:
-  - **Restrict transition**: Ẩn transition khi điều kiện không thỏa (theo vai trò).
-  - **Validate details**: Yêu cầu các trường bắt buộc phải điền trước khi chuyển.
-  - **Perform actions**: Tự động gán người, thêm nhãn, đặt trường khi transition hoàn thành.
-  - Mỗi rule có thể thêm nhiều điều kiện con, sắp xếp thứ tự, bật/tắt.
-- **Nút "Xóa Transition"**: Xóa transition hiện tại.
+### 8.2 Toolbar
 
-#### Khi chọn global transition
-- Tương tự transition thường nhưng trường **From** là "Bất kỳ" (Any).
+- **Week Selector**: Nút ← Prev / Today / Next → + nhãn dải tuần (`"Sun Jan 5 - Sat Jan 11, 2025"`) hiển thị theo locale/lang.
+- **Member Filter** (chỉ Tab "All"): Input tìm kiếm tên member (debounce 450ms), load danh sách user với infinite scroll (30 user/trang, Intersection Observer).
+- **View Toggles** (chỉ Tab "My"): **Timesheet Grid** 📊 / **List View** ☰.
+- Nút **"+ Ghi nhận thời gian"**: Mở `ManualTimeLogModal` với task được gán đầu tiên (nếu không có task active → toast warning).
 
-### 14.5 Modal Hướng dẫn (Help Modal)
+### 8.3 Grid View (My Timesheet)
 
-Mở khi nhấn nút "?" ở controls bar. 6 mục hướng dẫn với icon SVG minh họa:
+**Bảng tuần (Week Matrix):**
+- Cột đầu: Task (tên task + tên project + màu project + TaskTypeBadge).
+- 7 cột tiếp theo: Mỗi cột là một ngày trong tuần (Sun → Sat), header hiển thị tên ngày (Mon/Tue,...) + số ngày. Ngày hôm nay được highlight.
+- Mỗi ô: Tổng giờ đã log cho task đó trong ngày đó. Click ô → Popover chi tiết.
+- Hàng "Total": Tổng giờ mỗi ngày.
+- Cột "Total": Tổng giờ của task trong tuần.
+- **Grand Total**: Tổng giờ toàn tuần.
 
-1. **Thêm Transition**: Nhấn "⇌ Thêm Transition" trên toolbar → click node nguồn → click node đích.
-2. **Tạo nhanh (Preset)**: Dropdown "⚡ Tạo nhanh" để tạo hàng loạt transition theo kiểu đã chọn.
-3. **Xem chi tiết & chỉnh sửa**: Click node hoặc mũi tên → mở sidebar phải.
-4. **Di chuyển trạng thái**: Kéo thả node đến vị trí bất kỳ trên canvas.
-5. **Global Transition**: Vào sidebar node → "+ Thêm Global Transition" để cho phép chuyển từ bất kỳ đâu đến node này.
-6. **Quy tắc chuyển trạng thái**: Click transition → mở rộng phần "Quy tắc" để thiết lập ràng buộc.
+**Popover chi tiết ô (Cell Popover):**
+- Tên task + ngày.
+- Danh sách từng time entry: thời lượng + mô tả + (tên user nếu Tab "All"). Nút 🗑️ xóa (Admin hoặc chính người log).
+- Nút **"+ Ghi nhận giờ"** (disabled nếu task đã done hoặc không phải assignee).
 
-### 14.6 Notification khi chuyển trạng thái (Workflow-aware)
+**Thêm task vào grid:**
+- Nút **"+ Add Task"** (Popover): Tìm kiếm và thêm task chưa có log vào grid để log giờ.
+- Danh sách `distinctGridTasks` = task đã có log tuần này + task thêm thủ công.
 
-Khi user chuyển trạng thái task (qua Board, checkbox, hoặc Task Detail):
-- Hệ thống kiểm tra **workflow của dự án** để xác định transition nào hợp lệ từ trạng thái hiện tại.
-- Nếu transition có **quy tắc vi phạm** (thiếu trường, sai vai trò): Hiển thị thông báo cụ thể giải thích lý do bị chặn, không phải thông báo chung chung.
-- Nếu transition không tồn tại trong workflow: Thông báo trạng thái không thể chuyển trực tiếp.
+**Play/Stop timer từ grid:**
+- Mỗi dòng task có icon ▶/⏸ để bắt đầu/dừng timer ngay từ grid.
+- Khi toggle timer → dispatch `timer-updated` event → Header timer refresh.
 
-### 14.7 Lưu trữ dữ liệu
+### 8.4 List View (My Timesheet)
 
-Workflow được lưu trong trường `statuses` (json) của bảng `projects`, bao gồm:
-- Danh sách trạng thái (id, name, color, type, position trên canvas).
-- Danh sách transitions (id, from, to, name, allowed_roles, rules).
-- Danh sách global transitions (id, to, name, allowed_roles, rules).
+- Danh sách các time entry trong tuần, hiển thị: Task, Project, Mô tả, Ngày, Thời lượng, Nút xóa.
+
+### 8.5 All Timesheets (Tab Admin/Manager)
+
+**Grid View:**
+- Cột đầu: Member (avatar + tên).
+- 7 cột ngày.
+- Mỗi ô: Tổng giờ của member trong ngày đó.
+- Hàng Member: Click → Mở **Member Detail Drawer** (Ant Design Drawer) hiển thị chi tiết log của member đó trong tuần: danh sách task, giờ, ghi chú.
+
+**Member filter**: Tìm kiếm member, infinite scroll (Intersection Observer với sentinel ref).
+
+### 8.6 Manual Time Log Modal (`ManualTimeLogModal.tsx`)
+
+Fields:
+- **Task**: Dropdown chọn task (selectableTasks = assigned tasks chưa done + distinctGridTasks).
+- **Ngày giờ bắt đầu** (datetime input, mặc định = giờ hiện tại).
+- **Thời lượng**: Input giờ + phút.
+- **Ghi chú/Mô tả** (optional).
+- Nút Hủy + Nút "Lưu".
+
+---
+
+## 9. INBOX / NOTIFICATIONS (Hộp thư – `/inbox`)
+
+### 9.1 Header & Phân loại
+
+- Tiêu đề + `"Bạn có X thông báo chưa đọc"`.
+- **Tabs lọc**: Tất cả / Chưa đọc (badge số) / Nhắc tên (`mention`) / Được giao (`task_assigned`).
+- Nút **"Đánh dấu tất cả đã đọc"**.
+
+### 9.2 Notification Item
+
+Mỗi thông báo:
+- **Avatar** người thực hiện (ảnh hoặc initials + nền màu).
+- **Nội dung**: `[Tên] [hành động] "[target]"` + preview chi tiết (bình luận, emoji,...).
+- **Thời gian tương đối** (`vừa xong` / `3 phút trước` / `2 ngày trước`,...).
+- **Icon loại** (phải): 💬 cam (comment/mention/reply), 👍 xanh (reaction), 👤 tím (task_assigned/project_added), ✅ xanh dương (status_changed), ⏰ đỏ (deadline), ⭐ xanh lá (evaluation).
+- **Nền unread** (`.unread` class): Background sáng hơn.
+- Click → Đánh dấu đã đọc + điều hướng:
+  - Type `evaluation` → `/evaluations`.
+  - Có `project_id` → `/projects/:project_id?task_id=:task_id` (tự động mở Task Detail Panel).
+
+### 9.3 Real-time & Infinite Scroll
+
+- Lắng nghe event `notification-received-global` (dispatch từ Header khi nhận WebSocket) → prepend notification mới lên đầu.
+- Polling 30 giây để refresh khi tab không active.
+- Infinite scroll (window scroll listener) tải thêm thông báo cũ hơn.
+- Hiển thị `"Đã tải hết thông báo"` ở cuối khi không còn dữ liệu.
+
+---
+
+## 10. MEMBERS (Quản lý thành viên – `/members`)
+
+### 10.1 Danh sách thành viên
+
+**Toolbar:**
+- Ô tìm kiếm (theo tên/email, nút X xóa nhanh).
+- Dropdown lọc **Phòng ban** (sync từ Bitrix24).
+- Dropdown lọc **Vai trò** (Tất cả / Admin / Manager / Employee).
+
+**Bảng thành viên (Columns):**
+- **Thành viên**: Avatar + tên + email.
+- **Phòng ban**: Tags phòng ban (>2 thì hiển thị `+N` kèm Tooltip chi tiết khi hover).
+- **Vai trò**: Badge màu (admin/manager/employee).
+- **Công việc**: Progress bar (% hoàn thành) + `done/total`.
+- **Trạng thái**: Dot + label (`active` xanh / `inactive` xám).
+- **Hành động `⋮`**: Xem chi tiết / Chỉnh sửa (chỉ SuperAdmin, ngoại trừ user ID 632).
+
+**Phân trang:**
+- Nút prev/next ở cuối bảng.
+- Dropdown số dòng/trang (10/20/50/100), lưu vào `localStorage`.
+
+### 10.2 Member Detail Drawer (Profile Drawer)
+
+Slide từ phải khi click member.
+
+**Header:**
+- Avatar lớn, tên, vai trò.
+- Email, phone, ngày tham gia workspace.
+- Nút Edit (chỉ SuperAdmin).
+
+**Stats Grid:**
+- Tổng task / Task đang làm / Tỷ lệ hoàn thành / Task đã xong.
+
+**Tabs:**
+- **Công việc**: Danh sách task (chấm màu status, tên task, tên project, due date).
+- **Đánh giá**: Danh sách kỳ đánh giá: điểm số, badge xếp loại, tên evaluator.
+
+---
+
+## 11. EVALUATIONS (Đánh giá hiệu suất – `/evaluations`)
+
+### 11.1 Phân quyền
+
+- **Manager/Admin**: Xem tất cả, tạo kỳ mới, chỉnh sửa và publish đánh giá.
+- **Employee**: Chỉ xem đánh giá của bản thân đã được publish (read-only).
+
+### 11.2 Header & Summary
+
+- Tiêu đề + tên kỳ đang xem.
+- Nút **"+ Tạo kỳ đánh giá mới"** (chỉ Manager/Admin): Gọi API `generateEvaluations(period)` để tự động tính toán và tạo bản ghi đánh giá cho kỳ được chọn.
+- **Summary Cards**: Tổng nhân viên / Đã công bố (xanh lá) / Chưa đánh giá/Bản nháp (vàng) / Điểm trung bình (tím).
+
+### 11.3 Toolbar
+
+- Dropdown **Chọn kỳ** (định dạng `Tháng M năm YYYY`, ví dụ: "Tháng 5 năm 2026"). Danh sách periods từ API.
+- Lọc nhanh: **Tất cả** / **Bản nháp** (`draft`) / **Đã công bố** (`published`).
+
+### 11.4 Bảng đánh giá
+
+Columns:
+- **Nhân viên**: Avatar màu + tên + phòng ban.
+- **Số task hoàn thành**: `completed/total`.
+- **Đúng hạn**: % on_time_rate (màu: xanh ≥80%, vàng ≥60%, đỏ <60%).
+- **Điểm gợi ý**: `total_score` (màu: xanh lá ≥8, xanh dương ≥6, vàng ≥4, đỏ <4).
+- **Xếp loại**: Badge emoji + label (⭐ Xuất sắc ≥9 / ✅ Tốt ≥7 / 🔵 Khá ≥5 / 🟡 Trung bình ≥3 / 🔴 Yếu <3).
+- **Trạng thái**: `draft` / `published`.
+- Nút **"Xem chi tiết →"**.
+- Infinite scroll (Intersection Observer, 10 dòng/trang).
+
+### 11.5 Evaluation Detail Drawer
+
+Click dòng hoặc "Xem chi tiết" → Slide drawer phải.
+
+**Task Summary:**
+- 4 thẻ: Tổng task / Đã hoàn thành / Đúng hạn / Chưa hoàn thành.
+- Bảng danh sách task trong kỳ: Tên task, Hạn chót, Ngày hoàn thành, Trạng thái (dot xanh = on-time, dot đỏ = late).
+
+**Kết quả đánh giá:**
+- Điểm số `/10` + badge xếp loại màu sắc.
+
+**Nhận xét:**
+- **Draft**: Textarea editable cho Manager.
+- **Published**: Text tĩnh (read-only).
+
+**Footer** (chỉ hiển thị khi Draft, chỉ Manager/Admin):
+- Nút **Lưu nháp**: Lưu comment, giữ status draft.
+- Nút **Công bố**: Publish, gửi notification in-app cho nhân viên, khóa chỉnh sửa.
+
+---
+
+## 12. ANALYTICS / REPORTS (Báo cáo & Phân tích – `/analytics`)
+
+### 12.1 Toolbar & Xuất dữ liệu
+
+- Dropdown **Lọc dự án**: All Projects / một project cụ thể.
+- Nút **Xuất CSV** (`Export`): Tạo file CSV UTF-8 BOM (không lỗi font Excel). Nội dung: tổng quan theo status, theo priority, workload từng member, bảng team performance chi tiết.
+
+### 12.2 Biểu đồ (Recharts)
+
+- **Donut Chart**: Tỷ lệ task theo trạng thái (Done / In Progress / Review / Todo / Overdue).
+- **Priority Bar Chart**: Số task theo priority (Urgent / High / Medium / Low / None). Bar đứng.
+- **Line Chart (Xu hướng)**: So sánh task được tạo vs task hoàn thành theo tuần gần đây.
+- **Horizontal Bar Chart (Workload)**: Số task chưa hoàn thành của từng member. Cột ngang.
+- **Progress Circle**: % hoàn thành + số liệu chi tiết từng status.
+
+### 12.3 Team Performance Table
+
+Columns: Avatar + Tên / Tổng task / Đã xong / Tỷ lệ đúng hạn % (màu tự động) / Thời gian xử lý trung bình.
+
+---
+
+## 13. SETTINGS (Cài đặt – `/settings`)
+
+### 13.1 Profile (Thông tin cá nhân)
+
+- Hiển thị thông tin từ Bitrix24: avatar, tên, email, phone, work_position.
+- Ghi chú: `"Thông tin hồ sơ được đồng bộ từ Bitrix24, không thể chỉnh sửa trực tiếp."`.
+
+### 13.2 Thông báo (Notifications)
+
+5 toggle switches bật/tắt nhận notification (in-app và/hoặc email):
+- Khi được giao task mới (`taskAssigned`).
+- Khi có bình luận mới (`taskComment`).
+- Khi task sắp đến hạn (`deadline`).
+- Khi kết quả đánh giá được công bố (`evaluation`).
+- Khi dự án có cập nhật (`projectUpdate`).
+
+Lưu qua API `PUT /api/auth/settings` → sync xuống DB (`notification_settings` JSON field).
+
+### 13.3 Giao diện (Appearance)
+
+3 lựa chọn theme:
+- **Sáng (Light)** ☀️.
+- **Tối (Dark)** 🌙.
+- **Hệ thống (System)** 💻.
+
+Áp dụng ngay lập tức: cập nhật class CSS trên `<html>`, sync qua `theme-changed` event, lưu `localStorage` + API.
+
+### 13.4 Không gian làm việc (Workspace)
+
+- **Tên workspace**: Input text, lưu vào `localStorage['taskflow_workspace_name']` + API.
+- **Múi giờ**: Dropdown danh sách timezones (Asia/Ho_Chi_Minh, America/New_York, Europe/London,...). Lưu `localStorage['taskflow_timezone']` + API.
+- **Ngôn ngữ**: Dropdown: Tiếng Việt (`vi`) / English (`en`) / 日本語 (`ja`). Áp dụng ngay, lưu `localStorage['taskflow_lang']` + API.
+
+### 13.5 Task Templates
+
+- Danh sách các template task đã tạo.
+- Mỗi template: Tên, type, priority, description, danh sách checklist, subtasks.
+- Nút tạo template mới / chỉnh sửa / xóa.
+- Template được sử dụng khi tạo task mới (dropdown chọn template trong `CreateTaskModal`).
+
+---
+
+## 14. GLOBAL SEARCH (`SearchModal.tsx`)
+
+- Mở bằng click vào search bar header hoặc `Cmd+K` / `Ctrl+K`.
+- Ô nhập tìm kiếm với debounce.
+- Kết quả nhóm theo loại: **Tasks** / **Projects** / **Members**.
+- Gợi ý realtime khi gõ (gọi API `/api/search`).
+- Click kết quả → điều hướng tới màn hình tương ứng (project detail, task detail, member).
+
+---
+
+## 15. AI ASSISTANT (Trợ lý AI)
+
+### 15.1 Global AI Sidebar (`GlobalAiSidebar.tsx`)
+
+- Panel trượt từ cạnh phải màn hình (không liên kết với task cụ thể).
+- Chat AI tổng quát (gọi API `/api/ai/global/chat` dùng Gemini API).
+- Hỗ trợ: hỏi đáp, gợi ý kế hoạch, sinh nội dung,...
+
+### 15.2 Task-level AI (Trong Task Detail Panel)
+
+Các nút "✨ Viết bằng AI" / "AI →" xuất hiện ở:
+- **Mô tả (Description)**: Gọi `/api/tasks/{id}/ai/description` → AI viết/tóm tắt mô tả dựa trên tiêu đề và context.
+- **Subtasks**: Gọi `/api/tasks/{id}/ai/subtasks` → AI sinh danh sách subtask gợi ý.
+- **Checklists**: Gọi `/api/tasks/{id}/ai/checklist` → AI sinh danh sách checklist gợi ý.
+- **Chat trong task**: Gọi `/api/tasks/{id}/ai/chat` → Chat AI trong ngữ cảnh task cụ thể.
+
+---
+
+## 16. PHÍM TẮT (Keyboard Shortcuts)
+
+| Phím | Hành động |
+|------|-----------|
+| `Cmd+K` / `Ctrl+K` | Mở Global Search |
+| `Esc` | Đóng modal/panel/drawer |
+
+---
+
+## 17. REALTIME & EVENTS (WebSocket & Custom Events)
+
+### WebSocket Channels (Laravel Echo / Reverb)
+
+- **Private channel** `App.Models.User.{userId}`:
+  - `.notification.received` → Hiển thị toast + cập nhật badge.
+  - `.timer.updated` → Refresh timer data, sync server time offset.
+- **Project channel** (xem qua `getEcho()` trong ProjectDetailPage):
+  - `TaskUpdated` event → Cập nhật danh sách task realtime khi thành viên khác thay đổi.
+  - `TimeTrackingUpdated` event → Cập nhật timesheet realtime.
+
+### Custom Window Events
+
+| Event | Mô tả |
+|-------|-------|
+| `timer-updated` | Refresh timer data ở Header và Timesheet |
+| `projects-changed` | Refresh danh sách project ở Sidebar |
+| `unread-count-changed` | Cập nhật badge inbox ở Sidebar/Header |
+| `notification-received-global` | Prepend notification mới vào Inbox |
+| `open-create-task-modal` | Mở Global Create Task Modal |
+| `open-global-search` | Mở Global Search Modal |
+| `theme-changed` | Áp dụng theme mới toàn bộ UI |
+| `language-changed` | Áp dụng ngôn ngữ mới |
+
+---
+
+## 18. ĐA NGÔN NGỮ (i18n)
+
+- Hỗ trợ: **Tiếng Việt** (`vi`), **English** (`en`), **日本語** (`ja`).
+- Utility `useTranslation()` trả về `{ t, lang, locale }`.
+- Tất cả text UI đều dùng key dịch, không hardcode tiếng Việt trong component (ngoại trừ một số fallback).
+- Ngôn ngữ được sync từ DB user → localStorage → UI khi load.
+
+---
+
+*Cập nhật lần cuối: 2026-06-08 | Phiên bản: Scan codebase thực tế đầy đủ*

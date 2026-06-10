@@ -347,3 +347,14 @@ html[data-theme="light"] {
     }
   }
 }
+
+// ===== WORKFLOW TRANSITION GUIDED MODAL =====
+.workflow-transition-modal {
+  .ant-modal-content {
+    background: var(--bg-card, #1e1e2d) !important;
+    border: 1px solid var(--border-color, #2d3748) !important;
+    border-radius: 12px !important;
+    padding: 24px !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4) !important;
+  }
+}

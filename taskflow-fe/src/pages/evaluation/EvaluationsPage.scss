@@ -121,7 +121,7 @@
 
   &__table-header {
     display: grid;
-    grid-template-columns: 2fr 140px 130px 100px 90px 90px 90px;
+    grid-template-columns: 2fr 140px 130px 100px 120px 90px 90px;
     padding: 10px 20px;
     background: $bg-card;
     border-bottom: 1px solid $border-color;
@@ -130,11 +130,17 @@
     color: $text-tertiary;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+
+    span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   }
 
   &__table-row {
     display: grid;
-    grid-template-columns: 2fr 140px 130px 100px 90px 90px 90px;
+    grid-template-columns: 2fr 140px 130px 100px 120px 90px 90px;
     padding: 14px 20px;
     align-items: center;
     border-bottom: 1px solid $divider;
@@ -219,6 +225,7 @@
       border-radius: $radius-sm;
       font-size: $font-size-xs;
       font-weight: 600;
+      white-space: nowrap;
     }
   }
 
@@ -373,6 +380,7 @@
       @include flex-start;
       gap: 6px;
       font-size: $font-size-xs;
+      white-space: nowrap;
 
       .dot {
         width: 6px;

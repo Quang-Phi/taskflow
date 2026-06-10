@@ -39,7 +39,7 @@ class BitrixService
         $oauthUrl = rtrim($oauthUrl, '/') . '/oauth/token/';
 
         try {
-            $response = Http::timeout(10)->get($oauthUrl, [
+            $response = Http::timeout(10)->asForm()->post($oauthUrl, [
                 'grant_type' => 'refresh_token',
                 'client_id' => config('bitrix.client_id'),
                 'client_secret' => config('bitrix.client_secret'),
@@ -232,9 +232,9 @@ class BitrixService
             $localUser = $localUsers->get($bitrixId);
             $deptIds = $user['UF_DEPARTMENT'] ?? [];
 
-            // Determine role dynamically based on Bitrix department heads
             $role = 'employee';
-            if ((int)$bitrixId === 632) {
+            $superAdminId = (int) config('bitrix.super_admin_id', 632);
+            if ((int)$bitrixId === $superAdminId) {
                 $role = 'admin';
             } else if ($localUser && $localUser->role === 'admin') {
                 $role = 'admin';

@@ -13,6 +13,11 @@ class Workflow extends Model
         'status_template_id',
         'mode',
         'initial_status',
+        'applies_to',
+    ];
+
+    protected $casts = [
+        'applies_to' => 'array',
     ];
 
     public function project(): BelongsTo

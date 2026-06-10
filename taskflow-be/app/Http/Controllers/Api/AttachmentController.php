@@ -26,7 +26,12 @@ class AttachmentController extends Controller
         }
 
         $request->validate([
-            'file' => 'required|file|max:20480', // Max 20MB
+            'file' => [
+                'required',
+                'file',
+                'max:20480', // Max 20MB
+                'mimes:jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,zip,rar,7z,mp3,mp4,wav,avi'
+            ],
         ]);
 
         if ($request->hasFile('file')) {
@@ -35,7 +40,10 @@ class AttachmentController extends Controller
             $filename = time() . '_' . Str::random(8) . '_' . str_replace(' ', '_', $originalName);
             
             // Store file under configured storage folder or S3
-            $disk = config('filesystems.default', 'public');
+            $disk = env('FILESYSTEM_DISK', 'public');
+            if ($disk === 'local') {
+                $disk = 'public';
+            }
             $path = $file->storeAs('task_attachments', $filename, $disk);
             $filePath = $disk === 's3' ? Storage::disk('s3')->url($path) : '/storage/' . $path;
 
@@ -78,7 +86,18 @@ class AttachmentController extends Controller
         $task = $attachment->task;
         $project = $task->project;
         $user = $request->user();
-        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+        $isProjectManager = false;
+        $memberRecord = $project->members()->where('users.id', $user->id)->first();
+        if ($memberRecord && $memberRecord->pivot && $memberRecord->pivot->role === 'manager') {
+            $isProjectManager = true;
+        }
+
+        $canUpdate = $user->role === 'admin' 
+            || $project->created_by === $user->id
+            || (int)$attachment->user_id === (int)$user->id
+            || $isProjectManager;
+
+        if (!$canUpdate) {
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 
@@ -88,6 +107,16 @@ class AttachmentController extends Controller
 
         $oldName = $attachment->file_name;
         $newName = $request->input('file_name');
+
+        // Prevent bypassing extension validation on rename
+        $ext = strtolower(pathinfo($newName, PATHINFO_EXTENSION));
+        $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'zip', 'rar', '7z', 'mp3', 'mp4', 'wav', 'avi'];
+        if (!in_array($ext, $allowedExts)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid file extension. Allowed: ' . implode(', ', $allowedExts),
+            ], 422);
+        }
         
         $attachment->file_name = $newName;
         $attachment->save();
@@ -116,7 +145,18 @@ class AttachmentController extends Controller
         $task = $attachment->task;
         $project = $task->project;
         $user = $request->user();
-        if ($user->role !== 'admin' && $project->created_by !== $user->id && !$project->members->contains($user->id)) {
+        $isProjectManager = false;
+        $memberRecord = $project->members()->where('users.id', $user->id)->first();
+        if ($memberRecord && $memberRecord->pivot && $memberRecord->pivot->role === 'manager') {
+            $isProjectManager = true;
+        }
+
+        $canDelete = $user->role === 'admin' 
+            || $project->created_by === $user->id
+            || (int)$attachment->user_id === (int)$user->id
+            || $isProjectManager;
+
+        if (!$canDelete) {
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 

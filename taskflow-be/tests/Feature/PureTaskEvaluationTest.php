@@ -137,4 +137,63 @@ class PureTaskEvaluationTest extends TestCase
         $this->assertEquals('published', $eval->status);
         $this->assertNotNull($eval->published_at);
     }
+
+    public function test_evaluation_stats_recalculated_automatically_on_task_changes(): void
+    {
+        // 1. Pre-create evaluation draft for employee
+        $eval = Evaluation::create([
+            'period' => 'Q2 2026',
+            'employee_id' => $this->employee->id,
+            'evaluator_id' => $this->admin->id,
+            'total_tasks' => 0,
+            'completed_tasks' => 0,
+            'on_time_tasks' => 0,
+            'on_time_rate' => 0,
+            'total_score' => 0,
+            'status' => 'draft',
+        ]);
+
+        // 2. Create a task in Q2 2026 (May 15th, 2026) for the employee
+        $task = Task::create([
+            'project_id' => $this->project->id,
+            'title' => 'Task A',
+            'status' => 'todo',
+            'priority' => 'medium',
+            'creator_id' => $this->admin->id,
+            'assignee_id' => $this->employee->id,
+            'due_date' => '2026-05-15',
+            'position' => 1
+        ]);
+
+        // Evaluation stats should auto-refresh (total_tasks = 1, completed_tasks = 0, on_time_tasks = 0)
+        $eval->refresh();
+        $this->assertEquals(1, $eval->total_tasks);
+        $this->assertEquals(0, $eval->completed_tasks);
+        $this->assertEquals(0.0, $eval->total_score);
+
+        // 3. Mark task as completed (done) on time
+        $task->status = 'done';
+        $task->completed_at = '2026-05-15 10:00:00';
+        $task->save();
+
+        // Evaluation stats should auto-refresh (total_tasks = 1, completed_tasks = 1, on_time_tasks = 1, rate = 100.0)
+        // Expected score: taskScore (100% on-time) * 10 * 0.5 = 5.0
+        // + completionRate (1/1 completed) * 10 * 0.5 = 5.0
+        // Total = 10.0
+        $eval->refresh();
+        $this->assertEquals(1, $eval->total_tasks);
+        $this->assertEquals(1, $eval->completed_tasks);
+        $this->assertEquals(1, $eval->on_time_tasks);
+        $this->assertEquals(100.0, $eval->on_time_rate);
+        $this->assertEquals(10.0, $eval->total_score);
+
+        // 4. Delete the task
+        $task->delete();
+
+        // Evaluation stats should reset back to 0
+        $eval->refresh();
+        $this->assertEquals(0, $eval->total_tasks);
+        $this->assertEquals(0, $eval->completed_tasks);
+        $this->assertEquals(0.0, $eval->total_score);
+    }
 }

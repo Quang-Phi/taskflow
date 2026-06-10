@@ -104,7 +104,7 @@ class AiController extends Controller
     /**
      * POST /api/tasks/{id}/ai/chat
      */
-    public function chat(Request $request, $taskId): JsonResponse
+    public function chat(Request $request, $taskId)
     {
         @set_time_limit(120);
         if (session_status() === PHP_SESSION_ACTIVE) {
@@ -122,9 +122,9 @@ class AiController extends Controller
         }
 
         $request->validate([
-            'messages' => 'required|array',
+            'messages' => 'required|array|max:20',
             'messages.*.role' => 'required|string|in:user,ai',
-            'messages.*.content' => 'required|string',
+            'messages.*.content' => 'required|string|max:10000',
         ]);
 
         $messages = $request->input('messages');
@@ -145,6 +145,31 @@ class AiController extends Controller
             })->toArray()
         ];
 
+        if ($request->input('stream')) {
+            return response()->stream(function () use ($messages, $taskDetails) {
+                try {
+                    $this->openAiService->chatStream($messages, $taskDetails, function ($chunk) {
+                        echo "data: " . json_encode($chunk) . "\n\n";
+                        if (ob_get_level() > 0) {
+                            ob_flush();
+                        }
+                        flush();
+                    });
+                } catch (\Exception $e) {
+                    echo "data: " . json_encode(['error' => $e->getMessage()]) . "\n\n";
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
+                }
+            }, 200, [
+                'Content-Type' => 'text/event-stream',
+                'Cache-Control' => 'no-cache',
+                'Connection' => 'keep-alive',
+                'X-Accel-Buffering' => 'no',
+            ]);
+        }
+
         // Call OpenAI service
         $reply = $this->openAiService->chat($messages, $taskDetails);
 
@@ -157,20 +182,57 @@ class AiController extends Controller
     /**
      * POST /api/ai/global/chat
      */
-    public function globalChat(Request $request): JsonResponse
+    public function globalChat(Request $request)
     {
         @set_time_limit(180);
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_write_close();
         }
         $request->validate([
-            'messages' => 'required|array',
+            'messages' => 'required|array|max:20',
             'messages.*.role' => 'required|string|in:user,ai',
-            'messages.*.content' => 'required|string',
+            'messages.*.content' => 'required|string|max:10000',
         ]);
 
         $messages = $request->input('messages');
         $user = $request->user();
+
+        if ($request->input('stream')) {
+            return response()->stream(function () use ($messages, $user) {
+                try {
+                    $result = $this->openAiService->globalChatStream($messages, $user, function ($chunk) {
+                        echo "data: " . json_encode($chunk) . "\n\n";
+                        if (ob_get_level() > 0) {
+                            ob_flush();
+                        }
+                        flush();
+                    });
+
+                    $finalPayload = [
+                        'done' => true,
+                        'reply' => $result['reply'] ?? '',
+                        'actions' => $result['actions'] ?? [],
+                        'events' => $result['events'] ?? []
+                    ];
+                    echo "data: " . json_encode($finalPayload) . "\n\n";
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
+                } catch (\Exception $e) {
+                    echo "data: " . json_encode(['error' => $e->getMessage()]) . "\n\n";
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
+                }
+            }, 200, [
+                'Content-Type' => 'text/event-stream',
+                'Cache-Control' => 'no-cache',
+                'Connection' => 'keep-alive',
+                'X-Accel-Buffering' => 'no',
+            ]);
+        }
 
         // Call OpenAI service globalChat handler
         $result = $this->openAiService->globalChat($messages, $user);

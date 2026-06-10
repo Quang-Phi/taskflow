@@ -919,7 +919,7 @@ const TimesheetPage: React.FC = () => {
                                 return (
                                   <Tooltip title={isTaskDone(task) ? t('timesheet.tooltip.task_done') : !isAssignedToMe ? t('timesheet.tooltip.not_assigned') : isTracking ? t('timesheet.tooltip.stop_timer') : t('timesheet.tooltip.start_timer')}>
                                     <button 
-                                      className={`timer-btn ${isTracking ? 'running' : ''}`}
+                                      className={`timer-btn timesheet-timer-btn ${isTracking ? 'running' : ''}`}
                                       onClick={() => !isTaskDone(task) && isAssignedToMe && handleToggleTimer(task.id)}
                                       disabled={isTaskDone(task) || !isAssignedToMe}
                                       style={isTaskDone(task) || !isAssignedToMe ? { cursor: 'not-allowed', opacity: 0.5 } : {}}
@@ -1288,6 +1288,7 @@ const TimesheetPage: React.FC = () => {
                             borderRadius: '4px',
                             fontWeight: 600,
                             fontSize: '12px',
+                            whiteSpace: 'nowrap',
                           }}>
                             {formatSeconds(log.duration)}
                           </span>

@@ -19,6 +19,9 @@ use App\Http\Controllers\Api\BitrixController;
 
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\TaskController;
+use App\Http\Controllers\Api\TaskAssigneeController;
+use App\Http\Controllers\Api\TaskApprovalController;
+use App\Http\Controllers\Api\TaskDependencyController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\EvaluationController;
@@ -26,10 +29,14 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\AiController;
 
 // === Bitrix OAuth2 Callback (public, no auth) ===
-Route::post('/callback', [AuthController::class, 'callback']);
+Route::middleware(['throttle:30,1'])->post('/callback', [AuthController::class, 'callback']);
+
+// FIX #4: Exchange short-lived one-time code for Sanctum token (public, rate-limited)
+// Replaces the old ?token= URL approach — code is valid for 60s only
+Route::middleware(['throttle:10,1'])->post('/auth/exchange', [AuthController::class, 'exchangeCode']);
 
 // === Protected (Sanctum) ===
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'throttle:1000,1'])->group(function () {
 
     // Auth
     Route::get('/auth/me', [AuthController::class, 'me']);
@@ -70,8 +77,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Tasks
     Route::apiResource('tasks', TaskController::class);
     Route::put('tasks/{id}/status', [TaskController::class, 'updateStatus']);
+    Route::post('tasks/{id}/clone', [TaskController::class, 'cloneTask']);
+    Route::post('tasks/{id}/dependencies', [TaskDependencyController::class, 'store']);
+    Route::delete('task-dependencies/{id}', [TaskDependencyController::class, 'destroy']);
     Route::post('tasks/{id}/comments', [TaskController::class, 'storeComment']);
     Route::get('tasks/{id}/comments', [TaskController::class, 'getComments']);
+    Route::delete('comments/{id}', [TaskController::class, 'deleteComment']);
     Route::get('tasks/{id}/activities', [TaskController::class, 'getActivities']);
     Route::post('comments/{id}/react', [TaskController::class, 'reactToComment']);
     Route::post('tasks/{id}/watch', [TaskController::class, 'toggleWatch']);
@@ -83,12 +94,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/time-entries/today', [TaskController::class, 'getTodayTimeEntries']);
     Route::get('time-entries', [TaskController::class, 'getTimeEntriesList']);
 
-    // AI Assistant
-    Route::post('tasks/{id}/ai/checklist', [AiController::class, 'generateChecklist']);
-    Route::post('tasks/{id}/ai/subtasks', [AiController::class, 'generateSubtasks']);
-    Route::post('tasks/{id}/ai/description', [AiController::class, 'generateDescription']);
-    Route::post('tasks/{id}/ai/chat', [AiController::class, 'chat']);
-    Route::post('ai/global/chat', [AiController::class, 'globalChat']);
+    // AI Assistant (Stricter rate limits for AI processing, relaxed to 60/min for fluent chat)
+    Route::middleware('throttle:60,1')->group(function () {
+        Route::post('tasks/{id}/ai/checklist', [AiController::class, 'generateChecklist']);
+        Route::post('tasks/{id}/ai/subtasks', [AiController::class, 'generateSubtasks']);
+        Route::post('tasks/{id}/ai/description', [AiController::class, 'generateDescription']);
+        Route::post('tasks/{id}/ai/chat', [AiController::class, 'chat']);
+        Route::post('ai/global/chat', [AiController::class, 'globalChat']);
+    });
 
     // Custom Fields
     Route::get('projects/{projectId}/custom-fields', [\App\Http\Controllers\Api\CustomFieldController::class, 'index']);
@@ -109,6 +122,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('tasks/{taskId}/attachments', [\App\Http\Controllers\Api\AttachmentController::class, 'store']);
     Route::put('attachments/{id}', [\App\Http\Controllers\Api\AttachmentController::class, 'update']);
     Route::delete('attachments/{id}', [\App\Http\Controllers\Api\AttachmentController::class, 'destroy']);
+
+    // Task Templates
+    Route::get('/task-templates', [\App\Http\Controllers\Api\TaskTemplateController::class, 'index']);
+    Route::post('/task-templates', [\App\Http\Controllers\Api\TaskTemplateController::class, 'store']);
+    Route::delete('/task-templates/{id}', [\App\Http\Controllers\Api\TaskTemplateController::class, 'destroy']);
+
+    // Milestones
+    Route::get('/projects/{projectId}/milestones', [\App\Http\Controllers\Api\MilestoneController::class, 'index']);
+    Route::post('/projects/{projectId}/milestones', [\App\Http\Controllers\Api\MilestoneController::class, 'store']);
+    Route::get('/milestones/{id}', [\App\Http\Controllers\Api\MilestoneController::class, 'show']);
+    Route::put('/milestones/{id}', [\App\Http\Controllers\Api\MilestoneController::class, 'update']);
+    Route::delete('/milestones/{id}', [\App\Http\Controllers\Api\MilestoneController::class, 'destroy']);
+    Route::post('/milestones/{id}/tasks', [\App\Http\Controllers\Api\MilestoneController::class, 'assignTasks']);
+    Route::post('/milestones/{id}/tasks/remove', [\App\Http\Controllers\Api\MilestoneController::class, 'removeTasks']);
+    Route::get('/milestones/{id}/burndown', [\App\Http\Controllers\Api\MilestoneController::class, 'burndown']);
 
     // Evaluations
     Route::get('evaluations', [EvaluationController::class, 'index']);

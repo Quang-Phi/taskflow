@@ -24,7 +24,16 @@ class TimeTrackingUpdated implements ShouldBroadcast
         $this->projectId = $projectId;
         $this->userId = $userId;
         $this->action = $action;
-        $this->timeEntry = $timeEntry;
+        
+        // Clean up timeEntry to send only direct database fields, preventing "Payload too large" broadcasting errors
+        if ($timeEntry) {
+            $this->timeEntry = array_intersect_key($timeEntry, array_flip([
+                'id', 'task_id', 'user_id', 'started_at', 'ended_at', 'duration', 'description', 'created_at', 'updated_at'
+            ]));
+        } else {
+            $this->timeEntry = null;
+        }
+        
         $this->serverTime = now()->toIso8601String();
     }
 

@@ -133,6 +133,43 @@ class TimeTrackingTest extends TestCase
 
         $response->assertStatus(200);
     }
+
+    public function test_timer_stops_when_task_completed(): void
+    {
+        // 1. Create a running timer for Employee A on the task
+        $timeEntry = TimeEntry::create([
+            'task_id' => $this->task->id,
+            'user_id' => $this->employeeA->id,
+            'started_at' => now()->subMinutes(15), // started 15 mins ago
+            'ended_at' => null,
+            'duration' => 0,
+        ]);
+
+        // 2. Update task status to done (a closed status)
+        $response = $this->actingAs($this->employeeA)
+            ->putJson("/api/tasks/{$this->task->id}", [
+                'status' => 'done',
+            ]);
+
+        $response->assertStatus(200);
+
+        // 3. Assert task status is 'done'
+        $this->task->refresh();
+        $this->assertEquals('done', $this->task->status);
+
+        // 4. Assert running timer was stopped and duration calculated
+        $timeEntry->refresh();
+        $this->assertNotNull($timeEntry->ended_at);
+        $this->assertGreaterThan(890, $timeEntry->duration); // Should be around 900 seconds
+        $this->assertLessThan(910, $timeEntry->duration);
+
+        // 5. Assert TaskActivity was created
+        $this->assertDatabaseHas('task_activities', [
+            'task_id' => $this->task->id,
+            'user_id' => $this->employeeA->id,
+            'action' => 'stopped_timer',
+        ]);
+    }
 }
 
 

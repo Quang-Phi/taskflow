@@ -244,6 +244,184 @@ class AnalyticsController extends Controller
         usort($teamPerformance, fn($a, $b) => $b['total'] - $a['total']);
 
         // ──────────────────────────────────────────────
+        // 5.5. Process Performance (I13 - Cycle Time, Lead Time, Throughput, WIP)
+        // ──────────────────────────────────────────────
+        $completedTasks = (clone $taskQuery)->whereNotNull('completed_at')->get();
+        $completedTaskIds = $completedTasks->pluck('id')->toArray();
+
+        // Fetch status history for completed tasks
+        $histories = DB::table('task_status_history')
+            ->whereIn('task_id', $completedTaskIds)
+            ->orderBy('changed_at', 'asc')
+            ->get()
+            ->groupBy('task_id');
+
+        $totalCycleHours = 0;
+        $cycleTasksCount = 0;
+
+        $totalLeadHours = 0;
+        $leadTasksCount = 0;
+
+        foreach ($completedTasks as $task) {
+            $created = Carbon::parse($task->created_at);
+            $completed = Carbon::parse($task->completed_at);
+            
+            // Lead Time
+            $leadHours = abs($completed->diffInHours($created));
+            $totalLeadHours += $leadHours;
+            $leadTasksCount++;
+
+            // Cycle Time
+            $taskHistories = $histories->get($task->id) ?: collect();
+            $firstActiveTime = null;
+            $firstClosedTime = null;
+
+            // Map project statuses
+            $proj = $projectsList->get($task->project_id);
+            $statuses = $proj ? $proj->statuses : [];
+            $statusTypes = [];
+            foreach ($statuses as $s) {
+                $statusTypes[$s['id']] = $s['type'] ?? 'not_started';
+            }
+
+            foreach ($taskHistories as $h) {
+                $type = $statusTypes[$h->to_status] ?? 'not_started';
+                if ($type === 'active' && is_null($firstActiveTime)) {
+                    $firstActiveTime = Carbon::parse($h->changed_at);
+                }
+                if ($type === 'closed' && is_null($firstClosedTime)) {
+                    $firstClosedTime = Carbon::parse($h->changed_at);
+                }
+            }
+
+            if ($firstActiveTime && $firstClosedTime) {
+                $cycleHours = abs($firstClosedTime->diffInHours($firstActiveTime));
+                $totalCycleHours += $cycleHours;
+                $cycleTasksCount++;
+            } else {
+                // Fallback to Lead Time
+                $totalCycleHours += $leadHours;
+                $cycleTasksCount++;
+            }
+        }
+
+        $avgCycleTimeDays = $cycleTasksCount > 0 ? round(($totalCycleHours / $cycleTasksCount) / 24, 1) : 0;
+        $avgLeadTimeDays = $leadTasksCount > 0 ? round(($totalLeadHours / $leadTasksCount) / 24, 1) : 0;
+
+        // WIP calculation (Tasks in active type statuses)
+        $wipCount = 0;
+        $activeTasks = (clone $taskQuery)->whereNull('completed_at')->get();
+        foreach ($activeTasks as $task) {
+            $proj = $projectsList->get($task->project_id);
+            $statuses = $proj ? $proj->statuses : [];
+            $statusType = 'not_started';
+            foreach ($statuses as $s) {
+                if ($s['id'] === $task->status) {
+                    $statusType = $s['type'] ?? 'not_started';
+                    break;
+                }
+            }
+            if ($statusType === 'active' || $task->status === 'review') {
+                $wipCount++;
+            }
+        }
+
+        // Weekly throughput trend (last 8 weeks)
+        $throughputTrend = [];
+        $totalThroughputCompleted = 0;
+        for ($i = 7; $i >= 0; $i--) {
+            $weekStart = $now->copy()->subWeeks($i)->startOfWeek();
+            $weekEnd = $weekStart->copy()->endOfWeek();
+
+            $completedCount = (clone $taskQuery)
+                ->whereNotNull('completed_at')
+                ->whereBetween('completed_at', [$weekStart, $weekEnd])
+                ->count();
+
+            $weekLabel = 'W' . (8 - $i);
+            $throughputTrend[] = [
+                'week' => $weekLabel,
+                'throughput' => $completedCount,
+            ];
+            $totalThroughputCompleted += $completedCount;
+        }
+        $avgThroughputWeekly = round($totalThroughputCompleted / 8, 1);
+
+        // Cycle time trend (last 8 weeks)
+        $cycleTimeTrend = [];
+        for ($i = 7; $i >= 0; $i--) {
+            $weekStart = $now->copy()->subWeeks($i)->startOfWeek();
+            $weekEnd = $weekStart->copy()->endOfWeek();
+
+            $weekTasks = (clone $taskQuery)
+                ->whereNotNull('completed_at')
+                ->whereBetween('completed_at', [$weekStart, $weekEnd])
+                ->get();
+
+            $weekTaskIds = $weekTasks->pluck('id')->toArray();
+            $weekHistories = DB::table('task_status_history')
+                ->whereIn('task_id', $weekTaskIds)
+                ->orderBy('changed_at', 'asc')
+                ->get()
+                ->groupBy('task_id');
+
+            $weekTotalCycleHours = 0;
+            $weekCycleCount = 0;
+
+            foreach ($weekTasks as $task) {
+                $created = Carbon::parse($task->created_at);
+                $completed = Carbon::parse($task->completed_at);
+                $leadHours = abs($completed->diffInHours($created));
+
+                $taskHistories = $weekHistories->get($task->id) ?: collect();
+                $firstActiveTime = null;
+                $firstClosedTime = null;
+
+                $proj = $projectsList->get($task->project_id);
+                $statuses = $proj ? $proj->statuses : [];
+                $statusTypes = [];
+                foreach ($statuses as $s) {
+                    $statusTypes[$s['id']] = $s['type'] ?? 'not_started';
+                }
+
+                foreach ($taskHistories as $h) {
+                    $type = $statusTypes[$h->to_status] ?? 'not_started';
+                    if ($type === 'active' && is_null($firstActiveTime)) {
+                        $firstActiveTime = Carbon::parse($h->changed_at);
+                    }
+                    if ($type === 'closed' && is_null($firstClosedTime)) {
+                        $firstClosedTime = Carbon::parse($h->changed_at);
+                    }
+                }
+
+                if ($firstActiveTime && $firstClosedTime) {
+                    $weekTotalCycleHours += abs($firstClosedTime->diffInHours($firstActiveTime));
+                    $weekCycleCount++;
+                } else {
+                    $weekTotalCycleHours += $leadHours;
+                    $weekCycleCount++;
+                }
+            }
+
+            $weekAvgDays = $weekCycleCount > 0 ? round(($weekTotalCycleHours / $weekCycleCount) / 24, 1) : 0;
+            $weekLabel = 'W' . (8 - $i);
+
+            $cycleTimeTrend[] = [
+                'week' => $weekLabel,
+                'avg_days' => $weekAvgDays,
+            ];
+        }
+
+        $processPerformance = [
+            'cycle_time_avg' => $avgCycleTimeDays,
+            'lead_time_avg' => $avgLeadTimeDays,
+            'throughput_weekly_avg' => $avgThroughputWeekly,
+            'wip_count' => $wipCount,
+            'throughput_trend' => $throughputTrend,
+            'cycle_time_trend' => $cycleTimeTrend,
+        ];
+
+        // ──────────────────────────────────────────────
         // 6. Projects list for filter dropdown
         // ──────────────────────────────────────────────
         $projectsQuery = Project::whereNull('deleted_at');
@@ -262,6 +440,7 @@ class AnalyticsController extends Controller
                 'workload' => $workload,
                 'team_performance' => $teamPerformance,
                 'projects' => $projects,
+                'process_performance' => $processPerformance,
             ],
         ]);
     }

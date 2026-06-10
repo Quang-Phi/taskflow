@@ -44,7 +44,7 @@ class TaskUpdated implements ShouldBroadcast
     {
         $data = $this->taskData;
         if (is_array($data)) {
-            if ($this->action === 'comment_created' && isset($data['comment'])) {
+            if (in_array($this->action, ['comment_created', 'comment_updated']) && isset($data['comment'])) {
                 $comment = $data['comment'];
                 $user = isset($comment['user']) ? [
                     'id'    => $comment['user']['id'] ?? null,

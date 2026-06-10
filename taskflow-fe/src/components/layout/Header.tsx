@@ -588,31 +588,18 @@ const Header: React.FC<HeaderProps> = ({ sidebarCollapsed, aiSidebarOpen, mobile
               }}
               className="header-timer-trigger active"
             >
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />
-              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#ef4444', fontSize: '13px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444', display: 'inline-block', animation: 'pulse 1.5s infinite', flexShrink: 0 }} />
+              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#ef4444', fontSize: '13px', flexShrink: 0 }}>
                 {formatSeconds(elapsed)}
               </span>
               <button
-                style={{
-                  background: '#ef4444',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: '18px',
-                  height: '18px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  marginLeft: '4px',
-                  fontSize: '8px',
-                }}
+                className="header-timer-stop-btn"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleStopTimer();
                 }}
               >
-                ■
+                <span className="stop-square" />
               </button>
             </div>
           ) : (

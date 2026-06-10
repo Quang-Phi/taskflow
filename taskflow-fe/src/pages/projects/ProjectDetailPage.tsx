@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Dropdown, Tooltip, message, Modal, Select, Button, Popconfirm, Spin, Timeline, Popover, Calendar, Input, Tabs, Radio } from 'antd';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import {
   PlusOutlined,
   CloseOutlined,
@@ -39,6 +39,11 @@ import {
   AppstoreOutlined,
   BranchesOutlined,
   SettingOutlined,
+  SlidersOutlined,
+  DeploymentUnitOutlined,
+  CopyOutlined,
+  LinkOutlined,
+  ExportOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { getEcho } from '../../services/echo';
@@ -46,6 +51,7 @@ import { useTranslation } from '../../utils/i18n';
 import './ProjectDetailPage.scss';
 import '../tasks/MyTasksPage.scss';
 import { TaskDetailPanel } from '../../components/tasks/TaskDetailPanel';
+import { WorkflowTransitionModal } from '../../components/tasks/WorkflowTransitionModal';
 import { TaskCalendar } from '../../components/tasks/TaskCalendar';
 import TaskTypeBadge from '../../components/tasks/TaskTypeBadge';
 import { useDeleteConfirm } from '../../components/tasks/DeleteConfirmModal';
@@ -72,10 +78,14 @@ interface Task {
   watcher_ids?: number[];
   subtasks?: Task[];
   parent_task_id?: string | number;
+  milestone_id?: string | number | null;
+  milestone?: any;
   time_entries?: any[];
   type?: string;
   labels?: any[];
   position?: number;
+  dependencies?: any[];
+  inverse_dependencies?: any[];
 }
 
 // Priority config matching ClickUp style
@@ -155,6 +165,8 @@ interface ProjectFilterPopoverProps {
   filterStatuses: string[];
   filterPriorities: string[];
   filterTypes: string[];
+  milestoneFilter: string | number | 'all';
+  milestones: any[];
   // Parent update functions
   setFilterMyTasks: (val: boolean) => void;
   setFilterUnassigned: (val: boolean) => void;
@@ -162,6 +174,7 @@ interface ProjectFilterPopoverProps {
   setFilterStatuses: (val: string[]) => void;
   setFilterPriorities: (val: string[]) => void;
   setFilterTypes: (val: string[]) => void;
+  setMilestoneFilter: (val: string | number | 'all') => void;
   handleClearFilters: () => void;
 }
 
@@ -175,12 +188,15 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
   filterStatuses,
   filterPriorities,
   filterTypes,
+  milestoneFilter,
+  milestones,
   setFilterMyTasks,
   setFilterUnassigned,
   setFilterAssignees,
   setFilterStatuses,
   setFilterPriorities,
   setFilterTypes,
+  setMilestoneFilter,
   handleClearFilters,
 }) => {
   const [open, setOpen] = useState(false);
@@ -193,6 +209,7 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
   const [localStatuses, setLocalStatuses] = useState(filterStatuses);
   const [localPriorities, setLocalPriorities] = useState(filterPriorities);
   const [localTypes, setLocalTypes] = useState(filterTypes);
+  const [localMilestone, setLocalMilestone] = useState(milestoneFilter);
 
   // Sync external changes (e.g. clear filters)
   useEffect(() => {
@@ -202,7 +219,8 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
     setLocalStatuses(filterStatuses);
     setLocalPriorities(filterPriorities);
     setLocalTypes(filterTypes);
-  }, [filterMyTasks, filterUnassigned, filterAssignees, filterStatuses, filterPriorities, filterTypes]);
+    setLocalMilestone(milestoneFilter);
+  }, [filterMyTasks, filterUnassigned, filterAssignees, filterStatuses, filterPriorities, filterTypes, milestoneFilter]);
 
   // Propagate to parent helper
   const propagateFilters = useCallback((filters: {
@@ -212,6 +230,7 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
     statuses: string[];
     priorities: string[];
     types: string[];
+    milestone: string | number | 'all';
   }) => {
     setFilterMyTasks(filters.myTasks);
     setFilterUnassigned(filters.unassigned);
@@ -219,7 +238,8 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
     setFilterStatuses(filters.statuses);
     setFilterPriorities(filters.priorities);
     setFilterTypes(filters.types);
-  }, [setFilterMyTasks, setFilterUnassigned, setFilterAssignees, setFilterStatuses, setFilterPriorities, setFilterTypes]);
+    setMilestoneFilter(filters.milestone);
+  }, [setFilterMyTasks, setFilterUnassigned, setFilterAssignees, setFilterStatuses, setFilterPriorities, setFilterTypes, setMilestoneFilter]);
 
   // Debounced apply
   useEffect(() => {
@@ -230,11 +250,12 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
         assignees: localAssignees,
         statuses: localStatuses,
         priorities: localPriorities,
-        types: localTypes
+        types: localTypes,
+        milestone: localMilestone
       });
     }, 200);
     return () => clearTimeout(timer);
-  }, [localMyTasks, localUnassigned, localAssignees, localStatuses, localPriorities, localTypes, propagateFilters]);
+  }, [localMyTasks, localUnassigned, localAssignees, localStatuses, localPriorities, localTypes, localMilestone, propagateFilters]);
 
   // Force propagation on close
   const handleOpenChange = (newOpen: boolean) => {
@@ -246,7 +267,8 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
         assignees: localAssignees,
         statuses: localStatuses,
         priorities: localPriorities,
-        types: localTypes
+        types: localTypes,
+        milestone: localMilestone
       });
     }
   };
@@ -258,6 +280,7 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
     setLocalStatuses([]);
     setLocalPriorities([]);
     setLocalTypes([]);
+    setLocalMilestone('all');
     handleClearFilters();
   };
 
@@ -267,11 +290,13 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
     (localUnassigned ? 1 : 0) +
     (localStatuses.length > 0 ? 1 : 0) +
     (localPriorities.length > 0 ? 1 : 0) +
-    (localTypes.length > 0 ? 1 : 0);
+    (localTypes.length > 0 ? 1 : 0) +
+    (localMilestone !== 'all' ? 1 : 0);
   const hasFilter = activeCount > 0;
 
   const filterCategories = [
     { key: 'assignee', label: t('tasks.panel.assignee'), badge: localAssignees.length > 0 || localUnassigned || localMyTasks },
+    { key: 'milestone', label: t('project_detail.tab.milestones'), badge: localMilestone !== 'all' },
     { key: 'status', label: t('tasks.group.status'), badge: localStatuses.length > 0 },
     { key: 'priority', label: t('tasks.filter.priority'), badge: localPriorities.length > 0 },
     { key: 'type', label: t('task.type.label'), badge: localTypes.length > 0 },
@@ -309,6 +334,30 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
         {checked && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
       </span>
       {dotColor && <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: dotColor, flexShrink: 0 }} />}
+      {icon}
+      <span style={{ flex: 1, fontSize: '13px', fontWeight: checked ? 600 : 400, color: 'var(--text-primary)' }}>{label}</span>
+    </div>
+  );
+
+  const RadioRow = ({ checked, onClick, icon, label }: {
+    checked: boolean; onClick: () => void; icon?: React.ReactNode;
+    label: string;
+  }) => (
+    <div onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: '10px',
+      padding: '8px 10px', borderRadius: '7px', cursor: 'pointer',
+      background: checked ? 'rgba(99,102,241,0.08)' : 'transparent',
+      transition: 'background 0.12s',
+    }} className="status-item-hover">
+      <span style={{
+        width: '16px', height: '16px', borderRadius: '50%', flexShrink: 0,
+        border: checked ? '2px solid var(--primary)' : '2px solid var(--border-color)',
+        background: 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'all 0.12s',
+      }}>
+        {checked && <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--primary)' }} />}
+      </span>
       {icon}
       <span style={{ flex: 1, fontSize: '13px', fontWeight: checked ? 600 : 400, color: 'var(--text-primary)' }}>{label}</span>
     </div>
@@ -371,6 +420,33 @@ const ProjectFilterPopover: React.FC<ProjectFilterPopoverProps> = ({
                       </div>
                     )
                   }
+                  label={m.name}
+                />
+              ))}
+            </>
+          )}
+
+          {filterCategory === 'milestone' && (
+            <>
+              <RadioRow
+                checked={localMilestone === 'all'}
+                onClick={() => setLocalMilestone('all')}
+                icon={<DeploymentUnitOutlined style={{ fontSize: '13px', color: 'var(--text-muted)' }} />}
+                label={t('milestones.all')}
+              />
+              <RadioRow
+                checked={localMilestone === 'none'}
+                onClick={() => setLocalMilestone('none')}
+                icon={<DeploymentUnitOutlined style={{ fontSize: '13px', color: 'var(--text-muted)' }} />}
+                label={`(${t('tasks.panel.unassigned')})`}
+              />
+              <div style={{ height: '1px', background: 'var(--border-color)', margin: '6px 0' }} />
+              {milestones.map((m: any) => (
+                <RadioRow
+                  key={m.id}
+                  checked={Number(localMilestone) === Number(m.id)}
+                  onClick={() => setLocalMilestone(m.id)}
+                  icon={<DeploymentUnitOutlined style={{ fontSize: '13px', color: 'var(--text-muted)' }} />}
                   label={m.name}
                 />
               ))}
@@ -729,7 +805,7 @@ const formatDateTime = (dateStr?: string) => {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
 const ClickUpStatusPicker: React.FC<{
@@ -914,6 +990,210 @@ const ProjectDetailPage: React.FC = () => {
   const { t, lang, locale } = useTranslation();
   const { showDeleteConfirm, DeleteConfirmComponent } = useDeleteConfirm();
 
+  const [runningTimer, setRunningTimer] = useState<any>(null);
+
+  const fetchRunningTimer = async () => {
+    try {
+      const res = await api.getRunningTimer();
+      if (res && res.success) {
+        setRunningTimer(res.data);
+      } else {
+        setRunningTimer(null);
+      }
+    } catch (err) {
+      console.error(err);
+      setRunningTimer(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchRunningTimer();
+    window.addEventListener('timer-updated', fetchRunningTimer);
+    return () => {
+      window.removeEventListener('timer-updated', fetchRunningTimer);
+    };
+  }, []);
+
+  const handleStartTimer = async (taskId: string | number) => {
+    try {
+      await api.startTimer(taskId);
+      window.dispatchEvent(new Event('timer-updated'));
+      message.success(t('tasks.detail_toast.timer_start_success') || 'Bắt đầu tính giờ');
+      fetchProjectData(true);
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.detail_toast.timer_start_err'));
+    }
+  };
+
+  const handleStopTimer = async (taskId: string | number) => {
+    try {
+      await api.stopTimer(taskId);
+      window.dispatchEvent(new Event('timer-updated'));
+      message.success(t('tasks.detail_toast.timer_stop_success') || 'Đã dừng tính giờ');
+      fetchProjectData(true);
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.detail_toast.timer_stop_err'));
+    }
+  };
+
+  const handleCloneTask = async (taskId: string | number) => {
+    try {
+      const res = await api.cloneTask(taskId);
+      if (res.success) {
+        message.success(res.message || t('tasks.detail_toast.clone_success') || 'Nhân bản công việc thành công');
+        fetchProjectData(true);
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.detail_toast.clone_err') || 'Không thể nhân bản công việc');
+    }
+  };
+
+  const getTaskMenuItems = (task: Task) => {
+    const editPerm = canEditTask(task);
+    const deletePerm = canDeleteTask(task);
+    const menuItems: any[] = [];
+
+    // 1. Details
+    menuItems.push({
+      key: 'details',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <InfoCircleOutlined style={{ fontSize: '13px' }} />
+          {t('tasks.panel.view_details')}
+        </span>
+      ),
+      onClick: () => setSelectedTask(task)
+    });
+
+    // 2. Add subtask (if editable)
+    if (editPerm) {
+      menuItems.push({
+        key: 'add_subtask',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <PlusOutlined style={{ fontSize: '13px' }} />
+            {t('tasks.panel.add_subtask')}
+          </span>
+        ),
+        onClick: () => setSelectedTask(task)
+      });
+    }
+
+    // 3. Copy Link
+    menuItems.push({
+      key: 'copy_link',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <LinkOutlined style={{ fontSize: '13px' }} />
+          {t('tasks.panel.copy_url')}
+        </span>
+      ),
+      onClick: () => {
+        const link = `${window.location.origin}/projects/${task.project_id}?task_id=${task.id}`;
+        navigator.clipboard.writeText(link);
+        message.success(t('tasks.detail_toast.copy_url_success'));
+      }
+    });
+
+    // 4. Copy ID
+    menuItems.push({
+      key: 'copy_id',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <CopyOutlined style={{ fontSize: '13px' }} />
+          {t('tasks.panel.copy_id')}
+        </span>
+      ),
+      onClick: () => {
+        navigator.clipboard.writeText(`#${task.id}`);
+        message.success(t('tasks.detail_toast.copy_id_success'));
+      }
+    });
+
+    // 5. Open in New Tab
+    menuItems.push({
+      key: 'new_tab',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ExportOutlined style={{ fontSize: '13px' }} />
+          {t('tasks.panel.new_tab')}
+        </span>
+      ),
+      onClick: () => {
+        const link = `${window.location.origin}/projects/${task.project_id}?task_id=${task.id}`;
+        window.open(link, '_blank');
+      }
+    });
+
+    // 6. Watch/Unwatch
+    const isWatching = me?.id && task.watcher_ids?.includes(me.id);
+    if (Number(task.assignee_id) !== Number(me?.id)) {
+      menuItems.push({
+        key: 'toggle_watch',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isWatching ? (
+              <EyeInvisibleOutlined style={{ fontSize: '13px' }} />
+            ) : (
+              <EyeOutlined style={{ fontSize: '13px' }} />
+            )}
+            {isWatching ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
+          </span>
+        ),
+        onClick: () => handleToggleWatchTask(task.id)
+      });
+    }
+
+    // 7. Start/Stop Timer
+    const isTimerRunning = runningTimer && Number(runningTimer.task_id) === Number(task.id);
+    menuItems.push({
+      key: 'toggle_timer',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {isTimerRunning ? (
+            <PauseCircleOutlined style={{ fontSize: '13px', color: '#ef4444' }} />
+          ) : (
+            <PlayCircleOutlined style={{ fontSize: '13px', color: '#22c55e' }} />
+          )}
+          {isTimerRunning ? t('tasks.panel.stop_timer') : t('tasks.panel.start_timer')}
+        </span>
+      ),
+      onClick: () => isTimerRunning ? handleStopTimer(task.id) : handleStartTimer(task.id)
+    });
+
+    // 8. Duplicate (if editable)
+    if (editPerm) {
+      menuItems.push({
+        key: 'duplicate',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <BranchesOutlined style={{ fontSize: '13px' }} />
+            {t('tasks.panel.duplicate')}
+          </span>
+        ),
+        onClick: () => handleCloneTask(task.id)
+      });
+    }
+
+    // 9. Delete (if deletable)
+    if (deletePerm) {
+      menuItems.push({ type: 'divider' });
+      menuItems.push({
+        key: 'delete',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)' }}>
+            <DeleteOutlined style={{ fontSize: '13px' }} />
+            {t('tasks.panel.delete')}
+          </span>
+        ),
+        danger: true,
+        onClick: () => handleDeleteTask(task.id)
+      });
+    }
+
+    return menuItems;
+  };
+
   const [project, setProject] = useState<any>(null);
   const [showManageStatusesModal, setShowManageStatusesModal] = useState(false);
   const [showMappingModal, setShowMappingModal] = useState(false);
@@ -944,6 +1224,14 @@ const ProjectDetailPage: React.FC = () => {
   };
 
   const [tasks, setTasks] = useState<Task[]>([]);
+
+  // Workflow guided transition states
+  const [wfModalOpen, setWfModalOpen] = useState(false);
+  const [wfTask, setWfTask] = useState<any>(null);
+  const [wfTargetStatus, setWfTargetStatus] = useState<string>('');
+  const [wfTargetStatusName, setWfTargetStatusName] = useState<string>('');
+  const [wfFailedRules, setWfFailedRules] = useState<any[]>([]);
+  const [onWfSuccessCallback, setOnWfSuccessCallback] = useState<((updatedTask: any) => void) | null>(null);
 
   // Index tasks by parent ID to optimize recursive lookup speeds from O(N) to O(1)
   const tasksByParentId = useMemo(() => {
@@ -1001,6 +1289,24 @@ const ProjectDetailPage: React.FC = () => {
   // Timesheet states
   const [projectTimeEntries, setProjectTimeEntries] = useState<any[]>([]);
   const [loadingTimesheet, setLoadingTimesheet] = useState(false);
+
+  // Milestones states
+  const [milestones, setMilestones] = useState<any[]>([]);
+  const [selectedMilestone, setSelectedMilestone] = useState<any | null>(null);
+  const [burndownData, setBurndownData] = useState<any[]>([]);
+  const [loadingBurndown, setLoadingBurndown] = useState(false);
+  const [showMilestoneModal, setShowMilestoneModal] = useState(false);
+  const [editingMilestone, setEditingMilestone] = useState<any | null>(null);
+  const [milestoneFilter, setMilestoneFilter] = useState<string | number | 'all'>('all');
+  const [burndownMetric, setBurndownMetric] = useState<'tasks' | 'hours'>('tasks');
+
+  // Milestone Form fields
+  const [mName, setMName] = useState('');
+  const [mDescription, setMDescription] = useState('');
+  const [mGoal, setMGoal] = useState('');
+  const [mStartDate, setMStartDate] = useState('');
+  const [mDueDate, setMDueDate] = useState('');
+  const [mStatus, setMStatus] = useState<string>('planned');
   const [timesheetDateFilter, setTimesheetDateFilter] = useState('all'); // all, today, week, month, custom
   const [timesheetStartDate, setTimesheetStartDate] = useState('');
   const [timesheetEndDate, setTimesheetEndDate] = useState('');
@@ -1488,6 +1794,18 @@ const ProjectDetailPage: React.FC = () => {
       } catch (e) {
         console.error('Failed to load project time entries', e);
       }
+      try {
+        const resMilestones = await api.getProjectMilestones(id);
+        if (resMilestones?.success) {
+          setMilestones(resMilestones.data || []);
+        }
+      } catch (e) {
+        console.error('Failed to load milestones', e);
+      }
+      if (selectedMilestone?.id) {
+        fetchMilestoneDetails(selectedMilestone.id);
+        fetchMilestoneBurndown(selectedMilestone.id);
+      }
     } catch (err) {
       console.error(err);
       message.error(t('project_detail.toast.load_err'));
@@ -1703,6 +2021,14 @@ const ProjectDetailPage: React.FC = () => {
       if (!matchesTitle && !matchesId) return false;
     }
 
+    if (milestoneFilter !== 'all') {
+      if (milestoneFilter === 'none') {
+        if (t.milestone_id) return false;
+      } else {
+        if (Number(t.milestone_id) !== Number(milestoneFilter)) return false;
+      }
+    }
+
     if (filterMyTasks && me) {
       if (t.assignee_id !== me.id) return false;
     }
@@ -1742,6 +2068,7 @@ const ProjectDetailPage: React.FC = () => {
     setFilterStatuses([]);
     setFilterPriorities([]);
     setFilterTypes([]);
+    setMilestoneFilter('all');
   };
 
   const hasMatchingSubtasks = (parentId: number): boolean => {
@@ -1757,6 +2084,12 @@ const ProjectDetailPage: React.FC = () => {
     return tasks.filter((t) => {
       if (String(t.status) !== String(status) || t.parent_task_id) return false;
 
+      // If milestone filter is active, the task must not have a conflicting milestone
+      if (milestoneFilter !== 'all') {
+        if (milestoneFilter === 'none' && t.milestone_id) return false;
+        if (milestoneFilter !== 'none' && Number(t.milestone_id) !== Number(milestoneFilter)) return false;
+      }
+
       // Show parent if it matches filters or has a subtask that matches filters
       if (taskMatchesFilters(t)) return true;
       if (hasMatchingSubtasks(Number(t.id))) return true;
@@ -1770,6 +2103,12 @@ const ProjectDetailPage: React.FC = () => {
       const filtered = tasks.filter((t) => {
         if (String(t.status) !== String(col.key) || t.parent_task_id) return false;
 
+        // If milestone filter is active, the task must not have a conflicting milestone
+        if (milestoneFilter !== 'all') {
+          if (milestoneFilter === 'none' && t.milestone_id) return false;
+          if (milestoneFilter !== 'none' && Number(t.milestone_id) !== Number(milestoneFilter)) return false;
+        }
+
         // Show parent if it matches filters or has a subtask that matches filters
         if (taskMatchesFilters(t)) return true;
         if (hasMatchingSubtasks(Number(t.id))) return true;
@@ -1780,7 +2119,7 @@ const ProjectDetailPage: React.FC = () => {
       map[col.key] = [...filtered].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     });
     return map;
-  }, [tasks, filterSearch, filterMyTasks, filterAssigneeId, filterAssignees, filterUnassigned, filterStatuses, filterPriorities, filterTypes, me, columns]);
+  }, [tasks, filterSearch, milestoneFilter, filterMyTasks, filterAssigneeId, filterAssignees, filterUnassigned, filterStatuses, filterPriorities, filterTypes, me, columns]);
 
   const listTasksGrouped = useMemo(() => {
     // Only show parent tasks (no parent_task_id) in the grouped view.
@@ -1810,7 +2149,7 @@ const ProjectDetailPage: React.FC = () => {
       });
     }
     return groups;
-  }, [tasks, filterSearch, filterMyTasks, filterAssigneeId, filterAssignees, filterUnassigned, filterStatuses, filterPriorities, filterTypes, me, groupBy, columns, t]);
+  }, [tasks, filterSearch, milestoneFilter, filterMyTasks, filterAssigneeId, filterAssignees, filterUnassigned, filterStatuses, filterPriorities, filterTypes, me, groupBy, columns, t]);
 
   const isTaskDone = (task: Task) => {
     const statusObj = project?.statuses?.find((s: any) => s.id === task.status);
@@ -1850,9 +2189,7 @@ const ProjectDetailPage: React.FC = () => {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr;
     const pad = (n: number) => String(n).padStart(2, '0');
-    const timePart = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    const datePart = d.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
-    return `${timePart} ${datePart}`;
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
   const isToday = (dateStr?: string) => {
@@ -1903,7 +2240,23 @@ const ProjectDetailPage: React.FC = () => {
         }
       }
     } catch (err: any) {
-      message.error(err.response?.data?.message || t('tasks.toast.status_err'));
+      if (err.response?.data?.workflow_error && err.response?.data?.failed_rules) {
+        const statusObj = project?.statuses?.find((s: any) => s.id === nextStatus);
+        const statusName = statusObj ? statusObj.name : nextStatus;
+        setWfTask(tasks.find(t => t.id === id));
+        setWfTargetStatus(nextStatus);
+        setWfTargetStatusName(statusName);
+        setWfFailedRules(err.response.data.failed_rules);
+        setOnWfSuccessCallback(() => (updatedTask: any) => {
+          setTasks(prev => prev.map(t => t.id === id ? updatedTask : t));
+          if (selectedTask && selectedTask.id === id) {
+            setEditStatus(nextStatus);
+          }
+        });
+        setWfModalOpen(true);
+      } else {
+        message.error(err.response?.data?.message || t('tasks.toast.status_err'));
+      }
     }
   };
 
@@ -1921,7 +2274,23 @@ const ProjectDetailPage: React.FC = () => {
         }
       }
     } catch (err: any) {
-      message.error(err.response?.data?.message || t('tasks.toast.status_err'));
+      if (err.response?.data?.workflow_error && err.response?.data?.failed_rules) {
+        const statusObj = project?.statuses?.find((s: any) => s.id === 'done');
+        const statusName = statusObj ? statusObj.name : 'Done';
+        setWfTask(tasks.find(t => t.id === id));
+        setWfTargetStatus('done');
+        setWfTargetStatusName(statusName);
+        setWfFailedRules(err.response.data.failed_rules);
+        setOnWfSuccessCallback(() => (updatedTask: any) => {
+          setTasks(prev => prev.map(t => t.id === id ? updatedTask : t));
+          if (selectedTask && selectedTask.id === id) {
+            setEditStatus('done');
+          }
+        });
+        setWfModalOpen(true);
+      } else {
+        message.error(err.response?.data?.message || t('tasks.toast.status_err'));
+      }
     }
   };
 
@@ -2299,9 +2668,23 @@ const ProjectDetailPage: React.FC = () => {
       } catch (err: any) {
         console.error('[DragDnD] API error, reverting tasks:', err);
         setTasks(prevTasks);
-        const errMsg = err.response?.data?.message ||
-          (err.response?.data?.workflow_error ? t('workflow.transition_blocked') : t('tasks.toast.status_err'));
-        message.error(errMsg);
+        if (err.response?.data?.workflow_error && err.response?.data?.failed_rules) {
+          const statusId = newStatus;
+          const statusObj = project?.statuses?.find((s: any) => s.id === statusId);
+          const statusName = statusObj ? statusObj.name : statusId;
+
+          setWfTask(prevTasks.find(t => String(t.id) === String(taskId)));
+          setWfTargetStatus(statusId);
+          setWfTargetStatusName(statusName);
+          setWfFailedRules(err.response.data.failed_rules);
+          setOnWfSuccessCallback(() => (updatedTask: any) => {
+            setTasks(prev => prev.map(t => String(t.id) === String(updatedTask.id) ? updatedTask : t));
+          });
+          setWfModalOpen(true);
+        } else {
+          const errMsg = err.response?.data?.message || t('tasks.toast.status_err');
+          message.error(errMsg);
+        }
       }
     }, 50);
   };
@@ -2316,8 +2699,8 @@ const ProjectDetailPage: React.FC = () => {
         priority: newTaskPriority || 'medium',
       };
       if (newTaskAssignee) payload.assignee_id = newTaskAssignee;
-      if (newTaskStartDate) payload.start_date = newTaskStartDate;
-      if (newTaskDueDate) payload.due_date = newTaskDueDate;
+      if (newTaskStartDate) payload.start_date = new Date(newTaskStartDate).toISOString();
+      if (newTaskDueDate) payload.due_date = new Date(newTaskDueDate).toISOString();
       const res = await api.createTask(payload);
       if (res.success) {
         message.success(t('project_detail.toast.task_created'));
@@ -2369,6 +2752,796 @@ const ProjectDetailPage: React.FC = () => {
       const errMsg = err.response?.data?.message || t('projects.members.delete_failed');
       message.error(errMsg);
     }
+  };
+
+  const fetchMilestoneBurndown = async (milestoneId: string | number) => {
+    setLoadingBurndown(true);
+    try {
+      const res = await api.getMilestoneBurndown(milestoneId);
+      if (res.success) {
+        setBurndownData(res.data || []);
+      }
+    } catch (e) {
+      console.error('Failed to fetch burndown data', e);
+    } finally {
+      setLoadingBurndown(false);
+    }
+  };
+
+  const fetchMilestoneDetails = async (milestoneId: string | number) => {
+    try {
+      const res = await api.getMilestoneDetails(milestoneId);
+      if (res.success) {
+        setSelectedMilestone(res.data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch milestone details', e);
+    }
+  };
+
+  const handleOpenMilestoneModal = (mil?: any) => {
+    if (mil) {
+      setEditingMilestone(mil);
+      setMName(mil.name || '');
+      setMDescription(mil.description || '');
+      setMGoal(mil.goal || '');
+      setMStartDate(mil.start_date ? mil.start_date.substring(0, 10) : '');
+      setMDueDate(mil.due_date ? mil.due_date.substring(0, 10) : '');
+      setMStatus(mil.status || 'planned');
+    } else {
+      setEditingMilestone(null);
+      setMName('');
+      setMDescription('');
+      setMGoal('');
+      setMStartDate('');
+      setMDueDate('');
+      setMStatus('planned');
+    }
+    setShowMilestoneModal(true);
+  };
+
+  const handleSaveMilestone = async () => {
+    if (!id) return;
+    if (!mName.trim()) {
+      message.error('Milestone name is required');
+      return;
+    }
+    try {
+      const values: any = {
+        name: mName.trim(),
+        description: mDescription.trim() || undefined,
+        goal: mGoal.trim() || undefined,
+        start_date: mStartDate || undefined,
+        due_date: mDueDate || undefined,
+        status: mStatus as any,
+      };
+
+      let res;
+      if (editingMilestone) {
+        res = await api.updateMilestone(editingMilestone.id, values);
+      } else {
+        res = await api.createMilestone(id, values);
+      }
+
+      if (res.success) {
+        message.success(t('milestones.save_success'));
+        setShowMilestoneModal(false);
+        setEditingMilestone(null);
+        // Refresh milestones list
+        const resMilestones = await api.getProjectMilestones(id);
+        if (resMilestones?.success) {
+          setMilestones(resMilestones.data || []);
+        }
+        fetchProjectData(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error(err.response?.data?.message || 'Error saving milestone');
+    }
+  };
+
+  const handleDeleteMilestone = async (milestoneId: string | number) => {
+    if (!id) return;
+    try {
+      const res = await api.deleteMilestone(milestoneId);
+      if (res.success) {
+        message.success(t('milestones.delete_success'));
+        if (selectedMilestone?.id === milestoneId) {
+          setSelectedMilestone(null);
+        }
+        // Refresh milestones list
+        const resMilestones = await api.getProjectMilestones(id);
+        if (resMilestones?.success) {
+          setMilestones(resMilestones.data || []);
+        }
+        fetchProjectData(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error(err.response?.data?.message || 'Error deleting milestone');
+    }
+  };
+
+  const handleUpdateMilestoneStatus = async (milestoneId: string | number, newStatus: any) => {
+    if (!id) return;
+    try {
+      const res = await api.updateMilestone(milestoneId, { status: newStatus });
+      if (res.success) {
+        message.success(t('milestones.save_success'));
+        // Refresh milestones list
+        const resMilestones = await api.getProjectMilestones(id);
+        if (resMilestones?.success) {
+          setMilestones(resMilestones.data || []);
+        }
+        // If selected milestone status changed, update or deselect it
+        if (selectedMilestone?.id === milestoneId) {
+          setSelectedMilestone(null);
+        }
+        fetchProjectData(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error(err.response?.data?.message || 'Error updating milestone status');
+    }
+  };
+
+  const handleAssignTasksToMilestone = async (milestoneId: string | number, taskIds: (string | number)[]) => {
+    try {
+      const res = await api.assignTasksToMilestone(milestoneId, taskIds);
+      if (res.success) {
+        message.success(t('milestones.assign_success'));
+        fetchMilestoneDetails(milestoneId);
+        fetchMilestoneBurndown(milestoneId);
+        fetchProjectData(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error(err.response?.data?.message || 'Error assigning tasks');
+    }
+  };
+
+  const handleRemoveTaskFromMilestone = async (milestoneId: string | number, taskId: string | number) => {
+    try {
+      const res = await api.removeTasksFromMilestone(milestoneId, [taskId]);
+      if (res.success) {
+        message.success(t('milestones.remove_success'));
+        fetchMilestoneDetails(milestoneId);
+        fetchMilestoneBurndown(milestoneId);
+        fetchProjectData(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error(err.response?.data?.message || 'Error removing task');
+    }
+  };
+
+  const renderMilestoneCard = (m: any) => {
+    const isSelected = selectedMilestone?.id === m.id;
+    const milestoneTasks = tasks.filter((t: any) => Number(t.milestone_id) === Number(m.id));
+    const tasksCount = milestoneTasks.length;
+    const completedTasksCount = milestoneTasks.filter((t: any) => t.status === 'done').length;
+    const totalEstimatedHours = milestoneTasks.reduce((sum: number, t: any) => sum + (Number(t.estimated_hours) || 0), 0);
+    const completedEstimatedHours = milestoneTasks.filter((t: any) => t.status === 'done').reduce((sum: number, t: any) => sum + (Number(t.estimated_hours) || 0), 0);
+
+    const progressPercent = tasksCount > 0 ? Math.round((completedTasksCount / tasksCount) * 100) : 0;
+    const progressHoursPercent = totalEstimatedHours > 0 ? Math.round((completedEstimatedHours / totalEstimatedHours) * 100) : 0;
+
+    // Days remaining logic
+    let dateText = '';
+    let isOverdue = false;
+    if (m.due_date) {
+      const due = new Date(m.due_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diffTime = due.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      if (diffDays < 0) {
+        dateText = t('tasks.panel.overdue_by', { days: Math.abs(diffDays) });
+        isOverdue = true;
+      } else {
+        dateText = t('milestones.days_remaining', { days: diffDays });
+      }
+    }
+
+    return (
+      <div
+        key={m.id}
+        style={{
+          background: 'var(--bg-card)',
+          borderRadius: '12px',
+          border: '1px solid var(--border-color)',
+          padding: '24px',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+          position: 'relative',
+          transition: 'all 0.2s',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)' }}>{m.name}</h3>
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'planned',
+                      label: (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: 600, color: '#3b82f6' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }} />
+                          {t('milestones.status.planned')}
+                        </span>
+                      )
+                    },
+                    {
+                      key: 'active',
+                      label: (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: 600, color: '#22c55e' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
+                          {t('milestones.status.active')}
+                        </span>
+                      )
+                    },
+                    {
+                      key: 'completed',
+                      label: (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: 600, color: '#10b981' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                          {t('milestones.status.completed')}
+                        </span>
+                      )
+                    },
+                    {
+                      key: 'cancelled',
+                      label: (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: 600, color: '#ef4444' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                          {t('milestones.status.cancelled')}
+                        </span>
+                      )
+                    }
+                  ],
+                  onClick: ({ key }) => handleUpdateMilestoneStatus(m.id, key)
+                }}
+                trigger={['click']}
+              >
+                <span
+                  style={{
+                    background: m.status === 'active' 
+                      ? 'rgba(34, 197, 94, 0.12)' 
+                      : m.status === 'planned' 
+                      ? 'rgba(59, 130, 246, 0.12)' 
+                      : m.status === 'completed'
+                      ? 'rgba(16, 185, 129, 0.12)'
+                      : 'rgba(239, 68, 68, 0.12)',
+                    color: m.status === 'active' 
+                      ? '#22c55e' 
+                      : m.status === 'planned' 
+                      ? '#3b82f6' 
+                      : m.status === 'completed'
+                      ? '#10b981'
+                      : '#ef4444',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    border: m.status === 'active' 
+                      ? '1px solid rgba(34, 197, 94, 0.25)' 
+                      : m.status === 'planned' 
+                      ? '1px solid rgba(59, 130, 246, 0.25)' 
+                      : m.status === 'completed'
+                      ? '1px solid rgba(16, 185, 129, 0.25)'
+                      : '1px solid rgba(239, 68, 68, 0.25)',
+                    transition: 'all 0.15s ease',
+                  }}
+                  className="interactive-status-tag"
+                >
+                  {t(`milestones.status.${m.status}`)}
+                  <DownOutlined style={{ fontSize: '9px', opacity: 0.8 }} />
+                </span>
+              </Dropdown>
+            </div>
+            {m.start_date && m.due_date && (
+              <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CalendarOutlined style={{ fontSize: '13px' }} />
+                <span>{new Date(m.start_date).toLocaleDateString()} - {new Date(m.due_date).toLocaleDateString()}</span>
+                {m.status === 'active' && (
+                  <span style={{ color: isOverdue ? '#ef4444' : '#22c55e', fontWeight: 500, marginLeft: '4px' }}>
+                    ({dateText})
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenMilestoneModal(m);
+              }}
+            />
+            <Popconfirm
+              title={t('milestones.delete_confirm')}
+              onConfirm={(e) => {
+                e?.stopPropagation();
+                handleDeleteMilestone(m.id);
+              }}
+              okText={t('common.yes' as any, undefined, 'Có')}
+              cancelText={t('common.cancel' as any, undefined, 'Hủy')}
+            >
+              <Button type="text" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Popconfirm>
+            <Button
+              type={isSelected ? 'primary' : 'default'}
+              onClick={() => {
+                if (isSelected) {
+                  setSelectedMilestone(null);
+                } else {
+                  fetchMilestoneDetails(m.id);
+                  fetchMilestoneBurndown(m.id);
+                }
+              }}
+            >
+              {isSelected ? 'Thu gọn' : 'Chi tiết & Biểu đồ'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Progress Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '24px', marginBottom: '16px' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', marginBottom: '6px', color: 'var(--text-secondary)' }}>
+              <span>{t('milestones.tasks')}</span>
+              <span>{completedTasksCount}/{tasksCount} ({progressPercent}%)</span>
+            </div>
+            <div style={{ height: '8px', background: 'var(--bg-input)', borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${progressPercent}%`, background: '#22c55e', borderRadius: '4px', transition: 'width 0.3s' }} />
+            </div>
+          </div>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', marginBottom: '6px', color: 'var(--text-secondary)' }}>
+              <span>{t('milestones.estimated_hours')}</span>
+              <span>{completedEstimatedHours}h/{totalEstimatedHours}h ({progressHoursPercent}%)</span>
+            </div>
+            <div style={{ height: '8px', background: 'var(--bg-input)', borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${progressHoursPercent}%`, background: '#3b82f6', borderRadius: '4px', transition: 'width 0.3s' }} />
+            </div>
+          </div>
+        </div>
+
+        {m.goal && (
+          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '16px', fontSize: '13px' }}>
+            <strong style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>{t('milestones.goal')}:</strong>
+            <span style={{ color: 'var(--text-primary)' }}>{m.goal}</span>
+          </div>
+        )}
+
+        {/* Extended Detail section */}
+        {isSelected && selectedMilestone && selectedMilestone.id === m.id && (
+          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px', marginTop: '20px' }}>
+            {/* Burndown Chart Panel */}
+            <div style={{ background: 'rgba(0,0,0,0.1)', padding: '20px', borderRadius: '10px', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h4 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600 }}>{t('milestones.burndown')}</h4>
+                <Radio.Group size="small" value={burndownMetric} onChange={(e) => setBurndownMetric(e.target.value)}>
+                  <Radio.Button value="tasks">{t('milestones.burndown.tasks')}</Radio.Button>
+                  <Radio.Button value="hours">{t('milestones.burndown.hours')}</Radio.Button>
+                </Radio.Group>
+              </div>
+
+              {loadingBurndown ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}><Spin /></div>
+              ) : burndownData.length === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>No burndown data available. Make sure the milestone has tasks and valid start/due dates.</div>
+              ) : (
+                <div style={{ height: '300px', width: '100%' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={burndownData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                      <XAxis dataKey="date" stroke="var(--text-secondary)" style={{ fontSize: '11px' }} />
+                      <YAxis stroke="var(--text-secondary)" style={{ fontSize: '11px' }} />
+                      <RechartsTooltip contentStyle={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }} />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey={burndownMetric === 'tasks' ? 'ideal_tasks' : 'ideal_hours'}
+                        stroke="#96979a"
+                        strokeDasharray="5 5"
+                        name={t('milestones.burndown.ideal')}
+                        dot={false}
+                        strokeWidth={2}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey={burndownMetric === 'tasks' ? 'actual_tasks' : 'actual_hours'}
+                        stroke={burndownMetric === 'tasks' ? '#22c55e' : '#3b82f6'}
+                        name={t('milestones.burndown.actual')}
+                        strokeWidth={3}
+                        connectNulls
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            {/* Tasks list inside Milestone */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h4 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600 }}>
+                  {t('milestones.tasks')} ({selectedMilestone.tasks?.length || 0})
+                </h4>
+                {/* Select task to add */}
+                <Select
+                  placeholder={t('milestones.add_task')}
+                  style={{ width: '250px' }}
+                  value={undefined}
+                  onChange={(val) => { if (val) handleAssignTasksToMilestone(m.id, [val]); }}
+                  showSearch
+                  filterOption={(input, option) =>
+                    String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+                  }
+                >
+                  {tasks
+                    .filter(tItem => !tItem.parent_task_id && tItem.milestone_id !== m.id)
+                    .map(tItem => (
+                      <Select.Option key={tItem.id} value={tItem.id}>
+                        {tItem.title}
+                      </Select.Option>
+                    ))}
+                </Select>
+              </div>
+
+              {(!selectedMilestone.tasks || selectedMilestone.tasks.length === 0) ? (
+                <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', background: 'rgba(255,255,255,0.01)', borderRadius: '8px', border: '1px dashed var(--border-color)' }}>
+                  {t('milestones.no_tasks')}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '380px', overflowY: 'auto', paddingRight: '6px' }}>
+                  {selectedMilestone.tasks.map((milestoneTask: any) => {
+                    const taskItem = tasks.find((t: any) => t.id === milestoneTask.id) || milestoneTask;
+                    return (
+                      <div
+                        key={taskItem.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          background: 'rgba(255,255,255,0.02)',
+                          padding: '10px 16px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-color)',
+                        }}
+                      >
+                        <div
+                          style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}
+                          onClick={() => handleSelectTask(taskItem)}
+                        >
+                          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>#{taskItem.id}</span>
+                          <span style={{ color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500 }}>{taskItem.title}</span>
+                          {(() => {
+                            const sObj = getFallbackStatusObj(taskItem);
+                            return (
+                              <span
+                                style={{
+                                  background: `${sObj.color}1c`,
+                                  color: sObj.color,
+                                  border: `1px solid ${sObj.color}3d`,
+                                  fontSize: '11px',
+                                  padding: '1px 6px',
+                                  borderRadius: '3px',
+                                  whiteSpace: 'nowrap',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {sObj.name}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<CloseOutlined />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveTaskFromMilestone(m.id, taskItem.id);
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderMilestoneRow = (m: any) => {
+    const isSelected = selectedMilestone?.id === m.id;
+    const milestoneTasks = tasks.filter((t: any) => Number(t.milestone_id) === Number(m.id));
+    const tasksCount = milestoneTasks.length;
+    const completedTasksCount = milestoneTasks.filter((t: any) => t.status === 'done').length;
+    const progressPercent = tasksCount > 0 ? Math.round((completedTasksCount / tasksCount) * 100) : 0;
+
+    return (
+      <div
+        key={m.id}
+        style={{
+          background: 'var(--bg-card)',
+          borderRadius: '8px',
+          border: '1px solid var(--border-color)',
+          padding: '16px',
+          transition: 'all 0.2s',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{m.name}</span>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'planned',
+                    label: (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: '#3b82f6' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }} />
+                        {t('milestones.status.planned')}
+                      </span>
+                    )
+                  },
+                  {
+                    key: 'active',
+                    label: (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: '#22c55e' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
+                        {t('milestones.status.active')}
+                      </span>
+                    )
+                  },
+                  {
+                    key: 'completed',
+                    label: (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: '#10b981' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                        {t('milestones.status.completed')}
+                      </span>
+                    )
+                  },
+                  {
+                    key: 'cancelled',
+                    label: (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: '#ef4444' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                        {t('milestones.status.cancelled')}
+                      </span>
+                    )
+                  }
+                ],
+                onClick: ({ key }) => handleUpdateMilestoneStatus(m.id, key)
+              }}
+              trigger={['click']}
+            >
+              <span
+                style={{
+                  background: m.status === 'completed' 
+                    ? 'rgba(16, 185, 129, 0.12)' 
+                    : m.status === 'cancelled' 
+                    ? 'rgba(239, 68, 68, 0.12)' 
+                    : m.status === 'active'
+                    ? 'rgba(34, 197, 94, 0.12)'
+                    : 'rgba(59, 130, 246, 0.12)',
+                  color: m.status === 'completed' 
+                    ? '#10b981' 
+                    : m.status === 'cancelled' 
+                    ? '#ef4444' 
+                    : m.status === 'active'
+                    ? '#22c55e'
+                    : '#3b82f6',
+                  padding: '2px 6px',
+                  borderRadius: '3px',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  border: m.status === 'completed' 
+                    ? '1px solid rgba(16, 185, 129, 0.2)' 
+                    : m.status === 'cancelled' 
+                    ? '1px solid rgba(239, 68, 68, 0.2)' 
+                    : m.status === 'active'
+                    ? '1px solid rgba(34, 197, 94, 0.2)'
+                    : '1px solid rgba(59, 130, 246, 0.2)',
+                  transition: 'all 0.15s ease',
+                }}
+                className="interactive-status-tag"
+              >
+                {t(`milestones.status.${m.status}`)}
+                <DownOutlined style={{ fontSize: '8px', opacity: 0.8 }} />
+              </span>
+            </Dropdown>
+            {m.due_date && (
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                {t('milestones.due_date')}: {new Date(m.due_date).toLocaleDateString()}
+              </span>
+            )}
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              {completedTasksCount}/{tasksCount} {t('milestones.tasks')} ({progressPercent}%)
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => {
+                handleOpenMilestoneModal(m);
+              }}
+            />
+            <Popconfirm
+              title={t('milestones.delete_confirm')}
+              onConfirm={() => handleDeleteMilestone(m.id)}
+              okText={t('common.yes' as any, undefined, 'Có')}
+              cancelText={t('common.cancel' as any, undefined, 'Hủy')}
+            >
+              <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+            </Popconfirm>
+            <Button
+              size="small"
+              type={isSelected ? 'primary' : 'default'}
+              onClick={() => {
+                if (isSelected) {
+                  setSelectedMilestone(null);
+                } else {
+                  fetchMilestoneDetails(m.id);
+                  fetchMilestoneBurndown(m.id);
+                }
+              }}
+            >
+              {isSelected ? 'Thu gọn' : 'Chi tiết'}
+            </Button>
+          </div>
+        </div>
+
+        {isSelected && selectedMilestone && selectedMilestone.id === m.id && (
+          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '16px' }}>
+            {m.goal && (
+              <div style={{ marginBottom: '12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                <strong>{t('milestones.goal')}:</strong> {m.goal}
+              </div>
+            )}
+            
+            {/* Burndown Chart Panel for Expanded simpler milestone */}
+            <div style={{ background: 'rgba(0,0,0,0.1)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h4 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '13px', fontWeight: 600 }}>{t('milestones.burndown')}</h4>
+                <Radio.Group size="small" value={burndownMetric} onChange={(e) => setBurndownMetric(e.target.value)}>
+                  <Radio.Button value="tasks">{t('milestones.burndown.tasks')}</Radio.Button>
+                  <Radio.Button value="hours">{t('milestones.burndown.hours')}</Radio.Button>
+                </Radio.Group>
+              </div>
+
+              {loadingBurndown ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}><Spin size="small" /></div>
+              ) : burndownData.length === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>No burndown data available.</div>
+              ) : (
+                <div style={{ height: '200px', width: '100%' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={burndownData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                      <XAxis dataKey="date" stroke="var(--text-secondary)" style={{ fontSize: '10px' }} />
+                      <YAxis stroke="var(--text-secondary)" style={{ fontSize: '10px' }} />
+                      <RechartsTooltip contentStyle={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }} />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey={burndownMetric === 'tasks' ? 'ideal_tasks' : 'ideal_hours'}
+                        stroke="#96979a"
+                        strokeDasharray="5 5"
+                        name={t('milestones.burndown.ideal')}
+                        dot={false}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey={burndownMetric === 'tasks' ? 'actual_tasks' : 'actual_hours'}
+                        stroke={burndownMetric === 'tasks' ? '#22c55e' : '#3b82f6'}
+                        name={t('milestones.burndown.actual')}
+                        strokeWidth={2}
+                        connectNulls
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            {/* Task list */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>{t('milestones.tasks')}</span>
+                <Select
+                  placeholder={t('milestones.add_task')}
+                  style={{ width: '200px' }}
+                  size="small"
+                  value={undefined}
+                  onChange={(val) => { if (val) handleAssignTasksToMilestone(m.id, [val]); }}
+                  showSearch
+                  filterOption={(input, option) =>
+                    String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+                  }
+                >
+                  {tasks
+                    .filter(tItem => !tItem.parent_task_id && tItem.milestone_id !== m.id)
+                    .map(tItem => (
+                      <Select.Option key={tItem.id} value={tItem.id}>
+                        {tItem.title}
+                      </Select.Option>
+                    ))}
+                </Select>
+              </div>
+
+              {(!selectedMilestone.tasks || selectedMilestone.tasks.length === 0) ? (
+                <div style={{ padding: '10px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                  {t('milestones.no_tasks')}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '300px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {selectedMilestone.tasks.map((milestoneTask: any) => {
+                    const taskItem = tasks.find((t: any) => t.id === milestoneTask.id) || milestoneTask;
+                    return (
+                      <div
+                        key={taskItem.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          background: 'rgba(255,255,255,0.01)',
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          border: '1px solid var(--border-color)',
+                        }}
+                      >
+                        <div
+                          style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', flex: 1 }}
+                          onClick={() => handleSelectTask(taskItem)}
+                        >
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>#{taskItem.id}</span>
+                          <span style={{ color: 'var(--text-primary)', fontSize: '12px' }}>{taskItem.title}</span>
+                        </div>
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<CloseOutlined />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveTaskFromMilestone(m.id, taskItem.id);
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const filterEntriesByDate = (entries: any[]) => {
@@ -2588,32 +3761,94 @@ const ProjectDetailPage: React.FC = () => {
     }
   };
 
+  const calculateWorkingMinutes = (start: string, due: string): number => {
+    if (!start || !due) return 0;
+    const startDate = new Date(start);
+    const dueVal = new Date(due);
+    if (isNaN(startDate.getTime()) || isNaN(dueVal.getTime()) || dueVal <= startDate) return 0;
+
+    const ICT_OFFSET = 7 * 60 * 60 * 1000;
+    const startIctMs = startDate.getTime() + ICT_OFFSET;
+    const dueIctMs = dueVal.getTime() + ICT_OFFSET;
+
+    const getIctDateKey = (ms: number) => {
+      const d = new Date(ms);
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const dt = String(d.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${dt}`;
+    };
+
+    const getWorkingMinutesForDay = (dayOfWeek: number, startMin: number, endMin: number): number => {
+      if (dayOfWeek === 0) return 0;
+      if (dayOfWeek === 6) {
+        return Math.max(0, Math.min(endMin, 720) - Math.max(startMin, 480));
+      }
+      const overlap1 = Math.max(0, Math.min(endMin, 720) - Math.max(startMin, 480));
+      const overlap2 = Math.max(0, Math.min(endMin, 1020) - Math.max(startMin, 780));
+      return overlap1 + overlap2;
+    };
+
+    const startDateKey = getIctDateKey(startIctMs);
+    const dueDateKey = getIctDateKey(dueIctMs);
+
+    if (startDateKey === dueDateKey) {
+      const d = new Date(startIctMs);
+      const dayOfWeek = d.getUTCDay();
+      const startMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+      
+      const dDue = new Date(dueIctMs);
+      const dueMin = dDue.getUTCHours() * 60 + dDue.getUTCMinutes();
+
+      return getWorkingMinutesForDay(dayOfWeek, startMin, dueMin);
+    }
+
+    let totalMinutes = 0;
+    const startMidnight = new Date(startDateKey + 'T00:00:00Z').getTime();
+    const dueMidnight = new Date(dueDateKey + 'T00:00:00Z').getTime();
+
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    for (let currentMidnight = startMidnight; currentMidnight <= dueMidnight; currentMidnight += oneDayMs) {
+      const currentIctDate = new Date(currentMidnight);
+      const dayOfWeek = currentIctDate.getUTCDay();
+      const currentDateKey = getIctDateKey(currentMidnight);
+
+      let startMin = 0;
+      let endMin = 24 * 60;
+
+      if (currentDateKey === startDateKey) {
+        const dStart = new Date(startIctMs);
+        startMin = dStart.getUTCHours() * 60 + dStart.getUTCMinutes();
+      }
+      if (currentDateKey === dueDateKey) {
+        const dDue = new Date(dueIctMs);
+        endMin = dDue.getUTCHours() * 60 + dDue.getUTCMinutes();
+      }
+
+      totalMinutes += getWorkingMinutesForDay(dayOfWeek, startMin, endMin);
+    }
+
+    return totalMinutes;
+  };
+
   const calculateEstimateHours = (start: string, due: string): number | null => {
     if (!start || !due) return null;
-    const s = new Date(start).getTime();
-    const d = new Date(due).getTime();
-    if (isNaN(s) || isNaN(d) || d <= s) return null;
-    const diffMs = d - s;
-    return Math.round(diffMs / (1000 * 60 * 60));
+    const totalWorkingMinutes = calculateWorkingMinutes(start, due);
+    return Math.round(totalWorkingMinutes / 60);
   };
-
   const formatEstimate = (start: string, due: string): string => {
     if (!start || !due) return '—';
-    const s = new Date(start).getTime();
-    const d = new Date(due).getTime();
-    if (isNaN(s) || isNaN(d) || d <= s) return '—';
-    const diffMs = d - s;
-    const totalMinutes = Math.floor(diffMs / (1000 * 60));
-    const days = Math.floor(totalMinutes / (60 * 24));
-    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-    const minutes = totalMinutes % 60;
+    const totalWorkingMinutes = calculateWorkingMinutes(start, due);
+    if (totalWorkingMinutes <= 0) return '—';
+
+    const hours = Math.floor(totalWorkingMinutes / 60);
+    const minutes = totalWorkingMinutes % 60;
+
     const parts: string[] = [];
-    if (days > 0) parts.push(t('common.time.days', { count: days }));
     if (hours > 0) parts.push(t('common.time.hours', { count: hours }));
-    if (minutes > 0 && days === 0) parts.push(t('common.time.minutes', { count: minutes }));
+    if (minutes > 0) parts.push(t('common.time.minutes', { count: minutes }));
     return parts.length > 0 ? parts.join(' ') : t('common.time.less_than_minute');
   };
-
   const autoSaveTaskField = async (fieldName: string, value: any) => {
     if (!selectedTask) return;
     try {
@@ -2903,6 +4138,7 @@ const ProjectDetailPage: React.FC = () => {
 
   const tabs = [
     { key: 'tasks', label: t('project_detail.tab.tasks'), badge: tasks.filter(t => !t.parent_task_id).length },
+    { key: 'milestones', label: t('project_detail.tab.milestones'), badge: milestones.length },
     { key: 'timesheet', label: t('project_detail.tab.timesheet'), badge: projectTimeEntries.length },
     { key: 'members', label: t('project_detail.tab.members'), badge: project?.members?.length || 0 },
   ];
@@ -3129,7 +4365,7 @@ const ProjectDetailPage: React.FC = () => {
             <Tooltip title={t('projects.status.manage_btn')} placement="bottom">
               <Button
                 shape="circle"
-                icon={<SettingOutlined />}
+                icon={<SlidersOutlined />}
                 onClick={() => setShowManageStatusesModal(true)}
               />
             </Tooltip>
@@ -3209,12 +4445,15 @@ const ProjectDetailPage: React.FC = () => {
                 filterStatuses={filterStatuses}
                 filterPriorities={filterPriorities}
                 filterTypes={filterTypes}
+                milestoneFilter={milestoneFilter}
+                milestones={milestones}
                 setFilterMyTasks={setFilterMyTasks}
                 setFilterUnassigned={setFilterUnassigned}
                 setFilterAssignees={setFilterAssignees}
                 setFilterStatuses={setFilterStatuses}
                 setFilterPriorities={setFilterPriorities}
                 setFilterTypes={setFilterTypes}
+                setMilestoneFilter={setMilestoneFilter}
                 handleClearFilters={handleClearFilters}
               />
 
@@ -3352,23 +4591,72 @@ const ProjectDetailPage: React.FC = () => {
 
                     <div className="project-detail__column-body">
                       {/* Task Cards */}
-                      {colTasks.map((task: Task) => (
-                        <div key={task.id} className="project-detail__task-card" data-task-id={task.id}
-                          draggable onDragStart={(e) => handleDragStart(e, task.id)} onDragEnd={handleDragEnd}
-                          onDragOver={(e) => handleCardDragOver(e, task.id)}
-                          onDragLeave={handleCardDragLeave}
-                          onClick={() => handleSelectTask(task)}>
-                          <div className="project-detail__task-card-top">
-                            <span className="project-detail__task-card-id">#{task.id}</span>
-                            <FlagIcon color={priorityColors[task.priority] || '#f59e0b'} size={14} />
-                          </div>
-                          <div className="project-detail__task-card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <TaskTypeBadge type={task.type || 'task'} size="icon" />
-                            {task.title}
-                          </div>
+                      {colTasks.map((task: Task) => {
+                        const blockerTasks = [
+                          ...(task.dependencies || [])
+                            .filter((dep: any) => dep.type === 'blocked_by' && dep.target_task && !dep.target_task.completed_at)
+                            .map((dep: any) => dep.target_task),
+                          ...(task.inverse_dependencies || [])
+                            .filter((dep: any) => dep.type === 'blocks' && dep.task && !dep.task.completed_at)
+                            .map((dep: any) => dep.task)
+                        ];
+                        const isBlocked = blockerTasks.length > 0;
+                        const blockerNames = blockerTasks.map(t => `#${t.id} - ${t.title}`).join(', ');
+
+                        return (
+                          <div key={task.id} className="project-detail__task-card" data-task-id={task.id}
+                            draggable onDragStart={(e) => handleDragStart(e, task.id)} onDragEnd={handleDragEnd}
+                            onDragOver={(e) => handleCardDragOver(e, task.id)}
+                            onDragLeave={handleCardDragLeave}
+                            onClick={() => handleSelectTask(task)}>
+                            <div className="project-detail__task-card-top">
+                              <span className="project-detail__task-card-id">#{task.id}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} onClick={(e) => e.stopPropagation()}>
+                                <FlagIcon color={priorityColors[task.priority] || '#f59e0b'} size={14} />
+                                {(() => {
+                                  const menuItems = getTaskMenuItems(task);
+                                  if (menuItems.length === 0) return null;
+                                  return (
+                                    <Dropdown
+                                      menu={{ items: menuItems }}
+                                      trigger={['click']}
+                                    >
+                                      <button 
+                                        style={{
+                                          background: 'transparent',
+                                          border: 'none',
+                                          padding: '2px',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          color: 'var(--text-muted)',
+                                          outline: 'none',
+                                        }}
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <MoreOutlined style={{ fontSize: '14px' }} />
+                                      </button>
+                                    </Dropdown>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                            <div className="project-detail__task-card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <TaskTypeBadge type={task.type || 'task'} size="icon" />
+                              <span style={{ flex: 1 }}>{task.title}</span>
+                              {isBlocked && (
+                                <Tooltip title={`${t('tasks.blocked_by_tooltip' as any) || 'Bị chặn bởi'}: ${blockerNames}`}>
+                                  <LockOutlined style={{ color: '#ef4444', fontSize: '12px' }} />
+                                </Tooltip>
+                              )}
+                            </div>
                           <div className="project-detail__task-card-bottom">
                             <div className="project-detail__task-card-meta">
-                              <span className="project-detail__task-card-date">
+                              <span 
+                                className="project-detail__task-card-date"
+                                style={task.status === 'done' ? { color: '#22c55e', fontWeight: 500 } : undefined}
+                              >
                                 {task.due_date ? formatDateTime(task.due_date) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>{t('tasks.no_deadline')}</span>}
                               </span>
                             </div>
@@ -3455,7 +4743,6 @@ const ProjectDetailPage: React.FC = () => {
                                             <span
                                               style={{
                                                 color: isStDone ? 'var(--text-muted)' : 'var(--text-primary)',
-                                                textDecoration: isStDone ? 'line-through' : 'none',
                                                 fontWeight: 500,
                                                 overflow: 'hidden',
                                                 textOverflow: 'ellipsis',
@@ -3545,7 +4832,8 @@ const ProjectDetailPage: React.FC = () => {
                             );
                           })()}
                         </div>
-                      ))}
+                      );
+                    })}
 
                       {/* ClickUp-style Inline Create Bar */}
                       {inlineCreate === col.key && (() => {
@@ -3607,7 +4895,13 @@ const ProjectDetailPage: React.FC = () => {
                                         <UserOutlined style={{ fontSize: '12px', color: 'var(--text-muted)' }} />
                                         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tasks.panel.unassigned')}</span>
                                       </div>
-                                      {projectMembers.map((m: any) => (
+                                      {projectMembers.filter((m: any) => {
+                                        const userProjectRole = project?.members?.find((pm: any) => pm.id === me?.id)?.pivot?.role || 'member';
+                                        const isProjCreator = project?.created_by === me?.id;
+                                        const isProjManager = userProjectRole === 'manager' || isProjCreator || me?.role === 'admin';
+                                        if (isProjManager) return true;
+                                        return Number(m.id) === Number(me?.id);
+                                      }).map((m: any) => (
                                         <div key={m.id} onClick={() => setNewTaskAssignee(m.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: newTaskAssignee === m.id ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
                                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                             <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '8px', fontWeight: 700, overflow: 'hidden' }}>
@@ -3638,11 +4932,11 @@ const ProjectDetailPage: React.FC = () => {
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                           <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.start_date_label')}</span>
-                                          <input type="datetime-local" value={newTaskStartDate} onChange={(e) => setNewTaskStartDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+                                          <input type="datetime-local" value={newTaskStartDate} onChange={(e) => setNewTaskStartDate(e.target.value)} onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                           <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.due_date_label')}</span>
-                                          <input type="datetime-local" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+                                          <input type="datetime-local" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
                                         </div>
                                       </div>
                                     </div>
@@ -3828,7 +5122,7 @@ const ProjectDetailPage: React.FC = () => {
                                       )}
                                     </div>
                                     <div style={{ minWidth: 0, flex: 1 }}>
-                                      <div style={{ fontSize: '13px', fontWeight: 500, color: stIsDone ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: stIsDone ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display:'flex', alignItems:'center', gap:'5px' }}>
+                                      <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display:'flex', alignItems:'center', gap:'5px' }}>
                                         <TaskTypeBadge type={st.type || 'task'} size="icon" />
                                         {st.title}
                                       </div>
@@ -3910,9 +5204,9 @@ const ProjectDetailPage: React.FC = () => {
                                     )}
                                   </div>
                                   <div className="my-tasks__task-info">
-                                    <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <div className="title" style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                                       <TaskTypeBadge type={task.type || 'task'} size="icon" />
-                                      {task.title}
+                                      <span style={{ flex: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{task.title}</span>
                                     </div>
                                     <div className="subtitle">
                                       <span className="task-id">#{task.id}</span>
@@ -3939,7 +5233,10 @@ const ProjectDetailPage: React.FC = () => {
                                       {statusObj.name}
                                     </span>
                                   </div>
-                                  <div className={`my-tasks__task-date ${overdue ? 'overdue' : ''} ${today ? 'today' : ''}`}>
+                                  <div 
+                                    className={`my-tasks__task-date ${overdue ? 'overdue' : ''} ${today ? 'today' : ''}`}
+                                    style={isClosed ? { color: '#22c55e', fontWeight: 500 } : undefined}
+                                  >
                                     {task.start_date || task.due_date ? (
                                       task.start_date && task.due_date ? (
                                         `${formatDateTimeShort(task.start_date)} - ${formatDateTimeShort(task.due_date)}`
@@ -3967,65 +5264,7 @@ const ProjectDetailPage: React.FC = () => {
                                   )}
                                   <div className="my-tasks__task-actions" onClick={(e) => e.stopPropagation()}>
                                     {(() => {
-                                      const editPerm = canEditTask(task);
-                                      const deletePerm = canDeleteTask(task);
-                                      const menuItems: any[] = [];
-
-                                      menuItems.push({
-                                        key: 'details',
-                                        label: (
-                                          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            <InfoCircleOutlined style={{ fontSize: '13px' }} />
-                                            {t('tasks.panel.view_details')}
-                                          </span>
-                                        ),
-                                        onClick: () => setSelectedTask(task)
-                                      });
-
-                                      const isWatching = me?.id && task.watcher_ids?.includes(me.id);
-                                      if (Number(task.assignee_id) !== Number(me?.id)) {
-                                        menuItems.push({
-                                          key: 'toggle_watch',
-                                          label: (
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                              {isWatching ? (
-                                                <EyeInvisibleOutlined style={{ fontSize: '13px' }} />
-                                              ) : (
-                                                <EyeOutlined style={{ fontSize: '13px' }} />
-                                              )}
-                                              {isWatching ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
-                                            </span>
-                                          ),
-                                          onClick: () => handleToggleWatchTask(task.id)
-                                        });
-                                      }
-
-                                      if (editPerm) {
-                                        menuItems.push({
-                                          key: 'add_subtask',
-                                          label: (
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                              <PlusOutlined style={{ fontSize: '13px' }} />
-                                              {t('tasks.panel.add_subtask')}
-                                            </span>
-                                          ),
-                                          onClick: () => setSelectedTask(task)
-                                        });
-                                      }
-
-                                      if (deletePerm) {
-                                        menuItems.push({
-                                          key: 'delete',
-                                          label: (
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)' }}>
-                                              <DeleteOutlined style={{ fontSize: '13px' }} />
-                                              {t('tasks.panel.delete')}
-                                            </span>
-                                          ),
-                                          danger: true,
-                                          onClick: () => handleDeleteTask(task.id)
-                                        });
-                                      }
+                                      const menuItems = getTaskMenuItems(task);
                                       if (menuItems.length === 0) return null;
                                       return (
                                         <Dropdown
@@ -4114,7 +5353,13 @@ const ProjectDetailPage: React.FC = () => {
                                             <UserOutlined style={{ fontSize: '12px', color: 'var(--text-muted)' }} />
                                             <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tasks.panel.unassigned')}</span>
                                           </div>
-                                          {projectMembers.map((m: any) => (
+                                          {projectMembers.filter((m: any) => {
+                                            const userProjectRole = project?.members?.find((pm: any) => pm.id === me?.id)?.pivot?.role || 'member';
+                                            const isProjCreator = project?.created_by === me?.id;
+                                            const isProjManager = userProjectRole === 'manager' || isProjCreator || me?.role === 'admin';
+                                            if (isProjManager) return true;
+                                            return Number(m.id) === Number(me?.id);
+                                          }).map((m: any) => (
                                             <div key={m.id} onClick={() => setNewTaskAssignee(m.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: newTaskAssignee === m.id ? 'rgba(59,130,246,0.08)' : 'transparent' }} className="status-item-hover">
                                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                 <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '8px', fontWeight: 700, overflow: 'hidden' }}>
@@ -4144,11 +5389,11 @@ const ProjectDetailPage: React.FC = () => {
                                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                               <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.start_date_label')}</span>
-                                              <input type="datetime-local" value={newTaskStartDate} onChange={(e) => setNewTaskStartDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+                                              <input type="datetime-local" value={newTaskStartDate} onChange={(e) => setNewTaskStartDate(e.target.value)} onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
                                             </div>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                               <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '55px' }}>{t('tasks.panel.due_date_label')}</span>
-                                              <input type="datetime-local" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+                                              <input type="datetime-local" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }} style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 6px', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
                                             </div>
                                           </div>
                                         </div>
@@ -4279,7 +5524,7 @@ const ProjectDetailPage: React.FC = () => {
                   <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.role_in_project')}</th>
                   <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.active_tasks')}</th>
                   <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.date_joined')}</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 500, textAlign: 'right' }}>Action</th>
+                  {canEditProject() && <th style={{ padding: '12px 16px', fontWeight: 500, textAlign: 'right' }}>Action</th>}
                 </tr>
               </thead>
               <tbody>
@@ -4292,7 +5537,7 @@ const ProjectDetailPage: React.FC = () => {
                     const d = new Date(dateStr);
                     if (isNaN(d.getTime())) return dateStr;
                     const pad = (n: number) => String(n).padStart(2, '0');
-                    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+                    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
                   };
 
                   return (
@@ -4350,14 +5595,15 @@ const ProjectDetailPage: React.FC = () => {
                               }
                             }}
                             size="small"
-                            style={{ width: '110px' }}
+                            style={{ width: '140px' }}
                           >
-                            <Select.Option value="manager">Manager</Select.Option>
-                            <Select.Option value="member">Member</Select.Option>
+                            <Select.Option value="manager">{t('project_detail.role.manager')}</Select.Option>
+                            <Select.Option value="member">{t('project_detail.role.member')}</Select.Option>
+                            <Select.Option value="collaborator">{t('project_detail.role.collaborator')}</Select.Option>
                           </Select>
                         ) : (
-                          <span style={{ color: '#6366f1', textTransform: 'capitalize', fontSize: '13px' }}>
-                            {m.pivot?.role || 'member'}
+                          <span style={{ color: '#6366f1', fontSize: '13px' }}>
+                            {t(`project_detail.role.${m.pivot?.role || 'member'}`)}
                           </span>
                         )}
                       </td>
@@ -4373,9 +5619,9 @@ const ProjectDetailPage: React.FC = () => {
                       </td>
 
                       {/* Action */}
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        {!isOwner ? (
-                          canEditProject() ? (
+                      {canEditProject() && (
+                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          {!isOwner ? (
                             <Dropdown
                               menu={{
                                 items: [
@@ -4405,9 +5651,9 @@ const ProjectDetailPage: React.FC = () => {
                             >
                               <Button type="text" icon={<MoreOutlined />} size="small" />
                             </Dropdown>
-                          ) : null
-                        ) : null}
-                      </td>
+                          ) : null}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -4571,9 +5817,9 @@ const ProjectDetailPage: React.FC = () => {
                       <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.member')}</th>
                       <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('timesheet.log_table.task')}</th>
                       <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('timesheet.log_table.description')}</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.start_time')}</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 500 }}>{t('common.duration')}</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 500 }}></th>
+                      <th style={{ padding: '12px 16px', fontWeight: 500, width: '140px' }}>{t('common.start_time')}</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 500, width: '120px' }}>{t('common.duration')}</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 500, width: '50px' }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4597,7 +5843,7 @@ const ProjectDetailPage: React.FC = () => {
                           <td style={{ padding: '12px 16px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             <span className="description-text" title={entry.description}>{entry.description || '-'}</span>
                           </td>
-                          <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>
+                          <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                             <span className="date-text">
                               {new Date(entry.started_at).toLocaleString(locale, {
                                 year: 'numeric', month: '2-digit', day: '2-digit',
@@ -4605,10 +5851,10 @@ const ProjectDetailPage: React.FC = () => {
                               })}
                             </span>
                           </td>
-                          <td style={{ padding: '12px 16px' }}>
-                            <span className="duration-badge" style={{ background: 'var(--bg-body)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{formatSecondsToDuration(entry.duration)}</span>
+                          <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                            <span className="duration-badge" style={{ background: 'var(--bg-body)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap', display: 'inline-block' }}>{formatSecondsToDuration(entry.duration)}</span>
                           </td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          <td style={{ padding: '12px 16px', textAlign: 'right', width: '50px' }}>
                             {isOwnerOrAdmin && (
                               <Popconfirm
                                 title={t('timesheet.confirm.delete_content')}
@@ -4727,6 +5973,208 @@ const ProjectDetailPage: React.FC = () => {
           projectMembers={project?.members}
           projectStatuses={project?.statuses}
         />
+      )}
+
+      {/* Workflow Transition Guided Modal */}
+      {wfModalOpen && wfTask && (
+        <WorkflowTransitionModal
+          open={wfModalOpen}
+          task={wfTask}
+          targetStatus={wfTargetStatus}
+          targetStatusName={wfTargetStatusName}
+          failedRules={wfFailedRules}
+          projectMembers={project?.members}
+          projectLabels={project?.labels}
+          onCancel={() => {
+            setWfModalOpen(false);
+            setWfTask(null);
+          }}
+          onSuccess={(updatedTask) => {
+            setWfModalOpen(false);
+            setWfTask(null);
+            fetchProjectData();
+            if (onWfSuccessCallback) {
+              onWfSuccessCallback(updatedTask);
+            }
+          }}
+        />
+      )}
+
+      {activeTab === 'milestones' && (
+        <div style={{ marginTop: '16px' }}>
+          {/* Milestones Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <DeploymentUnitOutlined style={{ color: 'var(--primary)' }} />
+              {t('milestones.title')}
+            </h3>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => handleOpenMilestoneModal()}
+            >
+              {t('milestones.create')}
+            </Button>
+          </div>
+
+          {/* Active Milestones Section */}
+          <div style={{ marginBottom: '24px' }}>
+            <h4 style={{ color: 'var(--text-secondary)', fontSize: '14px', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginBottom: '16px' }}>
+              {t('milestones.active_milestones')}
+            </h4>
+            {milestones.filter(m => m.status === 'active').length === 0 ? (
+              <div style={{ padding: '24px', textAlign: 'center', background: 'var(--bg-card)', borderRadius: '8px', border: '1px dashed var(--border-color)', color: 'var(--text-muted)' }}>
+                {t('milestones.no_milestones')}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {milestones.filter(m => m.status === 'active').map(m => renderMilestoneCard(m))}
+              </div>
+            )}
+          </div>
+
+          {/* Planned Milestones Section */}
+          <div style={{ marginBottom: '24px' }}>
+            <h4 style={{ color: 'var(--text-secondary)', fontSize: '14px', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginBottom: '16px' }}>
+              {t('milestones.planned_milestones')}
+            </h4>
+            {milestones.filter(m => m.status === 'planned').length === 0 ? (
+              <div style={{ padding: '16px', textAlign: 'center', background: 'var(--bg-card)', borderRadius: '8px', border: '1px dashed var(--border-color)', color: 'var(--text-muted)', fontSize: '13px' }}>
+                {t('milestones.no_milestones')}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {milestones.filter(m => m.status === 'planned').map(m => renderMilestoneRow(m))}
+              </div>
+            )}
+          </div>
+
+          {/* Completed & Cancelled Milestones Section */}
+          <div>
+            <h4 style={{ color: 'var(--text-secondary)', fontSize: '14px', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginBottom: '16px' }}>
+              {t('milestones.completed_cancelled_milestones')}
+            </h4>
+            {milestones.filter(m => m.status === 'completed' || m.status === 'cancelled').length === 0 ? (
+              <div style={{ padding: '16px', textAlign: 'center', background: 'var(--bg-card)', borderRadius: '8px', border: '1px dashed var(--border-color)', color: 'var(--text-muted)', fontSize: '13px' }}>
+                {t('milestones.no_milestones')}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {milestones.filter(m => m.status === 'completed' || m.status === 'cancelled').map(m => renderMilestoneRow(m))}
+              </div>
+            )}
+          </div>
+
+          {/* Create/Edit Milestone Modal */}
+          {showMilestoneModal && (
+            <Modal
+              title={editingMilestone ? t('milestones.edit') : t('milestones.create')}
+              open={showMilestoneModal}
+              onCancel={() => {
+                setShowMilestoneModal(false);
+                setEditingMilestone(null);
+              }}
+              footer={null}
+              destroyOnClose
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '12px 0' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('milestones.name')} *</label>
+                  <Input
+                    required
+                    value={mName}
+                    onChange={(e) => setMName(e.target.value)}
+                    placeholder="e.g. Sprint 1, Q2 Launch"
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('milestones.description')}</label>
+                  <Input.TextArea
+                    value={mDescription}
+                    onChange={(e) => setMDescription(e.target.value)}
+                    rows={3}
+                    placeholder="Description of the milestone..."
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('milestones.goal')}</label>
+                  <Input.TextArea
+                    value={mGoal}
+                    onChange={(e) => setMGoal(e.target.value)}
+                    rows={2}
+                    placeholder="What is the main goal or target?"
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('milestones.start_date')}</label>
+                    <input
+                      type="date"
+                      value={mStartDate}
+                      onChange={(e) => setMStartDate(e.target.value)}
+                      style={{
+                        background: 'var(--bg-input, #2a2a2a)',
+                        border: '1px solid var(--border-color, #3a3a3a)',
+                        borderRadius: '6px',
+                        padding: '6px 10px',
+                        color: 'var(--text-primary)',
+                        outline: 'none'
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('milestones.due_date')}</label>
+                    <input
+                      type="date"
+                      value={mDueDate}
+                      onChange={(e) => setMDueDate(e.target.value)}
+                      style={{
+                        background: 'var(--bg-input, #2a2a2a)',
+                        border: '1px solid var(--border-color, #3a3a3a)',
+                        borderRadius: '6px',
+                        padding: '6px 10px',
+                        color: 'var(--text-primary)',
+                        outline: 'none'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('milestones.status')}</label>
+                  <Select
+                    value={mStatus}
+                    onChange={setMStatus}
+                    popupClassName="milestone-status-dropdown"
+                  >
+                    <Select.Option value="planned">{t('milestones.status.planned')}</Select.Option>
+                    <Select.Option value="active">{t('milestones.status.active')}</Select.Option>
+                    <Select.Option value="completed">{t('milestones.status.completed')}</Select.Option>
+                    <Select.Option value="cancelled">{t('milestones.status.cancelled')}</Select.Option>
+                  </Select>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
+                  <Button
+                    onClick={() => {
+                      setShowMilestoneModal(false);
+                      setEditingMilestone(null);
+                    }}
+                  >
+                    {t('common.cancel' as any) || 'Hủy'}
+                  </Button>
+                  <Button type="primary" onClick={handleSaveMilestone}>
+                    {t('common.save' as any) || 'Lưu'}
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          )}
+        </div>
       )}
 
       {/* Add Member Modal */}

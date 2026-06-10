@@ -10,6 +10,8 @@ import {
   DownOutlined,
   CheckOutlined,
   ClockCircleOutlined,
+  FileTextOutlined,
+  DeploymentUnitOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api from '../../services/api';
@@ -269,12 +271,31 @@ export interface CreateTaskModalOpenDetail {
   onSuccess?: (createdTask: any) => void;
   startDate?: string;
   dueDate?: string;
+  milestoneId?: number;
 }
 
 const CreateTaskModal: React.FC = () => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  useEffect(() => {
+    api.getMe().then(res => {
+      if (res) setCurrentUser(res);
+    }).catch(console.error);
+  }, []);
+
+  // Check if current user is manager or admin of the selected project
+  const isManagerOrAdmin = () => {
+    if (!currentUser || !selectedProjectId) return false;
+    if (currentUser.role === 'admin') return true;
+    const project = projects.find(p => p.id === selectedProjectId);
+    if (project && Number(project.created_by) === Number(currentUser.id)) return true;
+    const currentMember = projectMembers.find(m => Number(m.id) === Number(currentUser.id));
+    if (currentMember && (currentMember.pivot?.role === 'manager' || currentMember.role === 'manager')) return true;
+    return false;
+  };
 
   // Prefilled / Context IDs
   const [checklistItemId, setChecklistItemId] = useState<number | undefined>(undefined);
@@ -296,6 +317,36 @@ const CreateTaskModal: React.FC = () => {
   const [startDate, setStartDate] = useState<dayjs.Dayjs | null>(null);
   const [dueDate, setDueDate] = useState<dayjs.Dayjs | null>(null);
 
+  const [projectMilestones, setProjectMilestones] = useState<any[]>([]);
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState<number | undefined>(undefined);
+
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(undefined);
+
+  const loadTemplates = async (projId?: number) => {
+    try {
+      const res = await api.getTaskTemplates({ project_id: projId });
+      if (res.success) {
+        setTemplates(res.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load task templates', err);
+    }
+  };
+
+  const handleSelectTemplate = (templateId: number) => {
+    setSelectedTemplateId(templateId);
+    const template = templates.find(t => t.id === templateId);
+    if (template) {
+      if (!title) {
+        setTitle(template.name);
+      }
+      setDescription(template.description || '');
+      setPriority(template.priority || 'medium');
+      setTaskType(template.type === 'bug' ? 'bug' : 'task');
+    }
+  };
+
   // Load projects list
   const loadProjects = async () => {
     try {
@@ -314,6 +365,7 @@ const CreateTaskModal: React.FC = () => {
       if (!selectedProjectId) {
         setProjectMembers([]);
         setProjectStatuses([]);
+        setTemplates([]);
         return;
       }
       try {
@@ -330,6 +382,15 @@ const CreateTaskModal: React.FC = () => {
           } else {
             setStatus('todo');
           }
+        }
+        loadTemplates(selectedProjectId);
+        try {
+          const resMilestones = await api.getProjectMilestones(selectedProjectId);
+          if (resMilestones.success) {
+            setProjectMilestones(resMilestones.data || []);
+          }
+        } catch (err) {
+          console.error('Failed to load project milestones inside CreateTaskModal', err);
         }
       } catch (err) {
         console.error('Failed to fetch project details inside CreateTaskModal', err);
@@ -348,10 +409,19 @@ const CreateTaskModal: React.FC = () => {
       // Reset states
       setTitle(detail.title || '');
       setDescription('');
-      setSelectedProjectId(detail.projectId);
+      
+      let projId = detail.projectId;
+      if (!projId) {
+        const match = window.location.pathname.match(/\/projects\/(\d+)/);
+        if (match && match[1]) {
+          projId = parseInt(match[1]);
+        }
+      }
+      setSelectedProjectId(projId);
       setChecklistItemId(detail.checklistItemId);
       setChecklistId(detail.checklistId);
       setOnSuccessCallback(() => detail.onSuccess);
+      setSelectedMilestoneId(detail.milestoneId);
 
       // Default other fields
       setAssigneeId(undefined);
@@ -386,6 +456,10 @@ const CreateTaskModal: React.FC = () => {
     setTaskType('task');
     setStartDate(null);
     setDueDate(null);
+    setSelectedTemplateId(undefined);
+    setTemplates([]);
+    setSelectedMilestoneId(undefined);
+    setProjectMilestones([]);
   };
 
   const getInitials = (nameStr: string) => {
@@ -417,6 +491,8 @@ const CreateTaskModal: React.FC = () => {
         assignee_id: assigneeId || null,
         start_date: startDate ? startDate.toISOString() : null,
         due_date: dueDate ? dueDate.toISOString() : null,
+        template_id: selectedTemplateId || null,
+        milestone_id: selectedMilestoneId || null,
       };
 
       const res = await api.createTask(payload);
@@ -530,6 +606,33 @@ const CreateTaskModal: React.FC = () => {
 
         {/* Body */}
         <div className="create-task-modal-v2__body">
+          {/* Apply Template Selector */}
+          {templates.length > 0 && (
+            <div style={{ padding: '4px 16px 8px 16px', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border-color)', marginBottom: '12px' }}>
+              <span style={{ fontSize: '12.5px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                <FileTextOutlined style={{ fontSize: '13px', color: 'var(--primary)' }} />
+                {t('tasks.template.apply' as any) || 'Áp dụng mẫu'}:
+              </span>
+              <Select
+                style={{ flex: 1, minWidth: '150px' }}
+                placeholder="Chọn mẫu công việc để điền nhanh..."
+                value={selectedTemplateId}
+                onChange={handleSelectTemplate}
+                allowClear
+                onClear={() => {
+                  setSelectedTemplateId(undefined);
+                }}
+                popupClassName="template-selector-dropdown"
+                bordered={false}
+              >
+                {templates.map(tItem => (
+                  <Select.Option key={tItem.id} value={tItem.id}>
+                    {tItem.name} {tItem.is_public ? '(Global)' : ''}
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+          )}
           {/* Task Name */}
           <div className="task-title-input-wrapper">
             <Input
@@ -604,7 +707,9 @@ const CreateTaskModal: React.FC = () => {
                         <UserOutlined style={{ fontSize: '12px' }} />
                         <span style={{ fontSize: '12px' }}>{t('tasks.panel.assignee_placeholder')}</span>
                       </div>
-                      {projectMembers.map((m) => (
+                      {projectMembers
+                        .filter((m) => isManagerOrAdmin() || Number(m.id) === Number(currentUser?.id))
+                        .map((m) => (
                         <div
                           key={m.id}
                           onClick={() => setAssigneeId(m.id)}
@@ -701,6 +806,31 @@ const CreateTaskModal: React.FC = () => {
                     variant="borderless"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* 5. Mốc công việc (Milestone) */}
+            <div className="property-field">
+              <span className="field-label">
+                <DeploymentUnitOutlined style={{ fontSize: '14px', color: 'var(--text-muted)' }} /> {t('project_detail.tab.milestones')}
+              </span>
+              <div className="field-value">
+                <Select
+                  disabled={!selectedProjectId}
+                  value={selectedMilestoneId}
+                  onChange={setSelectedMilestoneId}
+                  placeholder={t('milestones.select_milestone')}
+                  style={{ width: '100%' }}
+                  allowClear
+                  popupClassName="milestone-selector-dropdown"
+                  variant="borderless"
+                >
+                  {projectMilestones.map((m) => (
+                    <Select.Option key={m.id} value={m.id}>
+                      {m.name}
+                    </Select.Option>
+                  ))}
+                </Select>
               </div>
             </div>
           </div>

@@ -86,11 +86,9 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onCollapse, className = ''
   };
 
   useEffect(() => {
-    if (projects.length === 0) {
-      fetchProjects();
-    }
+    fetchProjects();
     fetchUnreadCount();
-  }, [location.pathname, projects.length]);
+  }, [location.pathname]);
 
   useEffect(() => {
     const handleProjectsChanged = () => {

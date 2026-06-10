@@ -27,6 +27,113 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
   const [actions, setActions] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const targetTextRef = useRef('');
+  const displayedTextRef = useRef('');
+  const isStreamingFinishedRef = useRef(false);
+  const typewriterIntervalRef = useRef<any>(null);
+  const finalDataRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (typewriterIntervalRef.current) {
+        clearInterval(typewriterIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const finalizeResponse = () => {
+    const finalData = finalDataRef.current;
+    const replyToClean = finalData?.reply || targetTextRef.current;
+    const { cleanedReply, actions: inlineActions } = extractInlineActions(replyToClean);
+
+    setMessages(prev => {
+      const updated = [...prev];
+      const idx = updated.length - 1;
+      if (idx >= 0 && updated[idx].role === 'ai') {
+        updated[idx] = {
+          role: 'ai',
+          content: cleanedReply
+        };
+      }
+      return updated;
+    });
+
+    const finalActions = (finalData?.actions && finalData.actions.length > 0)
+      ? finalData.actions
+      : inlineActions;
+    if (finalActions.length > 0) {
+      setActions(finalActions);
+    }
+
+    if (finalData?.events && finalData.events.length > 0) {
+      finalData.events.forEach((ev: any) => {
+        if (ev.type === 'project_created') {
+          message.success(t('ai.global.event_project' as any, { name: ev.name || '' }));
+          navigate(`/projects/${ev.id}`);
+          window.dispatchEvent(new Event('projects-changed'));
+        } else if (ev.type === 'task_created') {
+          message.success(t('ai.global.event_task' as any, { title: ev.title || '' }));
+          if (location.pathname === '/my-tasks') {
+            navigate(`/my-tasks?task_id=${ev.id}`);
+          } else {
+            navigate(`/projects/${ev.project_id}?task_id=${ev.id}`);
+          }
+          window.dispatchEvent(new CustomEvent('task-created-global', { detail: ev }));
+        } else if (ev.type === 'timer_started' || ev.type === 'timer_stopped') {
+          window.dispatchEvent(new Event('timer-updated'));
+        }
+      });
+    }
+
+    setLoading(false);
+  };
+
+  const startTypewriter = () => {
+    if (typewriterIntervalRef.current) return;
+
+    typewriterIntervalRef.current = setInterval(() => {
+      const target = targetTextRef.current;
+      const displayed = displayedTextRef.current;
+
+      if (displayed.length < target.length) {
+        const diff = target.length - displayed.length;
+        let charsToAppend = 1;
+        if (diff > 120) {
+          charsToAppend = 10;
+        } else if (diff > 60) {
+          charsToAppend = 6;
+        } else if (diff > 30) {
+          charsToAppend = 4;
+        } else if (diff > 15) {
+          charsToAppend = 2;
+        }
+
+        const nextText = displayed + target.slice(displayed.length, displayed.length + charsToAppend);
+        displayedTextRef.current = nextText;
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const idx = updated.length - 1;
+          if (idx >= 0 && updated[idx].role === 'ai') {
+            updated[idx] = {
+              ...updated[idx],
+              content: nextText
+            };
+          }
+          return updated;
+        });
+      } else {
+        if (isStreamingFinishedRef.current) {
+          if (typewriterIntervalRef.current) {
+            clearInterval(typewriterIntervalRef.current);
+            typewriterIntervalRef.current = null;
+          }
+          finalizeResponse();
+        }
+      }
+    }, 20);
+  };
+
   // Initialize welcome message with translated text
   useEffect(() => {
     setMessages([
@@ -119,56 +226,126 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
     }
 
     const newMessages: Message[] = [...messages, { role: 'user', content: text }];
-    setMessages(newMessages);
+    setMessages([...newMessages, { role: 'ai', content: '' }]);
     setLoading(true);
     setActions([]);
 
+    // Initialize/Reset Typewriter Refs
+    targetTextRef.current = '';
+    displayedTextRef.current = '';
+    isStreamingFinishedRef.current = false;
+    finalDataRef.current = null;
+    if (typewriterIntervalRef.current) {
+      clearInterval(typewriterIntervalRef.current);
+      typewriterIntervalRef.current = null;
+    }
+
+    let hasError = false;
+
     try {
-      const response = await api.chatGlobalAi(newMessages);
-      if (response.success) {
-        // Extract any inline follow-up suggestions embedded in the reply text
-        const { cleanedReply, actions: inlineActions } = extractInlineActions(response.reply || '');
+      const token = localStorage.getItem('taskflow_token');
+      const lang = localStorage.getItem('taskflow_lang') || 'vi';
+      const base = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+      let url = base.replace(/\/+$/, '');
+      if (!url.endsWith('/api')) url = `${url}/api`;
 
-        setMessages(prev => [
-          ...prev,
-          { role: 'ai', content: cleanedReply }
-        ]);
+      const response = await fetch(`${url}/ai/global/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+          'Authorization': `Bearer ${token}`,
+          'X-Language': lang,
+          ...(process.env.NODE_ENV === 'development' ? { 'ngrok-skip-browser-warning': 'true' } : {})
+        },
+        body: JSON.stringify({
+          messages: newMessages,
+          stream: true
+        })
+      });
 
-        // Prefer explicit actions from API, fallback to inline-extracted ones
-        const finalActions = (response.actions && response.actions.length > 0)
-          ? response.actions
-          : inlineActions;
-        if (finalActions.length > 0) {
-          setActions(finalActions);
-        }
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-        if (response.events && response.events.length > 0) {
-          response.events.forEach((ev: any) => {
-            if (ev.type === 'project_created') {
-              message.success(t('ai.global.event_project' as any, { name: ev.name || '' }));
-              navigate(`/projects/${ev.id}`);
-              window.dispatchEvent(new Event('projects-changed'));
-            } else if (ev.type === 'task_created') {
-              message.success(t('ai.global.event_task' as any, { title: ev.title || '' }));
-              if (location.pathname === '/my-tasks') {
-                navigate(`/my-tasks?task_id=${ev.id}`);
-              } else {
-                navigate(`/projects/${ev.project_id}?task_id=${ev.id}`);
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('ReadableStream not supported by browser or response has no body.');
+      }
+
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+      let buffer = '';
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+          
+          let pos;
+          while ((pos = buffer.indexOf('\n')) !== -1) {
+            const line = buffer.slice(0, pos).trim();
+            buffer = buffer.slice(pos + 1);
+
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6);
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (parsed) {
+                  if (parsed.error) {
+                    message.error(parsed.error);
+                    done = true;
+                    break;
+                  }
+                  
+                  if (parsed.done) {
+                    finalDataRef.current = parsed;
+                    done = true;
+                    break;
+                  }
+
+                  if (parsed.status === 'executing_tool') {
+                    // Executing tool status - handled by header thinking spinner, skip rendering in content
+                  } else if (parsed.content !== undefined) {
+                    targetTextRef.current += parsed.content;
+                    startTypewriter();
+                  }
+                }
+              } catch (e) {
+                // Ignore parsing errors for incomplete lines
               }
-              window.dispatchEvent(new CustomEvent('task-created-global', { detail: ev }));
-            } else if (ev.type === 'timer_started' || ev.type === 'timer_stopped') {
-              window.dispatchEvent(new Event('timer-updated'));
             }
-          });
+          }
         }
-      } else {
-        message.error(response.message || t('ai.global.error_process' as any));
+      }
+
+      // Finish streaming, parse final responses (actions, events)
+      isStreamingFinishedRef.current = true;
+
+      // If typewriter has already caught up or was never started, finalize immediately
+      if (!typewriterIntervalRef.current) {
+        finalizeResponse();
       }
     } catch (err: any) {
+      hasError = true;
       console.error(err);
       message.error(t('ai.global.error_connect' as any));
+      // Remove the empty AI message if error occurred before any content
+      setMessages(prev => {
+        if (prev.length > 0 && prev[prev.length - 1].role === 'ai' && prev[prev.length - 1].content === '') {
+          return prev.slice(0, -2); // remove user and empty ai messages
+        }
+        return prev;
+      });
     } finally {
-      setLoading(false);
+      if (hasError) {
+        setLoading(false);
+        if (typewriterIntervalRef.current) {
+          clearInterval(typewriterIntervalRef.current);
+          typewriterIntervalRef.current = null;
+        }
+      }
     }
   };
 
@@ -394,29 +571,42 @@ const GlobalAiSidebar: React.FC<GlobalAiSidebarProps> = ({ isOpen, onClose }) =>
             </div>
           )}
 
-          {messages.map((msg, idx) => (
-            <div key={idx} className={`chat-message ${msg.role}`}>
-              <div className="message-header">
-                {msg.role === 'ai' ? (
-                  <span className="ai-name">✨ Brain</span>
-                ) : (
-                  <span className="user-name">{t('ai.global.user_label' as any)}</span>
-                )}
+          {messages.map((msg, idx) => {
+            const isMessageGenerating = msg.role === 'ai' && loading && idx === messages.length - 1;
+            return (
+              <div key={idx} className={`chat-message ${msg.role}`}>
+                <div className="message-header">
+                  {msg.role === 'ai' ? (
+                    isMessageGenerating ? (
+                      <span className="ai-name thinking" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <Spin size="small" />
+                        <span>{t('ai.global.thinking_header' as any)}</span>
+                      </span>
+                    ) : (
+                      <span className="ai-name">✨ Brain</span>
+                    )
+                  ) : (
+                    <span className="user-name">{t('ai.global.user_label' as any)}</span>
+                  )}
+                </div>
+                <div className="message-content">
+                  {msg.role === 'ai' ? (
+                    isMessageGenerating && !msg.content ? (
+                      <div className="typing-indicator">
+                        <span className="dot"></span>
+                        <span className="dot"></span>
+                        <span className="dot"></span>
+                      </div>
+                    ) : (
+                      renderMarkdown(msg.content)
+                    )
+                  ) : (
+                    <p>{msg.content}</p>
+                  )}
+                </div>
               </div>
-              <div className="message-content">
-                {msg.role === 'ai' ? renderMarkdown(msg.content) : <p>{msg.content}</p>}
-              </div>
-            </div>
-          ))}
-
-          {loading && (
-            <div className="chat-message ai loading">
-              <span className="ai-name">✨ {t('ai.global.loading' as any)}</span>
-              <div className="loading-spinner">
-                <Spin size="small" />
-              </div>
-            </div>
-          )}
+            );
+          })}
 
           {/* Follow-up actions */}
           {actions.length > 0 && (

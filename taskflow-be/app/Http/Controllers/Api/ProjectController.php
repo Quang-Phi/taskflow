@@ -95,6 +95,24 @@ class ProjectController extends Controller
 
         $user = $request->user();
 
+        if ($request->has('member_ids')) {
+            $requestedIds = array_map('intval', (array)$request->input('member_ids'));
+            
+            // Standard members/employees can only assign themselves to projects
+            if ($user->role === 'employee') {
+                $invalidIds = array_diff($requestedIds, [$user->id]);
+                if (!empty($invalidIds)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Standard members can only assign themselves to projects.',
+                        'errors' => [
+                            'member_ids' => ['Standard members can only assign themselves to projects.']
+                        ]
+                    ], 403);
+                }
+            }
+        }
+
         $project = DB::transaction(function () use ($request, $user) {
             $proj = Project::create([
                 'name' => $request->input('name'),
@@ -114,14 +132,20 @@ class ProjectController extends Controller
                 'joined_at' => now(),
             ]);
 
+            $allowedIds = $this->getAllowedMemberIdsForUser($user);
+
             // Add other selected members
             if ($request->has('member_ids')) {
                 $memberIds = array_diff(array_map('intval', (array) $request->input('member_ids')), [$user->id]);
                 if (!empty($memberIds)) {
                     $syncData = [];
                     foreach ($memberIds as $mId) {
+                        $role = (in_array($user->role, ['admin', 'superadmin']) || in_array($mId, $allowedIds))
+                            ? 'member'
+                            : 'collaborator';
+
                         $syncData[$mId] = [
-                            'role' => 'member',
+                            'role' => $role,
                             'joined_at' => now(),
                         ];
                     }
@@ -147,7 +171,7 @@ class ProjectController extends Controller
     public function show(Request $request, $id): JsonResponse
     {
         $user = $request->user();
-        $project = Project::with(['createdBy', 'members', 'tasks.assignee', 'tasks.labels', 'labels', 'customFields'])->find($id);
+        $project = Project::with(['createdBy', 'members', 'tasks.assignee', 'tasks.labels', 'tasks.parentTask', 'labels', 'customFields'])->find($id);
 
         if (!$project) {
             return response()->json([
@@ -162,6 +186,26 @@ class ProjectController extends Controller
                 'success' => false,
                 'message' => 'Unauthorized access to this project',
             ], 403);
+        }
+
+        // Filter tasks if user is a collaborator
+        if (!in_array($user->role, ['admin', 'superadmin']) && $project->created_by !== $user->id) {
+            $projectMember = $project->members()->where('user_id', $user->id)->first();
+            if ($projectMember && $projectMember->pivot->role === 'collaborator') {
+                $project->setRelation('tasks', $project->tasks->filter(function ($t) use ($user) {
+                    $isDirect = (int)$t->assignee_id === (int)$user->id || (int)$t->creator_id === (int)$user->id;
+                    if ($isDirect) {
+                        return true;
+                    }
+                    if ($t->parent_task_id) {
+                        $parent = $t->parentTask ?: \App\Models\Task::find($t->parent_task_id);
+                        if ($parent) {
+                            return (int)$parent->assignee_id === (int)$user->id || (int)$parent->creator_id === (int)$user->id;
+                        }
+                    }
+                    return false;
+                })->values());
+            }
         }
 
         return response()->json([
@@ -252,6 +296,7 @@ class ProjectController extends Controller
             ], 403);
         }
 
+        $project->tasks()->delete();
         $project->delete();
 
         Log::info("User ID {$user->id} ({$user->name}) deleted Project ID {$project->id} ({$project->name})");
@@ -279,7 +324,7 @@ class ProjectController extends Controller
         $request->validate([
             'user_id' => 'nullable',
             'user_ids' => 'nullable|array',
-            'role' => 'nullable|in:manager,member',
+            'role' => 'nullable|in:manager,member,collaborator',
         ]);
 
         // Check permission (admin, creator, manager)
@@ -314,6 +359,8 @@ class ProjectController extends Controller
 
         // Cast to array of integers
         $bitrixIds = array_map('intval', (array) $bitrixIds);
+
+        $allowedIds = $this->getAllowedMemberIdsForUser($user);
 
         // Fetch existing users from local DB by id
         $localUsers = \App\Models\User::whereIn('id', $bitrixIds)->get()->keyBy('id');
@@ -367,9 +414,17 @@ class ProjectController extends Controller
                 }
             }
 
+            // Determine final role based on whether the added user is a subordinate
+            $finalRole = $role;
+            if (!in_array($user->role, ['admin', 'superadmin'])) {
+                if (!in_array($localUser->id, $allowedIds)) {
+                    $finalRole = 'collaborator';
+                }
+            }
+
             // Sync using the local user's ID
             $syncData[$localUser->id] = [
-                'role' => $role,
+                'role' => $finalRole,
                 'joined_at' => now(),
             ];
         }
@@ -715,14 +770,21 @@ class ProjectController extends Controller
             'transitions.*.from' => 'required|string',
             'transitions.*.to' => 'required|string',
             'transitions.*.allowed_roles' => 'nullable|array',
+            'transitions.*.allowed_task_roles' => 'nullable|array',
+            'transitions.*.require_all_reviewers' => 'nullable|boolean',
             'transitions.*.rules' => 'nullable|array',
             'global_transitions' => 'present|array',
             'global_transitions.*.id' => 'required|string',
             'global_transitions.*.name' => 'nullable|string',
             'global_transitions.*.to' => 'required|string',
             'global_transitions.*.allowed_roles' => 'nullable|array',
+            'global_transitions.*.allowed_task_roles' => 'nullable|array',
+            'global_transitions.*.require_all_reviewers' => 'nullable|boolean',
             'global_transitions.*.rules' => 'nullable|array',
             'node_positions' => 'nullable|array',
+            // I8: applies_to – which task types this workflow applies to
+            'applies_to' => 'nullable|array',
+            'applies_to.*' => 'string|in:task,bug',
         ]);
 
         // Validate that all from/to status IDs exist in project statuses
@@ -752,12 +814,16 @@ class ProjectController extends Controller
             ], 422);
         }
 
+        // I8: applies_to determines which task type this workflow applies to
+        $appliesTo = $request->input('applies_to', null);
+
         $wfModel = $project->workflow()->firstOrCreate([], [
             'mode' => $request->input('mode'),
         ]);
         $wfModel->update([
             'mode'           => $request->input('mode'),
             'initial_status' => $request->input('initial_status'),
+            'applies_to'     => $appliesTo,
         ]);
 
         DB::transaction(function () use ($request, $wfModel) {
@@ -769,12 +835,14 @@ class ProjectController extends Controller
             // Insert new regular transitions
             foreach ($request->input('transitions', []) as $t) {
                 $createdTransition = $wfModel->transitionsRelation()->create([
-                    'transition_key' => $t['id'],
-                    'name' => $t['name'] ?? null,
-                    'from' => $t['from'],
-                    'to' => $t['to'],
-                    'allowed_roles' => $t['allowed_roles'] ?? [],
-                    'is_global' => false,
+                    'transition_key'       => $t['id'],
+                    'name'                 => $t['name'] ?? null,
+                    'from'                 => $t['from'],
+                    'to'                   => $t['to'],
+                    'allowed_roles'        => $t['allowed_roles'] ?? [],
+                    'allowed_task_roles'   => $t['allowed_task_roles'] ?? null,
+                    'require_all_reviewers' => $t['require_all_reviewers'] ?? false,
+                    'is_global'            => false,
                 ]);
 
                 foreach ($t['rules'] ?? [] as $r) {
@@ -788,12 +856,14 @@ class ProjectController extends Controller
             // Insert new global transitions
             foreach ($request->input('global_transitions', []) as $gt) {
                 $createdTransition = $wfModel->transitionsRelation()->create([
-                    'transition_key' => $gt['id'],
-                    'name' => $gt['name'] ?? null,
-                    'from' => null,
-                    'to' => $gt['to'],
-                    'allowed_roles' => $gt['allowed_roles'] ?? [],
-                    'is_global' => true,
+                    'transition_key'       => $gt['id'],
+                    'name'                 => $gt['name'] ?? null,
+                    'from'                 => null,
+                    'to'                   => $gt['to'],
+                    'allowed_roles'        => $gt['allowed_roles'] ?? [],
+                    'allowed_task_roles'   => $gt['allowed_task_roles'] ?? null,
+                    'require_all_reviewers' => $gt['require_all_reviewers'] ?? false,
+                    'is_global'            => true,
                 ]);
 
                 foreach ($gt['rules'] ?? [] as $r) {
@@ -867,11 +937,17 @@ class ProjectController extends Controller
             ->where('user_id', $user->id)
             ->value('role') ?? 'member';
 
+        $task = null;
+        if ($request->has('task_id')) {
+            $task = \App\Models\Task::find($request->input('task_id'));
+        }
+
         $transitions = $project->getAvailableTransitions(
             $statusId,
             $userProjectRole,
-            $user->role === 'admin',
-            $user->id
+            in_array($user->role, ['admin', 'superadmin']),
+            $user->id,
+            $task
         );
 
         return response()->json([
@@ -883,6 +959,17 @@ class ProjectController extends Controller
                 'workflow_mode' => $project->workflow['mode'] ?? 'unrestricted',
             ],
         ]);
+    }
+
+    /**
+     * Get allowed member IDs that a user is permitted to add to a project.
+     * Admin: all users.
+     * Employee: only themselves.
+     * Manager: themselves and all users belonging to their managed department or its sub-departments.
+     */
+    private function getAllowedMemberIdsForUser($user): array
+    {
+        return $user->getManagedUserIds();
     }
 }
 

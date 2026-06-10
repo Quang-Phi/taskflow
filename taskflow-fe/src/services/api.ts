@@ -88,7 +88,9 @@ class ApiClient {
         const lang = localStorage.getItem('taskflow_lang') || 'vi';
         if (config.headers) {
           config.headers['X-Language'] = lang;
-          config.headers['ngrok-skip-browser-warning'] = 'true';
+          if (process.env.NODE_ENV === 'development' && (API_BASE_URL.includes('ngrok-free.app') || API_BASE_URL.includes('ngrok.io'))) {
+            config.headers['ngrok-skip-browser-warning'] = 'true';
+          }
         }
         return config;
       },
@@ -285,7 +287,7 @@ class ApiClient {
   }
 
   // === LOCAL USERS (from DB) ===
-  async getLocalUsers(params?: { search?: string }) {
+  async getLocalUsers(params?: { search?: string; scope?: string }) {
     const res = await this.client.get('/users', { params });
     return res.data;
   }
@@ -307,6 +309,7 @@ class ApiClient {
     department_id?: string | number; 
     refresh?: boolean; 
     active?: boolean;
+    scope?: string;
   }) {
     const res = await this.client.get('/bitrix/users', { params });
     return res.data;
@@ -429,7 +432,7 @@ class ApiClient {
     return res.data;
   }
 
-  async getTasks(projectIdOrParams?: string | number | { project_id?: string | number; assignee_id?: string | number }) {
+  async getTasks(projectIdOrParams?: string | number | { project_id?: string | number; assignee_id?: string | number; creator_id?: string | number }) {
     let params: any = {};
     if (projectIdOrParams) {
       if (typeof projectIdOrParams === 'object') {
@@ -454,6 +457,8 @@ class ApiClient {
     start_date?: string;
     due_date?: string;
     parent_task_id?: string | number;
+    template_id?: string | number;
+    milestone_id?: string | number | null;
   }) {
     const res = await this.client.post('/tasks', data);
     return res.data;
@@ -479,6 +484,21 @@ class ApiClient {
     return res.data;
   }
 
+  async cloneTask(id: string | number) {
+    const res = await this.client.post(`/tasks/${id}/clone`);
+    return res.data;
+  }
+
+  async addTaskDependency(taskId: string | number, data: { target_task_id: string | number; type: string }) {
+    const res = await this.client.post(`/tasks/${taskId}/dependencies`, data);
+    return res.data;
+  }
+
+  async deleteTaskDependency(id: string | number) {
+    const res = await this.client.delete(`/task-dependencies/${id}`);
+    return res.data;
+  }
+
   async createTaskComment(taskId: string | number, comment: string, attachment?: File, parentId?: string | number) {
     const formData = new FormData();
     formData.append('comment', comment);
@@ -500,6 +520,11 @@ class ApiClient {
     return res.data;
   }
 
+  async deleteComment(commentId: string | number) {
+    const res = await this.client.delete(`/comments/${commentId}`);
+    return res.data;
+  }
+
   async getTaskComments(taskId: string | number, page = 1, perPage = 15) {
     const res = await this.client.get(`/tasks/${taskId}/comments`, { params: { page, per_page: perPage } });
     return res.data;
@@ -510,8 +535,8 @@ class ApiClient {
     return res.data;
   }
 
-  async toggleWatchTask(taskId: string | number) {
-    const res = await this.client.post(`/tasks/${taskId}/watch`);
+  async toggleWatchTask(taskId: string | number, userId?: string | number) {
+    const res = await this.client.post(`/tasks/${taskId}/watch`, userId ? { user_id: userId } : {});
     return res.data;
   }
 
@@ -662,11 +687,92 @@ class ApiClient {
   }
 
   getBackendUrl() {
-    return API_BASE_URL.replace('/api', '');
+    if (process.env.REACT_APP_NGROK_URL) {
+      return process.env.REACT_APP_NGROK_URL.replace(/\/+$/, '');
+    }
+    const apiUrl = process.env.REACT_APP_API_URL || '';
+    if (apiUrl.includes('localhost:3000')) {
+      return 'http://localhost:8000';
+    }
+    return API_BASE_URL.replace(/\/api\/?$/, '').replace(/\/+$/, '') || 'http://localhost:8000';
   }
 
   getClient() {
     return this.client;
+  }
+
+  async getTaskTemplates(params?: { project_id?: string | number }) {
+    const res = await this.client.get('/task-templates', { params });
+    return res.data;
+  }
+
+  async createTaskTemplate(data: {
+    name: string;
+    project_id?: string | number | null;
+    task_id?: string | number;
+    is_public?: boolean;
+  }) {
+    const res = await this.client.post('/task-templates', data);
+    return res.data;
+  }
+
+  async deleteTaskTemplate(id: string | number) {
+    const res = await this.client.delete(`/task-templates/${id}`);
+    return res.data;
+  }
+
+  async getProjectMilestones(projectId: string | number, params?: { status?: string }) {
+    const res = await this.client.get(`/projects/${projectId}/milestones`, { params });
+    return res.data;
+  }
+
+  async createMilestone(projectId: string | number, data: {
+    name: string;
+    description?: string;
+    start_date?: string;
+    due_date?: string;
+    status: 'planned' | 'active' | 'completed' | 'cancelled';
+    goal?: string;
+  }) {
+    const res = await this.client.post(`/projects/${projectId}/milestones`, data);
+    return res.data;
+  }
+
+  async getMilestoneDetails(id: string | number) {
+    const res = await this.client.get(`/milestones/${id}`);
+    return res.data;
+  }
+
+  async updateMilestone(id: string | number, data: {
+    name?: string;
+    description?: string;
+    start_date?: string | null;
+    due_date?: string | null;
+    status?: 'planned' | 'active' | 'completed' | 'cancelled';
+    goal?: string;
+  }) {
+    const res = await this.client.put(`/milestones/${id}`, data);
+    return res.data;
+  }
+
+  async deleteMilestone(id: string | number) {
+    const res = await this.client.delete(`/milestones/${id}`);
+    return res.data;
+  }
+
+  async assignTasksToMilestone(id: string | number, taskIds: (string | number)[]) {
+    const res = await this.client.post(`/milestones/${id}/tasks`, { task_ids: taskIds });
+    return res.data;
+  }
+
+  async removeTasksFromMilestone(id: string | number, taskIds: (string | number)[]) {
+    const res = await this.client.post(`/milestones/${id}/tasks/remove`, { task_ids: taskIds });
+    return res.data;
+  }
+
+  async getMilestoneBurndown(id: string | number) {
+    const res = await this.client.get(`/milestones/${id}/burndown`);
+    return res.data;
   }
 }
 
@@ -683,7 +789,6 @@ const createAiClient = () => {
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'ngrok-skip-browser-warning': 'true',
     },
     // Long timeout for AI completions
     timeout: 120_000,
@@ -697,6 +802,9 @@ const createAiClient = () => {
     const lang = localStorage.getItem('taskflow_lang') || 'vi';
     if (config.headers) {
       config.headers['X-Language'] = lang;
+      if (process.env.NODE_ENV === 'development' && (AI_BASE_URL.includes('ngrok-free.app') || AI_BASE_URL.includes('ngrok.io'))) {
+        config.headers['ngrok-skip-browser-warning'] = 'true';
+      }
     }
     return config;
   });

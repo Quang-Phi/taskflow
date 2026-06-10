@@ -110,47 +110,12 @@ class BitrixController extends Controller
                     return (int)$u['id'] === (int)$currentUser->id;
                 });
             } elseif ($currentUser->role === 'manager') {
-                // Find all departments managed by this user
-                $departments = $this->bitrix->getDepartments();
-                if (!is_array($departments)) {
-                    // getDepartments() failed (Bitrix unreachable etc.) — skip restriction
-                    $departments = [];
+                if ($request->input('scope') === 'managed') {
+                    $managedIds = $currentUser->getManagedUserIds();
+                    $filtered = array_filter($filtered, function ($u) use ($managedIds) {
+                        return in_array((int)$u['id'], $managedIds, true);
+                    });
                 }
-                $managedDeptIds = [];
-                foreach ($departments as $dept) {
-                    $headId = $dept['UF_HEAD'] ?? null;
-                    if ($headId && (int)$headId === (int)$currentUser->id) {
-                        $managedDeptIds[] = (int)$dept['ID'];
-                    }
-                }
-
-                // Recursively get sub-departments
-                if (!empty($managedDeptIds)) {
-                    $allManagedIds = $managedDeptIds;
-                    $added = true;
-                    while ($added) {
-                        $added = false;
-                        foreach ($departments as $dept) {
-                            $deptId = (int)$dept['ID'];
-                            $parentId = isset($dept['PARENT']) ? (int)$dept['PARENT'] : null;
-                            if ($parentId && in_array($parentId, $allManagedIds, true) && !in_array($deptId, $allManagedIds, true)) {
-                                $allManagedIds[] = $deptId;
-                                $added = true;
-                            }
-                        }
-                    }
-                    $managedDeptIds = $allManagedIds;
-                }
-
-                $filtered = array_filter($filtered, function ($u) use ($currentUser, $managedDeptIds) {
-                    if ((int)$u['id'] === (int)$currentUser->id) {
-                        return true;
-                    }
-                    // Guard: department_ids may be null/false from DB
-                    $rawDepts = $u['department_ids'];
-                    $uDepts = array_map('intval', is_array($rawDepts) ? $rawDepts : []);
-                    return count(array_intersect($managedDeptIds, $uDepts)) > 0;
-                });
             }
         }
 
@@ -200,7 +165,8 @@ class BitrixController extends Controller
 
         // Determine role dynamically based on Bitrix department heads
         $role = 'employee';
-        if ((int)$id === 632) {
+        $superAdminId = (int) config('bitrix.super_admin_id', 632);
+        if ((int)$id === $superAdminId) {
             $role = 'admin';
         } else if ($localUser && $localUser->role === 'admin') {
             $role = 'admin';
@@ -220,37 +186,7 @@ class BitrixController extends Controller
                 return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
             }
             if ($currentUser->role === 'manager' && (int)$id !== (int)$currentUser->id) {
-                $targetDepts = $user['UF_DEPARTMENT'] ?? [];
-                $managedDeptIds = [];
-                foreach ($departments as $dept) {
-                    $headId = $dept['UF_HEAD'] ?? null;
-                    if ($headId && (int)$headId === (int)$currentUser->id) {
-                        $managedDeptIds[] = (int)$dept['ID'];
-                    }
-                }
-
-                // Recursively get sub-departments
-                if (!empty($managedDeptIds)) {
-                    $allManagedIds = $managedDeptIds;
-                    $added = true;
-                    while ($added) {
-                        $added = false;
-                        foreach ($departments as $dept) {
-                            $deptId = (int)$dept['ID'];
-                            $parentId = isset($dept['PARENT']) ? (int)$dept['PARENT'] : null;
-                            if ($parentId && in_array($parentId, $allManagedIds, true) && !in_array($deptId, $allManagedIds, true)) {
-                                $allManagedIds[] = $deptId;
-                                $added = true;
-                            }
-                        }
-                    }
-                    $managedDeptIds = $allManagedIds;
-                }
-
-                $targetDepts = array_map('intval', $targetDepts ?? []);
-                if (count(array_intersect($managedDeptIds, $targetDepts)) === 0) {
-                    return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
-                }
+                // Managers are authorized to view profiles of other users.
             }
         }
 
@@ -278,14 +214,15 @@ class BitrixController extends Controller
     public function updateUser(Request $request, int $id): JsonResponse
     {
         $authUser = $request->user();
-        if (!$authUser || (int)$authUser->id !== 632) {
+        $superAdminId = (int) config('bitrix.super_admin_id', 632);
+        if (!$authUser || (int)$authUser->id !== $superAdminId) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only the system administrator (user 632) is authorized to modify user roles.',
+                'message' => 'Only the system administrator is authorized to modify user roles.',
             ], 403);
         }
 
-        if ($id === 632) {
+        if ($id === $superAdminId) {
             return response()->json([
                 'success' => false,
                 'message' => 'The system administrator role is permanently locked and cannot be edited.',
@@ -379,10 +316,6 @@ class BitrixController extends Controller
         ]);
     }
 
-    /**
-     * Proxy any custom Bitrix API endpoint.
-     * E.g.: GET /api/bitrix/custom?path=/cv/api/filter-options.php
-     */
     public function customProxy(Request $request): JsonResponse
     {
         if (!$this->prepareBitrix($request)) {
@@ -392,6 +325,15 @@ class BitrixController extends Controller
         $path = $request->input('path');
         if (!$path) {
             return response()->json(['success' => false, 'message' => 'Missing path parameter'], 400);
+        }
+
+        // SSRF & Path Traversal Mitigation: restrict path format strictly
+        if (!is_string($path) || !str_starts_with($path, '/') || str_contains($path, '..') || str_contains($path, '//') || str_contains($path, '\\') || str_contains($path, '@') || str_contains($path, ':')) {
+            return response()->json(['success' => false, 'message' => 'Invalid path format'], 400);
+        }
+
+        if (!preg_match('/^\/[a-zA-Z0-9_\-\.\/\?&=]+$/', $path)) {
+            return response()->json(['success' => false, 'message' => 'Invalid characters in path'], 400);
         }
 
         $params = $request->except(['path']);

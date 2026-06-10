@@ -350,6 +350,15 @@
               cursor: pointer;
               opacity: 0.85;
               transition: all $transition-fast;
+              flex-shrink: 0;
+              min-width: 28px;
+              min-height: 28px;
+
+              &.timesheet-timer-btn {
+                flex-shrink: 0 !important;
+                min-width: 28px !important;
+                min-height: 28px !important;
+              }
 
               &:hover {
                 background: $primary;
@@ -466,6 +475,7 @@
               padding: 4px 8px;
               border-radius: 6px;
               border: 1px solid rgba($primary, 0.15);
+              white-space: nowrap;
             }
 
             .cell-placeholder {
@@ -644,6 +654,7 @@
         padding: 2px 8px;
         border-radius: 4px;
         font-weight: 600;
+        white-space: nowrap;
       }
 
       .delete-list-row-btn {

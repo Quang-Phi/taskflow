@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo, startTransition } from 'react';
-import { Dropdown, Tooltip, message, Modal, Select, Button, Popconfirm, Spin, Popover, Input, DatePicker } from 'antd';
+import { Dropdown, Tooltip, message, Modal, Select, Button, Popconfirm, Spin, Popover, Input, DatePicker, Switch, Checkbox } from 'antd';
 import {
   CloseOutlined,
   DeleteOutlined,
@@ -28,10 +28,14 @@ import {
   LikeOutlined,
   DislikeOutlined,
   ReloadOutlined,
+  SyncOutlined,
   ArrowLeftOutlined,
   CopyOutlined,
   MoreOutlined,
   DownloadOutlined,
+  ShareAltOutlined,
+  FileTextOutlined,
+  DeploymentUnitOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { getEcho } from '../../services/echo';
@@ -40,6 +44,7 @@ import dayjs from 'dayjs';
 import './TaskDetailPanel.scss';
 import TaskTypeBadge from './TaskTypeBadge';
 import { useDeleteConfirm } from './DeleteConfirmModal';
+import { WorkflowTransitionModal } from './WorkflowTransitionModal';
 
 const EMOJI_CATEGORIES = [
   {
@@ -109,6 +114,17 @@ interface User {
   role?: string;
 }
 
+interface TaskDependency {
+  id: number;
+  task_id: number;
+  target_task_id: number;
+  type: string;
+  created_by: number;
+  created_at: string;
+  target_task?: Task;
+  task?: Task;
+}
+
 interface Task {
   id: number;
   project_id?: number | string;
@@ -135,13 +151,26 @@ interface Task {
     statuses?: any[];
     members?: User[];
     custom_fields?: any[];
+    labels?: any[];
   };
   parent_task_id?: number;
   parentTask?: Task;
+  milestone_id?: number | string | null;
+  milestone?: any;
   custom_field_values?: any[];
   checklists?: any[];
   attachments?: any[];
   type?: string;
+  dependencies?: TaskDependency[];
+  inverse_dependencies?: TaskDependency[];
+  is_recurring?: boolean;
+  recurring_frequency?: string;
+  recurring_interval?: number;
+  recurring_weekdays?: number[];
+  recurring_monthday?: number;
+  recurring_next_trigger?: string;
+  recurring_time?: string;
+  template?: any;
 }
 
 interface TaskDetailPanelProps {
@@ -561,7 +590,7 @@ const TimeTracker: React.FC<{
         <div className="manual-time-datepicker">
           <DatePicker
             showTime
-            format="YYYY-MM-DD HH:mm"
+            format="DD/MM/YYYY HH:mm"
             value={manualDate}
             onChange={setManualDate}
             placeholder={t('tasks.panel.start_time')}
@@ -1143,6 +1172,16 @@ const formatActivityDescription = (act: any, t: any, projectStatuses?: any[]): s
       const toName = getStatusName(match[2], t, projectStatuses);
       return t('tasks.activity.updated_status', { from: fromName, to: toName });
     }
+    const autoMatch = details.match(/Auto-transitioned status from '(.*)' to '(.*)' after all reviews approved/);
+    if (autoMatch) {
+      const fromName = getStatusName(autoMatch[1], t, projectStatuses);
+      const toName = getStatusName(autoMatch[2], t, projectStatuses);
+      const isVi = t('tasks.activity.created').includes('tạo');
+      const isJa = t('tasks.activity.created').includes('作成');
+      if (isVi) return `đã tự động chuyển trạng thái từ "${fromName}" sang "${toName}" sau khi toàn bộ phê duyệt được thông qua.`;
+      if (isJa) return `すべての承認が得られたため、ステータスを「${fromName}」から「${toName}」に自動移行しました。`;
+      return `auto-transitioned status from "${fromName}" to "${toName}" after all reviews approved.`;
+    }
     return t('tasks.activity.updated_status_generic');
   }
 
@@ -1222,6 +1261,250 @@ const formatActivityDescription = (act: any, t: any, projectStatuses?: any[]): s
     return t('tasks.activity.deleted_time', { duration });
   }
 
+  const isVi = t('tasks.activity.created').includes('tạo');
+  const isJa = t('tasks.activity.created').includes('作成');
+
+  if (act.action === 'created_checklist') {
+    const match = details.match(/Created checklist: "(.*)"/);
+    if (match) {
+      if (isVi) return `đã tạo checklist "${match[1]}".`;
+      if (isJa) return `がチェックリスト「${match[1]}」を作成しました。`;
+      return `created checklist "${match[1]}".`;
+    }
+  }
+
+  if (act.action === 'updated_checklist') {
+    const match = details.match(/Renamed checklist to "(.*)"/);
+    if (match) {
+      if (isVi) return `đã đổi tên checklist thành "${match[1]}".`;
+      if (isJa) return `がチェックリストの名前を「${match[1]}」に変更しました。`;
+      return `renamed checklist to "${match[1]}".`;
+    }
+  }
+
+  if (act.action === 'deleted_checklist') {
+    const match = details.match(/Deleted checklist "(.*)"/);
+    if (match) {
+      if (isVi) return `đã xóa checklist "${match[1]}".`;
+      if (isJa) return `がチェックリスト「${match[1]}」を削除しました。`;
+      return `deleted checklist "${match[1]}".`;
+    }
+  }
+
+  if (act.action === 'created_checklist_item') {
+    const match = details.match(/Added item "(.*)" to checklist "(.*)"/);
+    if (match) {
+      if (isVi) return `đã thêm mục "${match[1]}" vào checklist "${match[2]}".`;
+      if (isJa) return `がチェックリスト「${match[2]}」にアイテム「${match[1]}」を追加しました。`;
+      return `added item "${match[1]}" to checklist "${match[2]}".`;
+    }
+  }
+
+  if (act.action === 'updated_checklist_item') {
+    const checkedMatch = details.match(/Marked item "(.*)" as (checked|unchecked)/);
+    if (checkedMatch) {
+      const itemName = checkedMatch[1];
+      const isChecked = checkedMatch[2] === 'checked';
+      if (isVi) return `đã đánh dấu mục "${itemName}" là ${isChecked ? 'đã hoàn thành' : 'chưa hoàn thành'}.`;
+      if (isJa) return `がアイテム「${itemName}」を${isChecked ? '完了' : '未完了'}にしました。`;
+      return `marked item "${itemName}" as ${isChecked ? 'checked' : 'unchecked'}.`;
+    }
+
+    const renameMatch = details.match(/Renamed checklist item "(.*)" to "(.*)"/);
+    if (renameMatch) {
+      if (isVi) return `đã đổi tên mục checklist "${renameMatch[1]}" thành "${renameMatch[2]}".`;
+      if (isJa) return `がチェックリストアイテム「${renameMatch[1]}」の名前を「${renameMatch[2]}」に変更しました。`;
+      return `renamed checklist item "${renameMatch[1]}" to "${renameMatch[2]}".`;
+    }
+
+    const updateMatch = details.match(/Updated item "(.*)" in checklist "(.*)"/);
+    if (updateMatch) {
+      if (isVi) return `đã cập nhật mục "${updateMatch[1]}" trong checklist "${updateMatch[2]}".`;
+      if (isJa) return `がチェックリスト「${updateMatch[2]}」のアイテム「${updateMatch[1]}」を更新しました。`;
+      return `updated item "${updateMatch[1]}" in checklist "${updateMatch[2]}".`;
+    }
+  }
+
+  if (act.action === 'deleted_checklist_item') {
+    const match = details.match(/Deleted item "(.*)" from checklist "(.*)"/);
+    if (match) {
+      if (isVi) return `đã xóa mục "${match[1]}" khỏi checklist "${match[2]}".`;
+      if (isJa) return `がチェックリスト「${match[2]}」からアイテム「${match[1]}」を削除しました。`;
+      return `deleted item "${match[1]}" from checklist "${match[2]}".`;
+    }
+  }
+
+  if (act.action === 'converted_checklist_item') {
+    const match = details.match(/Converted item "(.*)" to (task|subtask)/);
+    if (match) {
+      const typeLabel = match[2] === 'subtask'
+        ? (isVi ? 'công việc con' : (isJa ? 'サブタスク' : 'subtask'))
+        : (isVi ? 'công việc' : (isJa ? 'タスク' : 'task'));
+      if (isVi) return `đã chuyển đổi mục "${match[1]}" thành ${typeLabel}.`;
+      if (isJa) return `がアイテム「${match[1]}」を${typeLabel}に変換しました。`;
+      return `converted item "${match[1]}" to ${typeLabel}.`;
+    }
+  }
+
+  if (act.action === 'added_attachment') {
+    const match = details.match(/Attached file "(.*)"/);
+    if (match) {
+      if (isVi) return `đã đính kèm tệp "${match[1]}".`;
+      if (isJa) return `がファイル「${match[1]}」を添付しました。`;
+      return `attached file "${match[1]}".`;
+    }
+  }
+
+  if (act.action === 'renamed_attachment') {
+    const match = details.match(/Renamed attachment "(.*)" to "(.*)"/);
+    if (match) {
+      if (isVi) return `đã đổi tên tệp đính kèm "${match[1]}" thành "${match[2]}".`;
+      if (isJa) return `が添付ファイル「${match[1]}」の名前を「${match[2]}」に変更しました。`;
+      return `renamed attachment "${match[1]}" to "${match[2]}".`;
+    }
+  }
+
+  if (act.action === 'deleted_attachment') {
+    const match = details.match(/Deleted attachment "(.*)"/);
+    if (match) {
+      if (isVi) return `đã xóa tệp đính kèm "${match[1]}".`;
+      if (isJa) return `が添付ファイル「${match[1]}」を削除しました。`;
+      return `deleted attachment "${match[1]}".`;
+    }
+  }
+
+  if (act.action === 'linked_task') {
+    const match = details.match(/Linked this task \((.*)\) to #(\d+) '(.*)'/);
+    if (match) {
+      const type = match[1];
+      const targetId = match[2];
+      const targetTitle = match[3];
+      const typeLabels: Record<string, string> = isVi ? {
+        'blocks': 'chặn',
+        'is blocked by': 'bị chặn bởi',
+        'relates to': 'liên quan đến',
+        'duplicates': 'trùng lặp với',
+        'is duplicated by': 'bị trùng lặp bởi',
+        'clones': 'nhân bản',
+        'is cloned from': 'được nhân bản từ',
+        'causes': 'nguyên nhân của',
+        'is caused by': 'gây ra bởi'
+      } : isJa ? {
+        'blocks': 'ブロックする',
+        'is blocked by': '被ブロック',
+        'relates to': '関連する',
+        'duplicates': '重複する',
+        'is duplicated by': '被重複',
+        'clones': 'クローンする',
+        'is cloned from': '被クローン',
+        'causes': '原因となる',
+        'is caused by': '被原因'
+      } : {};
+      const typeLabel = typeLabels[type] || type;
+      if (isVi) return `đã liên kết công việc này (${typeLabel}) với công việc #${targetId} "${targetTitle}".`;
+      if (isJa) return `がこのタスクを、タスク #${targetId}「${targetTitle}」とリンク（${typeLabel}）しました。`;
+      return `linked this task (${type}) to task #${targetId} "${targetTitle}".`;
+    }
+  }
+
+  if (act.action === 'unlinked_task') {
+    const match = details.match(/Removed link \((.*)\) to #(\d+) '(.*)'/);
+    if (match) {
+      const type = match[1];
+      const targetId = match[2];
+      const targetTitle = match[3];
+      const typeLabels: Record<string, string> = isVi ? {
+        'blocks': 'chặn',
+        'is blocked by': 'bị chặn bởi',
+        'relates to': 'liên quan đến',
+        'duplicates': 'trùng lặp với',
+        'is duplicated by': 'bị trùng lặp bởi',
+        'clones': 'nhân bản',
+        'is cloned from': 'được nhân bản từ',
+        'causes': 'nguyên nhân của',
+        'is caused by': 'gây ra bởi'
+      } : {};
+      const typeLabel = typeLabels[type] || type;
+      if (isVi) return `đã gỡ bỏ liên kết (${typeLabel}) với công việc #${targetId} "${targetTitle}".`;
+      if (isJa) return `がタスク #${targetId}「${targetTitle}」とのリンク（${type}）を解除しました。`;
+      return `removed link (${type}) to task #${targetId} "${targetTitle}".`;
+    }
+  }
+
+  if (act.action === 'added_assignee' || act.action === 'added_reviewer' || act.action === 'added_reporter') {
+    const match = details.match(/Added (.*) as (assignee|reviewer|reporter)/);
+    if (match) {
+      const name = match[1];
+      const role = match[2];
+      const roleLabels: Record<string, string> = isVi ? {
+        'assignee': 'người thực hiện',
+        'reviewer': 'người phê duyệt',
+        'reporter': 'người báo cáo'
+      } : isJa ? {
+        'assignee': '担当者',
+        'reviewer': '承認者',
+        'reporter': '作成者'
+      } : {};
+      const roleLabel = roleLabels[role] || role;
+      if (isVi) return `đã thêm ${name} làm ${roleLabel} cho công việc.`;
+      if (isJa) return `が ${name} を ${roleLabel} として追加しました。`;
+      return `added ${name} as ${role} to task.`;
+    }
+  }
+
+  if (act.action === 'removed_assignee' || act.action === 'removed_reviewer' || act.action === 'removed_reporter') {
+    const match = details.match(/Removed (.*) from task/);
+    if (match) {
+      const name = match[1];
+      const role = act.action.replace('removed_', '');
+      const roleLabels: Record<string, string> = isVi ? {
+        'assignee': 'người thực hiện',
+        'reviewer': 'người phê duyệt',
+        'reporter': 'người báo cáo'
+      } : isJa ? {
+        'assignee': '担当者',
+        'reviewer': '承認者',
+        'reporter': '作成者'
+      } : {};
+      const roleLabel = roleLabels[role] || role;
+      if (isVi) return `đã xóa ${name} khỏi vai trò ${roleLabel} của công việc.`;
+      if (isJa) return `が ${name} の ${roleLabel} ロールを解除しました。`;
+      return `removed ${name} (${role}) from task.`;
+    }
+  }
+
+  if (act.action === 'changed_role') {
+    const match = details.match(/Changed (.*)'s role from (assignee|reviewer|reporter) to (assignee|reviewer|reporter)/);
+    if (match) {
+      const name = match[1];
+      const fromRole = match[2];
+      const toRole = match[3];
+      const roleLabels: Record<string, string> = isVi ? {
+        'assignee': 'người thực hiện',
+        'reviewer': 'người phê duyệt',
+        'reporter': 'người báo cáo'
+      } : isJa ? {
+        'assignee': '担当者',
+        'reviewer': '承認者',
+        'reporter': '作成者'
+      } : {};
+      if (isVi) return `đã đổi vai trò của ${name} từ ${roleLabels[fromRole] || fromRole} thành ${roleLabels[toRole] || toRole} trong công việc.`;
+      if (isJa) return `が ${name} の役割を ${roleLabels[fromRole] || fromRole} から ${roleLabels[toRole] || toRole} に変更しました。`;
+      return `changed ${name}'s role from ${fromRole} to ${toRole} in task.`;
+    }
+  }
+
+  if (act.action === 'review_approved' || act.action === 'review_rejected') {
+    const isApproved = act.action === 'review_approved';
+    const commentMatch = details.match(/Comment: (.*)/);
+    const commentText = commentMatch ? `: "${commentMatch[1]}"` : '';
+    const transitionMatch = details.match(/transition '(.*)'/);
+    const transitionLabel = transitionMatch ? ` (${transitionMatch[1]})` : '';
+    if (isVi) return `đã ${isApproved ? 'phê duyệt' : 'từ chối'} yêu cầu review cho bước chuyển ${transitionLabel}${commentText}.`;
+    if (isJa) return `がトランジション ${transitionLabel} のレビューを ${isApproved ? '承認' : '却下'} しました${commentText}。`;
+    return `${isApproved ? 'approved' : 'rejected'} review for transition ${transitionLabel}${commentText}.`;
+  }
+
   return details || act.action || '';
 };
 
@@ -1271,6 +1554,7 @@ const SubtaskDatePicker: React.FC<{
                 setStartDate(e.target.value);
                 handleSave(e.target.value, dueDate);
               }}
+              onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }}
               style={{ width: '100%', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '12px', padding: '4px 8px', borderRadius: '4px' }}
             />
           </div>
@@ -1283,6 +1567,7 @@ const SubtaskDatePicker: React.FC<{
                 setDueDate(e.target.value);
                 handleSave(startDate, e.target.value);
               }}
+              onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }}
               style={{ width: '100%', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '12px', padding: '4px 8px', borderRadius: '4px' }}
             />
           </div>
@@ -1347,6 +1632,8 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   const { showDeleteConfirm, DeleteConfirmComponent } = useDeleteConfirm();
   const [task, setTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
+  const [unauthorized, setUnauthorized] = useState(false);
+  const [taskNotFound, setTaskNotFound] = useState(false);
   const [me, setMe] = useState<User | null>(null);
   const [project, setProject] = useState<any>(null);
   const commentsListRef = useRef<HTMLDivElement | null>(null);
@@ -1384,10 +1671,40 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
 
   const [editStatus, setEditStatus] = useState('todo');
+
+  // Workflow guided transition states
+  const [wfModalOpen, setWfModalOpen] = useState(false);
+  const [wfTargetStatus, setWfTargetStatus] = useState<string>('');
+  const [wfTargetStatusName, setWfTargetStatusName] = useState<string>('');
+  const [wfFailedRules, setWfFailedRules] = useState<any[]>([]);
   const [editPriority, setEditPriority] = useState('medium');
   const [editAssigneeId, setEditAssigneeId] = useState<number | string | undefined>(undefined);
   const [editStartDate, setEditStartDate] = useState('');
   const [editDueDate, setEditDueDate] = useState('');
+
+  const [editMilestoneId, setEditMilestoneId] = useState<number | string | undefined>(undefined);
+  const [projectMilestones, setProjectMilestones] = useState<any[]>([]);
+
+  const [editIsRecurring, setEditIsRecurring] = useState(false);
+  const [editRecurringFrequency, setEditRecurringFrequency] = useState<string>('none');
+  const [editRecurringInterval, setEditRecurringInterval] = useState<number>(1);
+  const [editRecurringWeekdays, setEditRecurringWeekdays] = useState<number[]>([]);
+  const [editRecurringMonthday, setEditRecurringMonthday] = useState<number>(1);
+
+  const [editRecurringTime, setEditRecurringTime] = useState<string>('09:00');
+
+  const [isRecurringModalVisible, setIsRecurringModalVisible] = useState(false);
+  const [modalIsRecurring, setModalIsRecurring] = useState(false);
+  const [modalRecurringFrequency, setModalRecurringFrequency] = useState<string>('none');
+  const [modalRecurringInterval, setModalRecurringInterval] = useState<number>(1);
+  const [modalRecurringWeekdays, setModalRecurringWeekdays] = useState<number[]>([]);
+  const [modalRecurringMonthday, setModalRecurringMonthday] = useState<number>(1);
+  const [modalRecurringTime, setModalRecurringTime] = useState<string>('09:00');
+
+  const [isTemplateModalVisible, setIsTemplateModalVisible] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templateProjectId, setTemplateProjectId] = useState<number | string | null>(null);
+  const [templateIsPublic, setTemplateIsPublic] = useState(false);
 
   // Subtasks states
   const [subtaskTitle, setSubtaskTitle] = useState('');
@@ -1396,6 +1713,13 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   const [subtaskStartDate, setSubtaskStartDate] = useState('');
   const [subtaskDueDate, setSubtaskDueDate] = useState('');
   const [showAddSubtaskForm, setShowAddSubtaskForm] = useState(false);
+
+  // Dependencies states
+  const [showAddDependencyForm, setShowAddDependencyForm] = useState(false);
+  const [depType, setDepType] = useState<string>('relates_to');
+  const [depTargetTaskId, setDepTargetTaskId] = useState<number | undefined>(undefined);
+  const [dependenciesLoading, setDependenciesLoading] = useState(false);
+  const [projectTasks, setProjectTasks] = useState<Task[]>([]);
 
   // Comments and Activities states
   const [comments, setComments] = useState<any[]>([]);
@@ -1422,6 +1746,14 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   const aiModalInputRef = useRef<HTMLInputElement>(null); // DOM ref to clear input
   const [aiModalResult, setAiModalResult] = useState<any>(null);
   const [aiModalLoading, setAiModalLoading] = useState(false);
+
+  // Typewriter effect states & refs for Brain AI Preview Modal
+  const [displayedAiModalResult, setDisplayedAiModalResult] = useState<any>(null);
+  const aiTypewriterIntervalRef = useRef<any>(null);
+  const aiModalRawResultRef = useRef<any>(null);
+  const aiModalTypeRef = useRef<'description' | 'subtasks' | 'checklist'>('description');
+  const checklistIdxRef = useRef<number>(0);
+  const checklistCharIdxRef = useRef<number>(0);
 
   // Attachment preview states
   const [previewAttachment, setPreviewAttachment] = useState<any | null>(null);
@@ -1475,6 +1807,23 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   useEffect(() => {
     api.getMe().then(res => setMe(res)).catch(console.error);
   }, []);
+
+  // Reset typewriter when AI modal closes
+  useEffect(() => {
+    if (!isAiModalOpen) {
+      if (aiTypewriterIntervalRef.current) {
+        clearInterval(aiTypewriterIntervalRef.current);
+        aiTypewriterIntervalRef.current = null;
+      }
+      setDisplayedAiModalResult(null);
+    }
+    return () => {
+      if (aiTypewriterIntervalRef.current) {
+        clearInterval(aiTypewriterIntervalRef.current);
+        aiTypewriterIntervalRef.current = null;
+      }
+    };
+  }, [isAiModalOpen]);
 
   // Scroll to reply textarea and focus when replyingToCommentId or replyingToSubCommentId changes
   useEffect(() => {
@@ -1616,7 +1965,11 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
   // Fetch Task Details
   const fetchTaskDetails = async (id: number | string, silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent) {
+      setLoading(true);
+      setUnauthorized(false);
+      setTaskNotFound(false);
+    }
     try {
       const res = await api.getTask(id);
       if (res.success) {
@@ -1628,6 +1981,13 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         setEditAssigneeId(fullTask.assignee_id || undefined);
         setEditStartDate(fullTask.start_date || '');
         setEditDueDate(fullTask.due_date || '');
+        setEditMilestoneId(fullTask.milestone_id || undefined);
+        setEditIsRecurring(fullTask.is_recurring || false);
+        setEditRecurringFrequency(fullTask.recurring_frequency || 'none');
+        setEditRecurringInterval(fullTask.recurring_interval || 1);
+        setEditRecurringWeekdays(fullTask.recurring_weekdays || []);
+        setEditRecurringMonthday(fullTask.recurring_monthday || 1);
+        setEditRecurringTime(fullTask.recurring_time || '09:00');
 
         // Fetch comments and activities
         setComments(fullTask.comments || []);
@@ -1650,6 +2010,14 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
             if (!initialStatuses) setStatuses(projRes.data.statuses || []);
             if (!initialMembers) setMembers(projRes.data.members || []);
             setCustomFields(projRes.data.custom_fields || []);
+            try {
+              const milestonesRes = await api.getProjectMilestones(fullTask.project_id);
+              if (milestonesRes.success) {
+                setProjectMilestones(milestonesRes.data || []);
+              }
+            } catch (err) {
+              console.error('Failed to load project milestones in detail panel', err);
+            }
           }
         } else {
           // Default project info if standalone task
@@ -1664,9 +2032,16 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
           if (!initialMembers) setMembers([]);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      if (!silent) message.error(t('tasks.detail_toast.fetch_err'));
+      if (err.response?.status === 403) {
+        setUnauthorized(true);
+      } else if (err.response?.status === 404) {
+        setTaskNotFound(true);
+        window.dispatchEvent(new Event('projects-changed'));
+      } else {
+        if (!silent) message.error(t('tasks.detail_toast.fetch_err'));
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -1680,15 +2055,15 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
 
   useEffect(() => {
     const handleTimerUpdated = () => {
-      if (taskId) {
-        fetchTaskDetails(taskId, true);
+      if (task?.id) {
+        fetchTaskDetails(task.id, true);
       }
     };
     window.addEventListener('timer-updated', handleTimerUpdated);
     return () => {
       window.removeEventListener('timer-updated', handleTimerUpdated);
     };
-  }, [taskId]);
+  }, [task?.id]);
 
   useEffect(() => {
     if (task) {
@@ -1725,10 +2100,21 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         if ('assignee_id' in data.taskData) setEditAssigneeId(data.taskData.assignee_id || undefined);
         if ('start_date' in data.taskData) setEditStartDate(data.taskData.start_date || '');
         if ('due_date' in data.taskData) setEditDueDate(data.taskData.due_date || '');
+        if ('milestone_id' in data.taskData) setEditMilestoneId(data.taskData.milestone_id || undefined);
+        if ('is_recurring' in data.taskData) setEditIsRecurring(data.taskData.is_recurring || false);
+        if ('recurring_frequency' in data.taskData) setEditRecurringFrequency(data.taskData.recurring_frequency || 'none');
+        if ('recurring_interval' in data.taskData) setEditRecurringInterval(data.taskData.recurring_interval || 1);
+        if ('recurring_weekdays' in data.taskData) setEditRecurringWeekdays(data.taskData.recurring_weekdays || []);
+        if ('recurring_monthday' in data.taskData) setEditRecurringMonthday(data.taskData.recurring_monthday || 1);
+        if ('recurring_time' in data.taskData) setEditRecurringTime(data.taskData.recurring_time || '09:00');
         refreshActivities();
       } else if (data.action === 'comment_reacted' && data.taskData.task_id === task.id) {
         const { comment_id, reactions } = data.taskData;
         setComments(prev => prev.map((c: any) => c.id === comment_id ? { ...c, reactions } : c));
+      } else if (data.action === 'comment_updated' && data.taskData.task_id === task.id) {
+        const comment = data.taskData.comment;
+        setComments(prev => prev.map((c: any) => c.id === comment.id ? { ...c, ...comment } : c));
+        refreshActivities();
       }
     };
 
@@ -1765,12 +2151,138 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   }, [initialStatuses]);
 
   useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.hasAttribute('contenteditable')
+      );
+      if (e.key === 'w' || e.key === 'W') {
+        if (!isTyping && task) {
+          e.preventDefault();
+          handleToggleWatch();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [task, me]);
+
+  useEffect(() => {
     if (panelTab === 'comments') {
       scrollToBottom();
     } else if (panelTab === 'history') {
       scrollToBottomActivities();
     }
   }, [panelTab]);
+
+  if (taskNotFound) {
+    return (
+      <>
+        <div className="task-detail__backdrop" onClick={onClose} style={{ backdropFilter: 'blur(4px)' }} />
+        <div className="task-detail__task-panel">
+          {/* Header row matching original panel style */}
+          <div className="task-detail__panel-header" style={{ display: 'flex', justifyContent: 'flex-end', padding: '16px 20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+            <button className="panel-btn" onClick={onClose} title={t('common.close')} style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px' }}>
+              <CloseOutlined style={{ fontSize: '16px' }} />
+            </button>
+          </div>
+          
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px', background: 'radial-gradient(circle at center, rgba(239, 68, 68, 0.03) 0%, transparent 70%)' }}>
+            
+            {/* Icon Container with glowing radial blur */}
+            <div style={{ position: 'relative', width: '96px', height: '96px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '28px' }}>
+              {/* Blur backdrop */}
+              <div style={{ position: 'absolute', width: '72px', height: '72px', background: 'rgba(239, 68, 68, 0.08)', borderRadius: '50%', filter: 'blur(16px)' }} />
+              {/* Shield/Lock Graphic Ring */}
+              <div style={{ position: 'absolute', width: '96px', height: '96px', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+              <div style={{ position: 'absolute', width: '80px', height: '80px', border: '1px dashed rgba(239, 68, 68, 0.15)', borderRadius: '50%' }} />
+              {/* Main Lock/Exclamation Icon */}
+              <div style={{ zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '60px', height: '60px', borderRadius: '50%', background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.05) 0%, rgba(239, 68, 68, 0.12) 100%)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#ef4444' }}>
+                <CloseOutlined style={{ fontSize: '26px' }} />
+              </div>
+            </div>
+
+            {/* Glassmorphic Card Container */}
+            <div style={{ background: 'rgba(255, 255, 255, 0.02)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '32px', maxWidth: '420px', width: '100%', textAlign: 'center', boxShadow: '0 10px 30px rgba(0, 0, 0, 0.25)' }}>
+              {/* Gradient text heading */}
+              <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '12px', background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5253 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.5px' }}>
+                {t('tasks.not_found')}
+              </h2>
+              
+              <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '28px', padding: '0 10px' }}>
+                {t('tasks.not_found_desc')}
+              </p>
+
+              <Button 
+                type="primary" 
+                onClick={onClose}
+                style={{ height: '40px', background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', border: 'none', borderRadius: '8px', fontWeight: 600, padding: '0 28px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(99, 102, 241, 0.3)', transition: 'all 0.2s ease', cursor: 'pointer' }}
+              >
+                {t('common.close')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (unauthorized) {
+    return (
+      <>
+        <div className="task-detail__backdrop" onClick={onClose} style={{ backdropFilter: 'blur(4px)' }} />
+        <div className="task-detail__task-panel">
+          {/* Header row matching original panel style */}
+          <div className="task-detail__panel-header" style={{ display: 'flex', justifyContent: 'flex-end', padding: '16px 20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+            <button className="panel-btn" onClick={onClose} title={t('common.close')} style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px' }}>
+              <CloseOutlined style={{ fontSize: '16px' }} />
+            </button>
+          </div>
+
+          {/* Centered Premium Content Card */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px', background: 'radial-gradient(circle at center, rgba(239, 68, 68, 0.03) 0%, transparent 70%)' }}>
+            
+            {/* Icon Container with glowing radial blur */}
+            <div style={{ position: 'relative', width: '96px', height: '96px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '28px' }}>
+              {/* Blur backdrop */}
+              <div style={{ position: 'absolute', width: '72px', height: '72px', background: 'rgba(239, 68, 68, 0.15)', borderRadius: '50%', filter: 'blur(16px)' }} />
+              {/* Shield/Lock Graphic Ring */}
+              <div style={{ position: 'absolute', width: '96px', height: '96px', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'pulse 3s infinite' }} />
+              <div style={{ position: 'absolute', width: '80px', height: '80px', border: '1px dashed rgba(239, 68, 68, 0.3)', borderRadius: '50%' }} />
+              {/* Main Lock Icon */}
+              <div style={{ zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '60px', height: '60px', borderRadius: '50%', background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.18) 100%)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#ef4444', boxShadow: 'inset 0 0 12px rgba(239, 68, 68, 0.15)' }}>
+                <LockOutlined style={{ fontSize: '26px', filter: 'drop-shadow(0 2px 4px rgba(239, 68, 68, 0.3))' }} />
+              </div>
+            </div>
+
+            {/* Glassmorphic Card Container */}
+            <div style={{ background: 'rgba(255, 255, 255, 0.02)', backdropFilter: 'blur(8px)', border: '1px solid var(--border-color)', borderRadius: '16px', padding: '32px', maxWidth: '420px', width: '100%', textAlign: 'center', boxShadow: '0 10px 30px rgba(0, 0, 0, 0.25)' }}>
+              {/* Gradient text heading */}
+              <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '12px', background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5253 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.5px' }}>
+                {t('tasks.access_denied')}
+              </h2>
+              
+              <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '28px', padding: '0 10px' }}>
+                {t('tasks.access_denied_desc')}
+              </p>
+
+              <Button 
+                type="primary" 
+                onClick={onClose}
+                style={{ height: '40px', background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', border: 'none', borderRadius: '8px', fontWeight: 600, padding: '0 28px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(99, 102, 241, 0.3)', transition: 'all 0.2s ease', cursor: 'pointer' }}
+              >
+                {t('common.close')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   if (!taskId || loading || !task) {
     return (
@@ -1853,6 +2365,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         assignee_id: assigneeIdVal,
         start_date: startVal ? new Date(startVal).toISOString() : null,
         due_date: dueVal ? new Date(dueVal).toISOString() : null,
+        milestone_id: fieldName === 'milestone_id' ? (value || null) : (editMilestoneId || null),
       };
 
       const res = await api.updateTask(task.id, payload);
@@ -1863,7 +2376,55 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
       }
     } catch (err: any) {
       console.error(err);
-      message.error(err.response?.data?.message || t('tasks.detail_toast.auto_save_err'));
+      if (fieldName === 'status' && err.response?.data?.workflow_error && err.response?.data?.failed_rules) {
+        setEditStatus(task.status);
+        const statusObj = statuses.find((s: any) => s.id === value);
+        const statusName = statusObj ? statusObj.name : value;
+        setWfTargetStatus(value);
+        setWfTargetStatusName(statusName);
+        setWfFailedRules(err.response.data.failed_rules);
+        setWfModalOpen(true);
+      } else {
+        message.error(err.response?.data?.message || t('tasks.detail_toast.auto_save_err'));
+      }
+    }
+  };
+
+  const handleSaveRecurringSettings = async (settings: any) => {
+    if (!task?.id) return;
+    try {
+      const payload: any = {
+        title: task.title,
+        description: editDescription,
+        status: editStatus,
+        priority: editPriority,
+        assignee_id: editAssigneeId || null,
+        start_date: editStartDate ? new Date(editStartDate).toISOString() : null,
+        due_date: editDueDate ? new Date(editDueDate).toISOString() : null,
+        is_recurring: settings.hasOwnProperty('is_recurring') ? settings.is_recurring : editIsRecurring,
+        recurring_frequency: settings.hasOwnProperty('recurring_frequency') ? settings.recurring_frequency : editRecurringFrequency,
+        recurring_interval: settings.hasOwnProperty('recurring_interval') ? settings.recurring_interval : editRecurringInterval,
+        recurring_weekdays: settings.hasOwnProperty('recurring_weekdays') ? settings.recurring_weekdays : editRecurringWeekdays,
+        recurring_monthday: settings.hasOwnProperty('recurring_monthday') ? settings.recurring_monthday : editRecurringMonthday,
+        recurring_time: settings.hasOwnProperty('recurring_time') ? settings.recurring_time : editRecurringTime,
+      };
+
+      if (settings.hasOwnProperty('is_recurring')) setEditIsRecurring(settings.is_recurring);
+      if (settings.hasOwnProperty('recurring_frequency')) setEditRecurringFrequency(settings.recurring_frequency);
+      if (settings.hasOwnProperty('recurring_interval')) setEditRecurringInterval(settings.recurring_interval);
+      if (settings.hasOwnProperty('recurring_weekdays')) setEditRecurringWeekdays(settings.recurring_weekdays);
+      if (settings.hasOwnProperty('recurring_monthday')) setEditRecurringMonthday(settings.recurring_monthday);
+      if (settings.hasOwnProperty('recurring_time')) setEditRecurringTime(settings.recurring_time);
+
+      const res = await api.updateTask(task.id, payload);
+      if (res.success) {
+        setTask(prev => prev ? { ...prev, ...res.data } : null);
+        onUpdate(true);
+        refreshActivities();
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error(err.response?.data?.message || 'Không thể cập nhật cấu hình lặp lại.');
     }
   };
 
@@ -1879,9 +2440,9 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   };
 
   // Watch / Unwatch Task
-  const handleToggleWatch = async () => {
+  const handleToggleWatch = async (userId?: number) => {
     try {
-      const res = await api.toggleWatchTask(task.id);
+      const res = await api.toggleWatchTask(task.id, userId);
       if (res.success) {
         setTask(prev => prev ? { ...prev, watcher_ids: res.watcher_ids } : null);
         onUpdate(true);
@@ -1912,6 +2473,21 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
         }
       }
     });
+  };
+
+  const handleCloneTask = async () => {
+    try {
+      const res = await api.cloneTask(task.id);
+      if (res.success) {
+        message.success(res.message || 'Công việc đã được nhân bản thành công.');
+        onUpdate(true);
+        if (res.data?.id) {
+          fetchTaskDetails(res.data.id);
+        }
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.message || 'Không thể nhân bản công việc.');
+    }
   };
 
   // Helper to determine final and first status IDs
@@ -2033,6 +2609,66 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
       }
     } catch {
       message.error(t('tasks.detail_toast.subtask_delete_err'));
+    }
+  };
+
+  // Fetch Project Tasks (for linking)
+  const fetchProjectTasks = async () => {
+    if (!task?.project_id || !task?.id) return;
+    try {
+      const res = await api.getTasks(task.project_id);
+      if (res.success) {
+        // Filter out the current task so we don't link to ourselves
+        setProjectTasks((res.data || []).filter((t: any) => Number(t.id) !== Number(task.id)));
+      }
+    } catch (err) {
+      console.error('Failed to fetch project tasks', err);
+    }
+  };
+
+  const handleOpenAddDependency = () => {
+    setShowAddDependencyForm(true);
+    fetchProjectTasks();
+  };
+
+  const handleAddDependency = async () => {
+    if (!depTargetTaskId) {
+      message.error(t('tasks.panel.select_target_task_err' as any) || 'Vui lòng chọn công việc để liên kết.');
+      return;
+    }
+    setDependenciesLoading(true);
+    try {
+      const res = await api.addTaskDependency(task.id, {
+        target_task_id: depTargetTaskId,
+        type: depType,
+      });
+      if (res.success) {
+        message.success(t('tasks.panel.dependency_added_success' as any) || 'Đã thêm liên kết công việc.');
+        setShowAddDependencyForm(false);
+        setDepTargetTaskId(undefined);
+        setDepType('relates_to');
+        // Reload task details to show updated dependencies
+        fetchTaskDetails(task.id, true);
+        onUpdate(true);
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.panel.dependency_add_error' as any) || 'Không thể liên kết công việc.');
+    } finally {
+      setDependenciesLoading(false);
+    }
+  };
+
+  const handleDeleteDependency = async (id: number) => {
+    try {
+      const res = await api.deleteTaskDependency(id);
+      if (res.success) {
+        message.success(t('tasks.panel.dependency_deleted_success' as any) || 'Đã gỡ bỏ liên kết công việc.');
+        // Reload task details to show updated dependencies
+        fetchTaskDetails(task.id, true);
+        onUpdate(true);
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.message || t('tasks.panel.dependency_delete_error' as any) || 'Không thể gỡ bỏ liên kết công việc.');
     }
   };
 
@@ -2192,17 +2828,130 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     }
   };
 
+  const startAiModalTypewriter = (result: any, type: 'description' | 'subtasks' | 'checklist') => {
+    if (aiTypewriterIntervalRef.current) {
+      clearInterval(aiTypewriterIntervalRef.current);
+      aiTypewriterIntervalRef.current = null;
+    }
+
+    aiModalRawResultRef.current = result;
+    aiModalTypeRef.current = type;
+
+    if (!result) {
+      setDisplayedAiModalResult(null);
+      return;
+    }
+
+    if (type === 'description') {
+      let currentLength = 0;
+      setDisplayedAiModalResult('');
+
+      aiTypewriterIntervalRef.current = setInterval(() => {
+        const fullText = aiModalRawResultRef.current;
+        if (typeof fullText !== 'string') {
+          clearInterval(aiTypewriterIntervalRef.current);
+          aiTypewriterIntervalRef.current = null;
+          return;
+        }
+
+        if (currentLength < fullText.length) {
+          const diff = fullText.length - currentLength;
+          let charsToAppend = 1;
+          if (diff > 120) {
+            charsToAppend = 12;
+          } else if (diff > 60) {
+            charsToAppend = 8;
+          } else if (diff > 30) {
+            charsToAppend = 5;
+          } else if (diff > 15) {
+            charsToAppend = 3;
+          } else if (diff > 5) {
+            charsToAppend = 2;
+          }
+
+          currentLength += charsToAppend;
+          setDisplayedAiModalResult(fullText.slice(0, currentLength));
+        } else {
+          clearInterval(aiTypewriterIntervalRef.current);
+          aiTypewriterIntervalRef.current = null;
+        }
+      }, 15);
+    } else {
+      if (!Array.isArray(result) || result.length === 0) {
+        setDisplayedAiModalResult([]);
+        return;
+      }
+
+      checklistIdxRef.current = 0;
+      checklistCharIdxRef.current = 0;
+      setDisplayedAiModalResult(['']);
+
+      aiTypewriterIntervalRef.current = setInterval(() => {
+        const items = aiModalRawResultRef.current;
+        if (!Array.isArray(items)) {
+          clearInterval(aiTypewriterIntervalRef.current);
+          aiTypewriterIntervalRef.current = null;
+          return;
+        }
+
+        const currentIdx = checklistIdxRef.current;
+        if (currentIdx >= items.length) {
+          clearInterval(aiTypewriterIntervalRef.current);
+          aiTypewriterIntervalRef.current = null;
+          return;
+        }
+
+        const targetString = items[currentIdx] || '';
+        const currentCharIdx = checklistCharIdxRef.current;
+
+        if (currentCharIdx < targetString.length) {
+          const diff = targetString.length - currentCharIdx;
+          let charsToAppend = 1;
+          if (diff > 30) {
+            charsToAppend = 4;
+          } else if (diff > 15) {
+            charsToAppend = 2;
+          }
+
+          const nextCharIdx = currentCharIdx + charsToAppend;
+          checklistCharIdxRef.current = nextCharIdx;
+
+          setDisplayedAiModalResult((prev: any) => {
+            if (!Array.isArray(prev)) return prev;
+            const updated = [...prev];
+            updated[currentIdx] = targetString.slice(0, nextCharIdx);
+            return updated;
+          });
+        } else {
+          if (currentIdx + 1 < items.length) {
+            checklistIdxRef.current = currentIdx + 1;
+            checklistCharIdxRef.current = 0;
+            setDisplayedAiModalResult((prev: any) => {
+              if (!Array.isArray(prev)) return prev;
+              return [...prev, ''];
+            });
+          } else {
+            clearInterval(aiTypewriterIntervalRef.current);
+            aiTypewriterIntervalRef.current = null;
+          }
+        }
+      }, 20);
+    }
+  };
+
   const handleGenerateAiChecklist = async (prompt?: string) => {
     if (!task) return;
     setAiModalType('checklist');
     setIsAiModalOpen(true);
     setAiModalLoading(true);
     setAiModalResult(null);
+    setDisplayedAiModalResult(null);
     setAiModalPrompt('');
     try {
       const res = await api.generateAiChecklist(task.id, prompt, true);
       if (res.success) {
         setAiModalResult(res.data);
+        startAiModalTypewriter(res.data, 'checklist');
       } else {
         message.error(t('ai.err.checklist'));
       }
@@ -2220,11 +2969,13 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     setIsAiModalOpen(true);
     setAiModalLoading(true);
     setAiModalResult(null);
+    setDisplayedAiModalResult(null);
     setAiModalPrompt('');
     try {
       const res = await api.generateAiDescription(task.id, prompt, true);
       if (res.success) {
         setAiModalResult(res.data);
+        startAiModalTypewriter(res.data, 'description');
       } else {
         message.error(t('ai.err.description'));
       }
@@ -2242,11 +2993,13 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     setIsAiModalOpen(true);
     setAiModalLoading(true);
     setAiModalResult(null);
+    setDisplayedAiModalResult(null);
     setAiModalPrompt('');
     try {
       const res = await api.generateAiSubtasks(task.id, prompt, true);
       if (res.success) {
         setAiModalResult(res.data);
+        startAiModalTypewriter(res.data, 'subtasks');
       } else {
         message.error(t('ai.err.subtasks'));
       }
@@ -2262,6 +3015,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     if (!task) return;
     setAiModalLoading(true);
     setAiModalResult(null); // Clear result so loading spinner shows during retry
+    setDisplayedAiModalResult(null);
     try {
       const promptToUse = customPrompt || aiModalPromptRef.current;
       let res;
@@ -2274,6 +3028,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
       }
       if (res.success) {
         setAiModalResult(res.data);
+        startAiModalTypewriter(res.data, aiModalType);
         // Clear input via ref (uncontrolled)
         if (aiModalInputRef.current) aiModalInputRef.current.value = '';
         aiModalPromptRef.current = '';
@@ -2720,7 +3475,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   // Post Reply to Comment
   const handlePostReply = async (parentCommentId: number) => {
     const text = replyTextRef.current;
-    if (!text.trim()) return;
+    if (!text.trim() && !replyFile) return;
     try {
       const res = await api.createTaskComment(task.id, text, replyFile || undefined, parentCommentId);
       if (res.success) {
@@ -2771,6 +3526,27 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: number) => {
+    try {
+      const res = await api.deleteComment(commentId);
+      if (res.success) {
+        message.success(t('tasks.detail_toast.delete_comment_success' as any) || 'Bình luận đã được xóa.');
+        setComments(prev => prev.map(c => c.id === commentId ? { ...c, comment: 'Bình luận này đã bị xóa', attachment_path: null } : c));
+        
+        const taskRes = await api.getTask(task.id);
+        if (taskRes.success) {
+          setTask(taskRes.data);
+          setComments(taskRes.data.comments || []);
+          const sortedActs = [...(taskRes.data.activities || [])].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          setActivities(sortedActs);
+        }
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error(err.response?.data?.message || t('tasks.detail_toast.delete_comment_err' as any) || 'Không thể xóa bình luận.');
     }
   };
 
@@ -3025,79 +3801,236 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
     );
   };
 
+  const isWatching = task.watcher_ids?.includes(me?.id || 0);
+  const watcherCount = task.watcher_ids?.length || 0;
+
+  const handleRemoveWatcher = async (uid: number) => {
+    try {
+      const res = await api.toggleWatchTask(task.id, uid);
+      if (res.success) {
+        setTask(prev => prev ? { ...prev, watcher_ids: res.watcher_ids } : null);
+        onUpdate(true);
+        message.success('Đã xóa người theo dõi.');
+      }
+    } catch {
+      message.error('Không thể xóa người theo dõi.');
+    }
+  };
+
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}/projects/${task.project_id}?task_id=${task.id}`;
+    navigator.clipboard.writeText(url);
+    message.success('Đã sao chép liên kết công việc vào bộ nhớ tạm!');
+  };
+
+  const blockerTasks = [
+    ...(task.dependencies || [])
+      .filter((dep: any) => dep.type === 'blocked_by' && dep.target_task && !dep.target_task.completed_at)
+      .map((dep: any) => dep.target_task),
+    ...(task.inverse_dependencies || [])
+      .filter((dep: any) => dep.type === 'blocks' && dep.task && !dep.task.completed_at)
+      .map((dep: any) => dep.task)
+  ];
+  const isBlocked = blockerTasks.length > 0;
+
+  const watchersPopoverContent = (
+    <div style={{ width: '260px', padding: '4px 0' }}>
+      {Number(task.assignee_id) !== Number(me?.id) && (
+        <div
+          onClick={() => handleToggleWatch()}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 12px',
+            cursor: 'pointer',
+            borderBottom: '1px solid var(--border-color)',
+            fontWeight: 500,
+            color: 'var(--text-primary)',
+          }}
+          className="watcher-popover-item"
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isWatching ? <EyeInvisibleOutlined style={{ fontSize: '14px' }} /> : <EyeOutlined style={{ fontSize: '14px' }} />}
+            {isWatching ? 'Ngừng theo dõi' : 'Theo dõi công việc'}
+          </span>
+          <span style={{
+            fontSize: '10px',
+            color: 'var(--text-muted)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '3px',
+            padding: '0 4px',
+            background: 'rgba(120, 120, 120, 0.08)'
+          }}>W</span>
+        </div>
+      )}
+
+      <div style={{ padding: '10px 12px 6px 12px' }}>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Người theo dõi ({watcherCount})
+        </span>
+      </div>
+
+      <div style={{ maxHeight: '160px', overflowY: 'auto', padding: '0 4px' }}>
+        {watcherCount === 0 ? (
+          <div style={{ padding: '16px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', textAlign: 'center' }}>
+            <div style={{ display: 'flex', gap: '-4px' }}>
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(120,120,120,0.2)' }} />
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(120,120,120,0.15)', marginLeft: '-6px' }} />
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(120,120,120,0.1)', marginLeft: '-6px' }} />
+            </div>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Chưa có ai theo dõi</span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            {task.watcher_ids?.map((uid: number) => {
+              const member = members.find((m: any) => m.id === uid);
+              if (!member) return null;
+              return (
+                <div key={uid} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 8px',
+                  borderRadius: '4px',
+                }} className="watcher-list-item">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#6366f1', color: '#fff', fontSize: '9px', fontWeight: 600, overflow: 'hidden' }}>
+                      {member.photo ? (
+                        <img src={member.photo} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        getInitials(member.name)
+                      )}
+                    </div>
+                    <span style={{ fontSize: '13px', color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '140px' }}>{member.name}</span>
+                  </div>
+                  <Button
+                    type="text"
+                    size="small"
+                    danger
+                    icon={<CloseOutlined style={{ fontSize: '10px' }} />}
+                    onClick={() => handleRemoveWatcher(uid)}
+                    style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: '8px 12px 4px 12px', borderTop: '1px solid var(--border-color)', marginTop: '6px' }}>
+        <Select
+          showSearch
+          size="small"
+          placeholder="Thêm người theo dõi..."
+          style={{ width: '100%' }}
+          optionFilterProp="children"
+          value={null}
+          onChange={async (uid) => {
+            if (!uid) return;
+            try {
+              const res = await api.toggleWatchTask(task.id, uid);
+              if (res.success) {
+                setTask(prev => prev ? { ...prev, watcher_ids: res.watcher_ids } : null);
+                onUpdate(true);
+                message.success('Đã thêm người theo dõi.');
+              }
+            } catch (err) {
+              message.error('Không thể thêm người theo dõi.');
+            }
+          }}
+          filterOption={(input, option) =>
+            (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+          }
+          options={members
+            .filter((m: any) => !task.watcher_ids?.includes(m.id) && Number(m.id) !== Number(task.assignee_id))
+            .map((m: any) => ({
+              value: m.id,
+              label: m.name,
+            }))}
+        />
+      </div>
+    </div>
+  );
+
+  const actionMenu = {
+    items: [
+      {
+        key: 'clone',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CopyOutlined /> Nhân bản công việc
+          </span>
+        ),
+        onClick: handleCloneTask,
+      },
+      {
+        key: 'recurring',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <SyncOutlined /> Cấu hình định kỳ
+          </span>
+        ),
+        onClick: () => {
+          setModalIsRecurring(task.is_recurring || false);
+          setModalRecurringFrequency(task.recurring_frequency || 'none');
+          setModalRecurringInterval(task.recurring_interval || 1);
+          setModalRecurringWeekdays(task.recurring_weekdays || []);
+          setModalRecurringMonthday(task.recurring_monthday || 1);
+          setModalRecurringTime(task.recurring_time || '09:00');
+          setIsRecurringModalVisible(true);
+        },
+      },
+      {
+        key: 'save-template',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FileTextOutlined /> {task.template ? 'Đã lưu mẫu công việc' : (t('tasks.template.save_btn' as any) || 'Lưu thành mẫu')}
+          </span>
+        ),
+        disabled: !!task.template,
+        onClick: () => {
+          setTemplateName(task.title);
+          setTemplateProjectId(task.project_id || null);
+          setTemplateIsPublic(false);
+          setIsTemplateModalVisible(true);
+        },
+      },
+      ...(canDelete ? [{
+        key: 'delete',
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
+            <DeleteOutlined /> Xóa công việc
+          </span>
+        ),
+        onClick: handleDeleteTask,
+      }] : []),
+    ]
+  };
+
   return (
     <>
       <div className="task-detail__backdrop" onClick={onClose} />
       <div className="task-detail__task-panel" style={{ display: 'flex', flexDirection: 'column' }}>
 
         {/* Panel Header */}
-        <div className="task-detail__panel-header">
-          <div className="task-detail__panel-header-left" style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1 }}>
-            <span className="task-id">#{task.id}</span>
-
-            {/* Watchers section */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: '24px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {t('tasks.panel.watchers_count', { count: task.watcher_ids?.length || 0 })}
+        <div className="task-detail__panel-header" style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 16px',
+          borderBottom: '1px solid var(--border-color)',
+          background: 'rgba(255,255,255,0.01)'
+        }}>
+          <div className="task-detail__panel-header-left" style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, overflow: 'hidden' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>
+                {task.project?.name || task.project?.title || t('tasks.no_project' as any) || 'Không có dự án'}
               </span>
-
-              {/* Only show watch button if current user is NOT the assignee */}
-              {me?.id && me.id !== task.assignee_id && (
-                <Button
-                  type={task.watcher_ids?.includes(me.id) ? "primary" : "default"}
-                  size="small"
-                  style={{ fontSize: '12px', height: '24px', padding: '0 8px', display: 'flex', alignItems: 'center' }}
-                  icon={task.watcher_ids?.includes(me.id) ? <EyeInvisibleOutlined style={{ fontSize: '12px' }} /> : <EyeOutlined style={{ fontSize: '12px' }} />}
-                  onClick={handleToggleWatch}
-                >
-                  {task.watcher_ids?.includes(me.id) ? t('tasks.panel.unwatch') : t('tasks.panel.watch')}
-                </Button>
-              )}
-
-              {task.watcher_ids && task.watcher_ids.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  {task.watcher_ids.map((uid: number) => {
-                    const member = members.find((m: any) => m.id === uid);
-                    if (!member) return null;
-                    return (
-                      <Tooltip title={member.name} key={uid}>
-                        <div style={{ background: '#6366f1', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: '#fff', fontSize: '10px', fontWeight: 600, overflow: 'hidden' }}>
-                          {member.photo ? (
-                            <img src={member.photo} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : (
-                            getInitials(member.name)
-                          )}
-                        </div>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="task-detail__panel-header-right">
-            {canDelete && (
-              <Tooltip title={t('tasks.panel.delete_task')}>
-                <button className="panel-btn" onClick={handleDeleteTask}>
-                  <DeleteOutlined style={{ color: '#ef4444' }} />
-                </button>
-              </Tooltip>
-            )}
-            <button className="panel-btn" onClick={onClose}><CloseOutlined /></button>
-          </div>
-        </div>
-
-        {/* Panel Body */}
-        <div className="task-detail__panel-body">
-
-          {/* Left Column: Properties Grid, Description, Subtasks */}
-          <div className="task-detail__panel-content">
-            {/* Breadcrumb / Location */}
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-              <span>{task.project?.name || task.project?.title || t('tasks.no_project' as any) || 'Không có dự án'}</span>
               {task.parentTask && (
                 <>
-                  <span>/</span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>/</span>
                   <span
                     onClick={() => fetchTaskDetails(task.parent_task_id!)}
                     style={{
@@ -3112,8 +4045,8 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                   </span>
                 </>
               )}
-              <span>/</span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 500, color: 'var(--text-secondary)' }}>
+              <span style={{ color: 'var(--text-tertiary)' }}>/</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600, color: 'var(--text-primary)' }}>
                 <TaskTypeBadge
                   type={task.type || 'task'}
                   size="badge"
@@ -3122,6 +4055,112 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 {t('tasks.panel.task_id_label' as any, { id: task.id })}
               </span>
             </div>
+          </div>
+          <div className="task-detail__panel-header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Lock/Workflow indicator */}
+            <Tooltip title={isBlocked ? `Bị chặn bởi: ${blockerTasks.map(t => `#${t.id} - ${t.title}`).join(', ')}` : "Quy trình mở khóa"}>
+              <Button
+                size="small"
+                icon={<LockOutlined style={{ color: isBlocked ? '#ef4444' : 'var(--text-muted)', fontSize: '14px' }} />}
+                style={{
+                  height: '28px',
+                  width: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: isBlocked ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+                  borderColor: isBlocked ? 'rgba(239, 68, 68, 0.2)' : 'var(--border-color)',
+                  borderRadius: '4px',
+                  padding: 0
+                }}
+              />
+            </Tooltip>
+
+            {/* Watchers popover eye button */}
+            <Popover
+              content={watchersPopoverContent}
+              title={null}
+              trigger="click"
+              placement="bottomRight"
+              overlayClassName="watcher-popover-overlay"
+            >
+              <Button
+                size="small"
+                type={isWatching ? "primary" : "default"}
+                style={{
+                  height: '28px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderColor: isWatching ? 'var(--primary)' : 'var(--border-color)',
+                  borderRadius: '4px',
+                }}
+              >
+                <EyeOutlined style={{ fontSize: '14px' }} />
+                {watcherCount > 0 && <span style={{ fontSize: '12px', fontWeight: 600 }}>{watcherCount}</span>}
+              </Button>
+            </Popover>
+
+            {/* Share/Link button */}
+            <Tooltip title="Sao chép liên kết công việc">
+              <Button
+                size="small"
+                icon={<ShareAltOutlined style={{ fontSize: '14px' }} />}
+                onClick={handleCopyLink}
+                style={{
+                  height: '28px',
+                  width: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '4px',
+                  padding: 0
+                }}
+              />
+            </Tooltip>
+
+            {/* More actions dropdown (triple dots) */}
+            <Dropdown menu={actionMenu} trigger={['click']} placement="bottomRight">
+              <Button
+                size="small"
+                icon={<MoreOutlined style={{ fontSize: '16px' }} />}
+                style={{
+                  height: '28px',
+                  width: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '4px',
+                  padding: 0
+                }}
+              />
+            </Dropdown>
+
+            {/* Separator line */}
+            <div style={{ width: '1px', height: '16px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+            {/* Close button */}
+            <Button
+              type="text"
+              size="small"
+              icon={<CloseOutlined style={{ fontSize: '14px', color: 'var(--text-muted)' }} />}
+              onClick={onClose}
+              style={{
+                height: '28px',
+                width: '28px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Panel Body */}
+        <div className="task-detail__panel-body">
+
+          {/* Left Column: Properties Grid, Description, Subtasks */}
+          <div className="task-detail__panel-content">
 
             <TaskTitleInput
               initialTitle={task.title}
@@ -3184,7 +4223,17 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                           <UserOutlined style={{ fontSize: '12px' }} />
                           <span style={{ fontSize: '12px' }}>{t('tasks.panel.assignee_placeholder')}</span>
                         </div>
-                        {members.map((m: any) => (
+                        {members
+                          .filter((m: any) => {
+                            const isSubtask = task?.parent_task_id !== null && task?.parent_task_id !== undefined;
+                            const userProjectRole = project?.members?.find((pm: any) => pm.id === me?.id)?.pivot?.role || 'member';
+                            const isProjCreator = project?.created_by === me?.id;
+                            const isManager = userProjectRole === 'manager' || isProjCreator || me?.role === 'admin';
+
+                            if (isManager || isSubtask) return true;
+                            return Number(m.id) === Number(me?.id);
+                          })
+                          .map((m: any) => (
                           <div
                             key={m.id}
                             onClick={() => {
@@ -3269,18 +4318,31 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 </div>
               </div>
 
-              {/* 4. Ước tính */}
+              {/* 5b. Mốc công việc (Milestone) */}
               <div className="property-field">
                 <span className="field-label">
-                  <DashboardOutlined style={{ fontSize: '14px', color: 'var(--text-muted)' }} /> {t('tasks.panel.estimate')}
+                  <DeploymentUnitOutlined style={{ fontSize: '14px', color: 'var(--text-muted)' }} /> {t('project_detail.tab.milestones')}
                 </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '30px' }}>
-                  <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>
-                    {formatEstimate(t, editStartDate, editDueDate)}
-                  </span>
-                  <Tooltip title={t('tasks.panel.estimate_tooltip')}>
-                    <InfoCircleOutlined style={{ color: 'var(--text-muted)', fontSize: '12px', marginLeft: '4px' }} />
-                  </Tooltip>
+                <div className="field-value" style={{ marginTop: '4px', minWidth: 0 }}>
+                  <Select
+                    disabled={!taskEditable}
+                    value={editMilestoneId}
+                    onChange={(val) => {
+                      setEditMilestoneId(val);
+                      autoSaveTaskField('milestone_id', val);
+                    }}
+                    placeholder={t('milestones.select_milestone')}
+                    style={{ width: '100%', minWidth: 0 }}
+                    allowClear
+                    popupClassName="milestone-selector-dropdown"
+                    variant="borderless"
+                  >
+                    {projectMilestones.map((m) => (
+                      <Select.Option key={m.id} value={m.id}>
+                        {m.name}
+                      </Select.Option>
+                    ))}
+                  </Select>
                 </div>
               </div>
 
@@ -3329,6 +4391,21 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 </div>
               </div>
 
+              {/* 4. Ước tính */}
+              <div className="property-field">
+                <span className="field-label">
+                  <DashboardOutlined style={{ fontSize: '14px', color: 'var(--text-muted)' }} /> {t('tasks.panel.estimate')}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '30px' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>
+                    {formatEstimate(t, editStartDate, editDueDate)}
+                  </span>
+                  <Tooltip title={t('tasks.panel.estimate_tooltip')}>
+                    <InfoCircleOutlined style={{ color: 'var(--text-muted)', fontSize: '12px', marginLeft: '4px' }} />
+                  </Tooltip>
+                </div>
+              </div>
+
               {/* 6. Theo dõi thời gian */}
               <div className="property-field">
                 <span className="field-label">
@@ -3365,6 +4442,8 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                 </div>
               </div>
 
+
+
               {/* Custom Fields defined in Project */}
               {customFields.map((field) => {
                 const valueObj = task.custom_field_values?.find(
@@ -3391,7 +4470,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                       </Popconfirm>
                     </span>
 
-                    <div style={{ marginTop: '4px' }}>
+                    <div style={{ marginTop: '4px', minWidth: 0 }}>
                       {field.type === 'checkbox' ? (
                         <input
                           type="checkbox"
@@ -3402,7 +4481,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                       ) : field.type === 'dropdown' ? (
                         <Select
                           variant="borderless"
-                          style={{ width: '100%', padding: 0 }}
+                          style={{ width: '100%', padding: 0, minWidth: 0 }}
                           value={rawValue || undefined}
                           placeholder={t('tasks.panel.select_value_placeholder' as any) || 'Chọn giá trị'}
                           allowClear
@@ -3857,6 +4936,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                               type="datetime-local"
                               value={subtaskStartDate}
                               onChange={e => setSubtaskStartDate(e.target.value)}
+                              onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }}
                               style={{ width: '100%', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '12px', padding: '4px 8px', borderRadius: '4px' }}
                             />
                           </div>
@@ -3866,6 +4946,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                               type="datetime-local"
                               value={subtaskDueDate}
                               onChange={e => setSubtaskDueDate(e.target.value)}
+                              onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }}
                               style={{ width: '100%', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '12px', padding: '4px 8px', borderRadius: '4px' }}
                             />
                           </div>
@@ -3951,6 +5032,260 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                   <PlusOutlined style={{ fontSize: '12px' }} /> {t('tasks.panel.add_subtask' as any) || 'Thêm công việc con'}
                 </div>
               )}
+            </div>
+
+            {/* Dependencies Section */}
+            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {t('tasks.panel.dependencies' as any) || 'Phụ thuộc & Liên kết'} ({((task.dependencies || []).length + (task.inverse_dependencies || []).length)})
+                </span>
+                {taskEditable && !showAddDependencyForm && (
+                  <Button
+                    type="text"
+                    size="small"
+                    onClick={handleOpenAddDependency}
+                    style={{
+                      fontSize: '12px',
+                      color: 'var(--primary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '0 4px'
+                    }}
+                  >
+                    <PlusOutlined /> {t('tasks.panel.add_dependency' as any) || 'Thêm liên kết'}
+                  </Button>
+                )}
+              </div>
+
+              {/* Add Dependency Form */}
+              {taskEditable && showAddDependencyForm && (
+                <div style={{
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  background: 'rgba(120, 120, 120, 0.04)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  marginBottom: '16px',
+                }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', minWidth: '80px' }}>
+                      {t('tasks.panel.relation_type' as any) || 'Mối quan hệ'}:
+                    </span>
+                    <Select
+                      size="small"
+                      style={{ flex: 1, minWidth: 0 }}
+                      value={depType}
+                      onChange={(val) => setDepType(val)}
+                    >
+                      <Select.Option value="blocks">{t('tasks.dependency.blocks' as any) || 'Chặn'}</Select.Option>
+                      <Select.Option value="blocked_by">{t('tasks.dependency.blocked_by' as any) || 'Bị chặn bởi'}</Select.Option>
+                      <Select.Option value="relates_to">{t('tasks.dependency.relates_to' as any) || 'Liên quan đến'}</Select.Option>
+                      <Select.Option value="duplicates">{t('tasks.dependency.duplicates' as any) || 'Trùng lặp với'}</Select.Option>
+                      <Select.Option value="duplicated_by">{t('tasks.dependency.duplicated_by' as any) || 'Bị trùng lặp bởi'}</Select.Option>
+                      <Select.Option value="clones">{t('tasks.dependency.clones' as any) || 'Nhân bản từ'}</Select.Option>
+                      <Select.Option value="cloned_by">{t('tasks.dependency.cloned_by' as any) || 'Bị nhân bản bởi'}</Select.Option>
+                      <Select.Option value="causes">{t('tasks.dependency.causes' as any) || 'Nguyên nhân cho'}</Select.Option>
+                      <Select.Option value="caused_by">{t('tasks.dependency.caused_by' as any) || 'Có nguyên nhân từ'}</Select.Option>
+                    </Select>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', minWidth: '80px' }}>
+                      {t('tasks.panel.target_task' as any) || 'Công việc'}:
+                    </span>
+                    <Select
+                      showSearch
+                      size="small"
+                      style={{ flex: 1, minWidth: 0 }}
+                      placeholder={t('tasks.panel.select_task_placeholder' as any) || 'Tìm kiếm công việc để liên kết...'}
+                      optionFilterProp="children"
+                      value={depTargetTaskId}
+                      onChange={(val) => setDepTargetTaskId(val)}
+                      filterOption={(input, option) =>
+                        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      options={projectTasks.map(pt => ({
+                        value: pt.id,
+                        label: `#${pt.id} - ${pt.title}`
+                      }))}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                    <Button size="small" onClick={() => {
+                      setShowAddDependencyForm(false);
+                      setDepTargetTaskId(undefined);
+                    }}>
+                      {t('tasks.panel.cancel_btn' as any) || 'Hủy'}
+                    </Button>
+                    <Button type="primary" size="small" loading={dependenciesLoading} onClick={handleAddDependency}>
+                      {t('tasks.panel.save_btn' as any) || 'Lưu'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Dependencies List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {/* 1. Direct dependencies where this task is the source */}
+                {(task.dependencies || []).map((dep) => {
+                  if (!dep.target_task) return null;
+                  const targetStatus = statuses.find(s => s.id === dep.target_task?.status) || { name: dep.target_task?.status?.toUpperCase(), color: '#9ca0b0' };
+                  return (
+                    <div key={`dep-${dep.id}`} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 8px',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--primary)', textTransform: 'uppercase', flexShrink: 0 }}>
+                          {t(`tasks.dependency.${(dep.type || '').toLowerCase()}` as any) || (dep.type || '').replace('_', ' ')}
+                        </span>
+                        <span
+                          onClick={() => fetchTaskDetails(dep.target_task_id)}
+                          style={{
+                            fontSize: '13px',
+                            color: 'var(--text-primary)',
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                          className="dependency-task-link"
+                        >
+                          #{dep.target_task_id} - {dep.target_task.title}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: `${targetStatus.color}22`,
+                          color: targetStatus.color,
+                          textTransform: 'uppercase',
+                        }}>
+                          {targetStatus.name}
+                        </span>
+                        {taskEditable && (
+                          <Popconfirm
+                            title={t('tasks.panel.delete_dependency_confirm' as any) || "Gỡ bỏ liên kết này?"}
+                            onConfirm={() => handleDeleteDependency(dep.id)}
+                            okText={t('tasks.panel.delete_btn' as any) || "Gỡ"}
+                            cancelText={t('tasks.panel.cancel_btn' as any) || "Hủy"}
+                            okButtonProps={{ danger: true }}
+                          >
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<CloseOutlined style={{ fontSize: '10px', color: 'var(--text-muted)' }} />}
+                              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', padding: 0 }}
+                            />
+                          </Popconfirm>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* 2. Inverse dependencies where this task is the target */}
+                {(task.inverse_dependencies || []).map((dep) => {
+                  if (!dep.task) return null;
+                  const sourceStatus = statuses.find(s => s.id === dep.task?.status) || { name: dep.task?.status?.toUpperCase(), color: '#9ca0b0' };
+                  
+                  const inverseTypes: Record<string, string> = {
+                    'blocks': 'blocked_by',
+                    'blocked_by': 'blocks',
+                    'relates_to': 'relates_to',
+                    'duplicates': 'duplicated_by',
+                    'duplicated_by': 'duplicates',
+                    'clones': 'cloned_by',
+                    'cloned_by': 'clones',
+                    'causes': 'caused_by',
+                    'caused_by': 'causes'
+                  };
+                  const typeLower = (dep.type || '').toLowerCase();
+                  const displayType = inverseTypes[typeLower] || typeLower;
+
+                  return (
+                    <div key={`dep-inv-${dep.id}`} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 8px',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--primary)', textTransform: 'uppercase', flexShrink: 0 }}>
+                          {t(`tasks.dependency.${displayType}` as any) || displayType.replace('_', ' ')}
+                        </span>
+                        <span
+                          onClick={() => fetchTaskDetails(dep.task_id)}
+                          style={{
+                            fontSize: '13px',
+                            color: 'var(--text-primary)',
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                          className="dependency-task-link"
+                        >
+                          #{dep.task_id} - {dep.task.title}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: `${sourceStatus.color}22`,
+                          color: sourceStatus.color,
+                          textTransform: 'uppercase',
+                        }}>
+                          {sourceStatus.name}
+                        </span>
+                        {taskEditable && (
+                          <Popconfirm
+                            title={t('tasks.panel.delete_dependency_confirm' as any) || "Gỡ bỏ liên kết này?"}
+                            onConfirm={() => handleDeleteDependency(dep.id)}
+                            okText={t('tasks.panel.delete_btn' as any) || "Gỡ"}
+                            cancelText={t('tasks.panel.cancel_btn' as any) || "Hủy"}
+                            okButtonProps={{ danger: true }}
+                          >
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<CloseOutlined style={{ fontSize: '10px', color: 'var(--text-muted)' }} />}
+                              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', padding: 0 }}
+                            />
+                          </Popconfirm>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {((task.dependencies || []).length === 0 && (task.inverse_dependencies || []).length === 0) && (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', padding: '4px 8px' }}>
+                    {t('tasks.panel.no_dependencies' as any) || 'Không có liên kết phụ thuộc nào.'}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Checklists Section */}
@@ -4248,8 +5583,14 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                             <div style={{ background: 'rgba(120, 120, 120, 0.08)', padding: '8px 12px', borderRadius: '18px', display: 'inline-block', maxWidth: '100%', border: '1px solid var(--border-color)' }}>
                               <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '13px', display: 'block' }}>{comment.user?.name}</span>
-                              <p style={{ color: 'var(--text-primary)', fontSize: '13px', margin: '2px 0 0 0', whiteSpace: 'pre-wrap' }}>
-                                {renderCommentText(comment.comment)}
+                              <p style={{
+                                color: comment.comment === 'Bình luận này đã bị xóa' ? 'var(--text-muted)' : 'var(--text-primary)',
+                                fontSize: '13px',
+                                margin: '2px 0 0 0',
+                                whiteSpace: 'pre-wrap',
+                                fontStyle: comment.comment === 'Bình luận này đã bị xóa' ? 'italic' : 'normal'
+                              }}>
+                                {comment.comment === 'Bình luận này đã bị xóa' ? t('tasks.panel.comment_deleted_trace' as any) : renderCommentText(comment.comment)}
                               </p>
                             </div>
 
@@ -4281,29 +5622,46 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                                 {new Date(comment.created_at).toLocaleString('vi-VN')}
                               </span>
 
-                              <Popover content={reactionMenu(comment.id)} trigger="hover" placement="top" mouseEnterDelay={0.3}>
-                                <button style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: userReaction ? '#6366f1' : 'var(--text-secondary)', fontWeight: 600 }}>
-                                  {userReaction ? getReactionEmoji(userReaction.reaction) : t('tasks.reaction.like' as any)}
-                                </button>
-                              </Popover>
+                              {comment.comment !== 'Bình luận này đã bị xóa' && (
+                                <>
+                                  <Popover content={reactionMenu(comment.id)} trigger="hover" placement="top" mouseEnterDelay={0.3}>
+                                    <button style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: userReaction ? '#6366f1' : 'var(--text-secondary)', fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                      {userReaction ? getReactionEmoji(userReaction.reaction) : t('tasks.reaction.like' as any)}
+                                    </button>
+                                  </Popover>
 
-                              <button
-                                onClick={() => {
-                                  setReplyingToCommentId(comment.id);
-                                  setReplyingToSubCommentId(null);
-                                  const initText = comment.user?.id === me?.id ? '' : `@[${comment.user?.name || ''}] `;
-                                  replyTextRef.current = initText;
-                                  setHasReplyText(initText.trim().length > 0);
-                                  // Set DOM value after render
-                                  setTimeout(() => {
-                                    const ta = document.getElementById(`reply-textarea-${comment.id}`) as HTMLTextAreaElement;
-                                    if (ta) { ta.value = initText; ta.focus(); ta.setSelectionRange(initText.length, initText.length); }
-                                  }, 50);
-                                }}
-                                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-secondary)', fontWeight: 600 }}
-                              >
-                                {t('tasks.panel.reply_btn' as any)}
-                              </button>
+                                  <button
+                                    onClick={() => {
+                                      setReplyingToCommentId(comment.id);
+                                      setReplyingToSubCommentId(null);
+                                      const initText = comment.user?.id === me?.id ? '' : `@[${comment.user?.name || ''}] `;
+                                      replyTextRef.current = initText;
+                                      setHasReplyText(initText.trim().length > 0);
+                                      // Set DOM value after render
+                                      setTimeout(() => {
+                                        const ta = document.getElementById(`reply-textarea-${comment.id}`) as HTMLTextAreaElement;
+                                        if (ta) { ta.value = initText; ta.focus(); ta.setSelectionRange(initText.length, initText.length); }
+                                      }, 50);
+                                    }}
+                                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap' }}
+                                  >
+                                    {t('tasks.panel.reply_btn' as any)}
+                                  </button>
+
+                                  {comment.user?.id === me?.id && (
+                                    <Popconfirm
+                                      title={t('tasks.panel.delete_comment_confirm' as any)}
+                                      okText={t('common.yes' as any, undefined, 'Có')}
+                                      cancelText={t('common.no' as any, undefined, 'Không')}
+                                      onConfirm={() => handleDeleteComment(comment.id)}
+                                    >
+                                      <button style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#ff4d4f', fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                        {t('common.delete' as any) || 'Xóa'}
+                                      </button>
+                                    </Popconfirm>
+                                  )}
+                                </>
+                              )}
                             </div>
 
                             {/* Reactions display */}
@@ -4341,36 +5699,81 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                                         <div style={{ flex: 1 }}>
                                           <div style={{ background: 'rgba(120, 120, 120, 0.05)', padding: '6px 10px', borderRadius: '14px', border: '1px solid var(--border-color)' }}>
                                             <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '12px', display: 'block' }}>{reply.user?.name}</span>
-                                            <p style={{ color: 'var(--text-primary)', fontSize: '12px', margin: '2px 0 0 0', whiteSpace: 'pre-wrap' }}>
-                                              {renderCommentText(reply.comment)}
+                                            <p style={{
+                                              color: reply.comment === 'Bình luận này đã bị xóa' ? 'var(--text-muted)' : 'var(--text-primary)',
+                                              fontSize: '12px',
+                                              margin: '2px 0 0 0',
+                                              whiteSpace: 'pre-wrap',
+                                              fontStyle: reply.comment === 'Bình luận này đã bị xóa' ? 'italic' : 'normal'
+                                            }}>
+                                              {reply.comment === 'Bình luận này đã bị xóa' ? t('tasks.panel.comment_deleted_trace' as any) : renderCommentText(reply.comment)}
                                             </p>
                                           </div>
+
+                                          {reply.attachment_path && (
+                                            <div style={{ marginTop: '6px', marginLeft: '6px' }}>
+                                              {isImageFile(reply.attachment_path) ? (
+                                                <a href={getFileUrl(reply.attachment_path)} target="_blank" rel="noreferrer">
+                                                  <img
+                                                    src={getFileUrl(reply.attachment_path)}
+                                                    alt="attachment"
+                                                    style={{ maxWidth: '160px', maxHeight: '120px', borderRadius: '6px', border: '1px solid var(--border-color)' }}
+                                                  />
+                                                </a>
+                                              ) : (
+                                                <a
+                                                  href={getFileUrl(reply.attachment_path)}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}
+                                                >
+                                                  <PaperClipOutlined /> {t('tasks.panel.download_attachment_with_name' as any, { filename: reply.attachment_path.split('/').pop() || '' })}
+                                                </a>
+                                              )}
+                                            </div>
+                                          )}
 
                                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '2px', fontSize: '10px', paddingLeft: '6px' }}>
                                             <span style={{ color: 'var(--text-secondary)' }}>
                                               {new Date(reply.created_at).toLocaleString('vi-VN')}
                                             </span>
-                                            <Popover content={reactionMenu(reply.id)} trigger="hover" placement="top" mouseEnterDelay={0.3}>
-                                              <button style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: replyReaction ? '#6366f1' : 'var(--text-secondary)', fontWeight: 600 }}>
-                                                {replyReaction ? getReactionEmoji(replyReaction.reaction) : t('tasks.reaction.like' as any)}
-                                              </button>
-                                            </Popover>
-                                            <button
-                                              onClick={() => {
-                                                setReplyingToCommentId(comment.id);
-                                                setReplyingToSubCommentId(reply.id);
-                                                const initText = reply.user?.id === me?.id ? '' : `@[${reply.user?.name || ''}] `;
-                                                replyTextRef.current = initText;
-                                                setHasReplyText(initText.trim().length > 0);
-                                                setTimeout(() => {
-                                                  const ta = document.getElementById(`reply-textarea-${comment.id}`) as HTMLTextAreaElement;
-                                                  if (ta) { ta.value = initText; ta.focus(); ta.setSelectionRange(initText.length, initText.length); }
-                                                }, 50);
-                                              }}
-                                              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-secondary)', fontWeight: 600 }}
-                                            >
-                                              {t('tasks.panel.reply_btn' as any)}
-                                            </button>
+                                            {reply.comment !== 'Bình luận này đã bị xóa' && (
+                                              <>
+                                                <Popover content={reactionMenu(reply.id)} trigger="hover" placement="top" mouseEnterDelay={0.3}>
+                                                  <button style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: replyReaction ? '#6366f1' : 'var(--text-secondary)', fontWeight: 600, fontSize: '10.5px', whiteSpace: 'nowrap' }}>
+                                                    {replyReaction ? getReactionEmoji(replyReaction.reaction) : t('tasks.reaction.like' as any)}
+                                                  </button>
+                                                </Popover>
+                                                <button
+                                                  onClick={() => {
+                                                    setReplyingToCommentId(comment.id);
+                                                    setReplyingToSubCommentId(reply.id);
+                                                    const initText = reply.user?.id === me?.id ? '' : `@[${reply.user?.name || ''}] `;
+                                                    replyTextRef.current = initText;
+                                                    setHasReplyText(initText.trim().length > 0);
+                                                    setTimeout(() => {
+                                                      const ta = document.getElementById(`reply-textarea-${comment.id}`) as HTMLTextAreaElement;
+                                                      if (ta) { ta.value = initText; ta.focus(); ta.setSelectionRange(initText.length, initText.length); }
+                                                    }, 50);
+                                                  }}
+                                                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '10.5px', whiteSpace: 'nowrap' }}
+                                                >
+                                                  {t('tasks.panel.reply_btn' as any)}
+                                                </button>
+                                                {reply.user?.id === me?.id && (
+                                                  <Popconfirm
+                                                    title={t('tasks.panel.delete_comment_confirm' as any)}
+                                                    okText={t('common.yes' as any, undefined, 'Có')}
+                                                    cancelText={t('common.no' as any, undefined, 'Không')}
+                                                    onConfirm={() => handleDeleteComment(reply.id)}
+                                                  >
+                                                    <button style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#ff4d4f', fontWeight: 600, fontSize: '10.5px', whiteSpace: 'nowrap' }}>
+                                                      {t('common.delete' as any) || 'Xóa'}
+                                                    </button>
+                                                  </Popconfirm>
+                                                )}
+                                              </>
+                                            )}
                                           </div>
                                           {reply.reactions && reply.reactions.length > 0 && renderReactionsDisplay(reply.reactions)}
                                         </div>
@@ -4662,10 +6065,10 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
               ) : (
                 <div className="ai-brain-modal__content">
                   {aiModalType === 'description' ? (
-                    renderMarkdown(aiModalResult || '')
-                  ) : Array.isArray(aiModalResult) ? (
+                    renderMarkdown(displayedAiModalResult || '')
+                  ) : aiModalType === 'subtasks' || aiModalType === 'checklist' ? (
                     <ul style={{ paddingLeft: '20px', margin: '0', listStyleType: 'disc' }}>
-                      {aiModalResult.map((item: string, idx: number) => (
+                      {(displayedAiModalResult || []).map((item: string, idx: number) => (
                         <li key={idx} style={{ marginBottom: '6px' }}>{item}</li>
                       ))}
                     </ul>
@@ -4944,6 +6347,302 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
           </div>
         </>
       )}
+
+      {/* Recurring Tasks Configuration Modal */}
+      <Modal
+        title={
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+            <SyncOutlined style={{ color: 'var(--primary)' }} />
+            {t('tasks.recurring.title' as any) || 'Cấu hình định kỳ'}
+          </span>
+        }
+        zIndex={4000}
+        open={isRecurringModalVisible}
+        onCancel={() => setIsRecurringModalVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setIsRecurringModalVisible(false)}>
+            {t('tasks.panel.cancel_btn' as any) || 'Hủy'}
+          </Button>,
+          taskEditable && (
+            <Button
+              key="save"
+              type="primary"
+              onClick={async () => {
+                await handleSaveRecurringSettings({
+                  is_recurring: modalIsRecurring,
+                  recurring_frequency: modalRecurringFrequency,
+                  recurring_interval: modalRecurringInterval,
+                  recurring_weekdays: modalRecurringWeekdays,
+                  recurring_monthday: modalRecurringMonthday,
+                  recurring_time: modalRecurringTime,
+                });
+                setIsRecurringModalVisible(false);
+                message.success('Đã lưu cấu hình định kỳ.');
+              }}
+            >
+              {t('tasks.panel.save_btn' as any) || 'Lưu'}
+            </Button>
+          ),
+        ].filter(Boolean)}
+        width={400}
+        destroyOnClose
+        className="recurring-config-modal"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '8px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Switch
+              checked={modalIsRecurring}
+              disabled={!taskEditable}
+              onChange={(checked) => {
+                setModalIsRecurring(checked);
+                if (checked && modalRecurringFrequency === 'none') {
+                  setModalRecurringFrequency('daily');
+                }
+              }}
+            />
+            <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>
+              {t('tasks.recurring.enable' as any) || 'Kích hoạt lặp lại'}
+            </span>
+          </div>
+
+          {modalIsRecurring && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              padding: '12px',
+              borderRadius: '8px',
+              background: 'rgba(120, 120, 120, 0.05)',
+              border: '1px solid var(--border-color)',
+            }}>
+              {/* Tần suất */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-muted)', minWidth: '100px' }}>
+                  {t('tasks.recurring.frequency' as any) || 'Tần suất'}:
+                </span>
+                <Select
+                  style={{ width: '150px' }}
+                  value={modalRecurringFrequency}
+                  disabled={!taskEditable}
+                  onChange={(val) => {
+                    setModalRecurringFrequency(val);
+                    if (val === 'none') {
+                      setModalIsRecurring(false);
+                    }
+                  }}
+                >
+                  <Select.Option value="daily">{t('tasks.recurring.daily' as any) || 'Hàng ngày'}</Select.Option>
+                  <Select.Option value="weekly">{t('tasks.recurring.weekly' as any) || 'Hàng tuần'}</Select.Option>
+                  <Select.Option value="monthly">{t('tasks.recurring.monthly' as any) || 'Hàng tháng'}</Select.Option>
+                  <Select.Option value="yearly">{t('tasks.recurring.yearly' as any) || 'Hàng năm'}</Select.Option>
+                </Select>
+              </div>
+
+              {/* Khoảng cách chu kỳ */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-muted)', minWidth: '100px' }}>
+                  {t('tasks.recurring.interval' as any) || 'Lặp lại mỗi'}:
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Input
+                    type="number"
+                    style={{ width: '70px', textAlign: 'center' }}
+                    value={modalRecurringInterval}
+                    disabled={!taskEditable}
+                    min={1}
+                    onChange={(e) => setModalRecurringInterval(parseInt(e.target.value) || 1)}
+                  />
+                  <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    {modalRecurringFrequency === 'daily' && (t('tasks.recurring.days' as any) || 'ngày')}
+                    {modalRecurringFrequency === 'weekly' && (t('tasks.recurring.weeks' as any) || 'tuần')}
+                    {modalRecurringFrequency === 'monthly' && (t('tasks.recurring.months' as any) || 'tháng')}
+                    {modalRecurringFrequency === 'yearly' && (t('tasks.recurring.years' as any) || 'năm')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Chọn thứ trong tuần (Chỉ khi lặp theo tuần) */}
+              {modalRecurringFrequency === 'weekly' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                    {t('tasks.recurring.weekdays' as any) || 'Các ngày trong tuần'}:
+                  </span>
+                  <Select
+                    mode="multiple"
+                    style={{ width: '100%' }}
+                    placeholder="Chọn thứ..."
+                    value={modalRecurringWeekdays}
+                    disabled={!taskEditable}
+                    onChange={(vals) => setModalRecurringWeekdays(vals)}
+                    options={[
+                      { value: 1, label: 'Thứ Hai' },
+                      { value: 2, label: 'Thứ Ba' },
+                      { value: 3, label: 'Thứ Tư' },
+                      { value: 4, label: 'Thứ Năm' },
+                      { value: 5, label: 'Thứ Sáu' },
+                      { value: 6, label: 'Thứ Bảy' },
+                      { value: 7, label: 'Chủ Nhật' },
+                    ]}
+                  />
+                </div>
+              )}
+
+              {/* Chọn ngày trong tháng (Chỉ khi lặp theo tháng) */}
+              {modalRecurringFrequency === 'monthly' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-muted)', minWidth: '100px' }}>
+                    {t('tasks.recurring.monthday' as any) || 'Ngày trong tháng'}:
+                  </span>
+                  <Select
+                    style={{ width: '90px' }}
+                    value={modalRecurringMonthday}
+                    disabled={!taskEditable}
+                    onChange={(val) => setModalRecurringMonthday(val)}
+                    options={Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: `${i + 1}` }))}
+                  />
+                </div>
+              )}
+
+              {/* Giờ chạy */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-muted)', minWidth: '100px' }}>
+                  {t('tasks.recurring.time' as any) || 'Giờ chạy'}:
+                </span>
+                <Input
+                  type="time"
+                  style={{ width: '100px', textAlign: 'center' }}
+                  value={modalRecurringTime}
+                  disabled={!taskEditable}
+                  onChange={(e) => setModalRecurringTime(e.target.value || '09:00')}
+                />
+              </div>
+
+              {/* Preview lần chạy tiếp theo */}
+              {task.recurring_next_trigger && (
+                <div style={{
+                  borderTop: '1px solid var(--border-color)',
+                  paddingTop: '8px',
+                  marginTop: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12px',
+                  color: '#22c55e',
+                  fontWeight: 500
+                }}>
+                  <ClockCircleOutlined style={{ fontSize: '13px' }} />
+                  <span>
+                    {(t('tasks.recurring.next_run' as any) || 'Lần chạy tiếp theo')}: {dayjs(task.recurring_next_trigger).format('DD/MM/YYYY HH:mm')}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Save as Template Modal */}
+      <Modal
+        title={
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+            <FileTextOutlined style={{ color: 'var(--primary)' }} />
+            {t('tasks.template.save_as_title' as any) || 'Lưu thành mẫu công việc'}
+          </span>
+        }
+        zIndex={4000}
+        open={isTemplateModalVisible}
+        onCancel={() => setIsTemplateModalVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setIsTemplateModalVisible(false)}>
+            {t('tasks.panel.cancel_btn' as any) || 'Hủy'}
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            disabled={!templateName.trim()}
+            onClick={async () => {
+              try {
+                const res = await api.createTaskTemplate({
+                  name: templateName,
+                  project_id: templateProjectId,
+                  task_id: task.id,
+                  is_public: templateIsPublic,
+                });
+                if (res.success) {
+                  message.success(t('tasks.template.success_save' as any) || 'Đã lưu mẫu công việc thành công.');
+                  setIsTemplateModalVisible(false);
+                  fetchTaskDetails(task.id, true);
+                }
+              } catch (err) {
+                console.error(err);
+                message.error('Không thể lưu mẫu công việc.');
+              }
+            }}
+          >
+            {t('tasks.panel.save_btn' as any) || 'Lưu'}
+          </Button>
+        ]}
+        width={400}
+        destroyOnClose
+        className="template-save-modal"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '8px 0' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+              {t('tasks.template.name_label' as any) || 'Tên mẫu'}:
+            </span>
+            <Input
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              placeholder="Nhập tên mẫu..."
+            />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+              {t('tasks.template.scope_label' as any) || 'Phạm vi mẫu'}:
+            </span>
+            <Select
+              style={{ width: '100%' }}
+              value={templateProjectId ? 'project' : 'global'}
+              onChange={(val) => {
+                setTemplateProjectId(val === 'project' ? task.project_id || null : null);
+                setTemplateIsPublic(val === 'global');
+              }}
+            >
+              <Select.Option value="project">
+                {t('tasks.template.scope_project' as any) || 'Dự án hiện tại'}
+              </Select.Option>
+              <Select.Option value="global">
+                {t('tasks.template.scope_global' as any) || 'Hệ thống (Toàn cục)'}
+              </Select.Option>
+            </Select>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Workflow Transition Guided Modal */}
+      {wfModalOpen && task && (
+        <WorkflowTransitionModal
+          open={wfModalOpen}
+          task={task}
+          targetStatus={wfTargetStatus}
+          targetStatusName={wfTargetStatusName}
+          failedRules={wfFailedRules}
+          projectMembers={members}
+          projectLabels={task.project?.labels || []}
+          onCancel={() => {
+            setWfModalOpen(false);
+          }}
+          onSuccess={(updatedTask) => {
+            setWfModalOpen(false);
+            setTask(updatedTask);
+            setEditStatus(updatedTask.status);
+            onUpdate(true);
+            refreshActivities();
+          }}
+        />
+      )}
     </>
   );
 
@@ -5052,33 +6751,106 @@ const getFileUrl = (path: string): string => {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
-  const apiBase = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
-  const baseUrl = apiBase.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+  let baseUrl = 'http://localhost:8000';
+  if (process.env.REACT_APP_NGROK_URL) {
+    baseUrl = process.env.REACT_APP_NGROK_URL.replace(/\/+$/, '');
+  } else {
+    const apiBase = process.env.REACT_APP_API_URL || '';
+    if (apiBase) {
+      if (apiBase.includes('localhost:3000')) {
+        baseUrl = 'http://localhost:8000';
+      } else {
+        baseUrl = apiBase.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+      }
+    }
+  }
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${baseUrl}${cleanPath}`;
 };
 
+const calculateWorkingMinutes = (start: string, due: string): number => {
+  if (!start || !due) return 0;
+  const startDate = new Date(start);
+  const dueVal = new Date(due);
+  if (isNaN(startDate.getTime()) || isNaN(dueVal.getTime()) || dueVal <= startDate) return 0;
+
+  const ICT_OFFSET = 7 * 60 * 60 * 1000;
+  const startIctMs = startDate.getTime() + ICT_OFFSET;
+  const dueIctMs = dueVal.getTime() + ICT_OFFSET;
+
+  const getIctDateKey = (ms: number) => {
+    const d = new Date(ms);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dt = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${dt}`;
+  };
+
+  const getWorkingMinutesForDay = (dayOfWeek: number, startMin: number, endMin: number): number => {
+    if (dayOfWeek === 0) return 0;
+    if (dayOfWeek === 6) {
+      return Math.max(0, Math.min(endMin, 720) - Math.max(startMin, 480));
+    }
+    const overlap1 = Math.max(0, Math.min(endMin, 720) - Math.max(startMin, 480));
+    const overlap2 = Math.max(0, Math.min(endMin, 1020) - Math.max(startMin, 780));
+    return overlap1 + overlap2;
+  };
+
+  const startDateKey = getIctDateKey(startIctMs);
+  const dueDateKey = getIctDateKey(dueIctMs);
+
+  if (startDateKey === dueDateKey) {
+    const d = new Date(startIctMs);
+    const dayOfWeek = d.getUTCDay();
+    const startMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+    
+    const dDue = new Date(dueIctMs);
+    const dueMin = dDue.getUTCHours() * 60 + dDue.getUTCMinutes();
+
+    return getWorkingMinutesForDay(dayOfWeek, startMin, dueMin);
+  }
+
+  let totalMinutes = 0;
+  const startMidnight = new Date(startDateKey + 'T00:00:00Z').getTime();
+  const dueMidnight = new Date(dueDateKey + 'T00:00:00Z').getTime();
+
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  for (let currentMidnight = startMidnight; currentMidnight <= dueMidnight; currentMidnight += oneDayMs) {
+    const currentIctDate = new Date(currentMidnight);
+    const dayOfWeek = currentIctDate.getUTCDay();
+    const currentDateKey = getIctDateKey(currentMidnight);
+
+    let startMin = 0;
+    let endMin = 24 * 60;
+
+    if (currentDateKey === startDateKey) {
+      const dStart = new Date(startIctMs);
+      startMin = dStart.getUTCHours() * 60 + dStart.getUTCMinutes();
+    }
+    if (currentDateKey === dueDateKey) {
+      const dDue = new Date(dueIctMs);
+      endMin = dDue.getUTCHours() * 60 + dDue.getUTCMinutes();
+    }
+
+    totalMinutes += getWorkingMinutesForDay(dayOfWeek, startMin, endMin);
+  }
+
+  return totalMinutes;
+};
 const formatEstimate = (t: any, start?: string, due?: string) => {
   if (!start || !due) return t('tasks.panel.no_estimate' as any) || 'Chưa có ước tính';
-  const s = new Date(start).getTime();
-  const d = new Date(due).getTime();
-  if (isNaN(s) || isNaN(d) || s >= d) return t('tasks.panel.no_estimate' as any) || 'Chưa có ước tính';
+  const totalWorkingMinutes = calculateWorkingMinutes(start, due);
+  if (totalWorkingMinutes <= 0) return t('tasks.panel.no_estimate' as any) || 'Chưa có ước tính';
 
-  const diffMs = d - s;
-  const totalMinutes = Math.floor(diffMs / 60000);
-  const days = Math.floor(totalMinutes / (24 * 60));
-  const remainingMinutes = totalMinutes % (24 * 60);
-  const hours = Math.floor(remainingMinutes / 60);
-  const mins = remainingMinutes % 60;
+  const hours = Math.floor(totalWorkingMinutes / 60);
+  const mins = totalWorkingMinutes % 60;
 
   const parts = [];
-  if (days > 0) parts.push(t('common.time.days', { count: days }));
   if (hours > 0) parts.push(t('common.time.hours', { count: hours }));
   if (mins > 0) parts.push(t('common.time.minutes', { count: mins }));
 
   return parts.join(' ') || t('tasks.panel.no_estimate' as any) || 'Chưa có ước tính';
 };
-
 const renderCommentText = (text: string) => {
   if (!text) return '';
   const tokenRegex = /(https?:\/\/[^\s]+|@\[[^\]]+\])/g;
@@ -5105,37 +6877,39 @@ const renderCommentText = (text: string) => {
 };
 
 const renderMarkdown = (text: string) => {
-  if (!text) return '';
-  let html = text;
+  if (!text) return <></>;
 
-  // Escape HTML to prevent XSS
-  html = html
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  // FIX #5: Replaced custom regex-based markdown renderer with marked + DOMPurify.
+  // The old approach escaped HTML first, then re-injected raw HTML tags via regex substitutions
+  // — effectively bypassing its own escaping and creating an XSS vector.
+  // DOMPurify sanitizes the full HTML output before it reaches the DOM.
+  try {
+    const { marked } = require('marked');
+    const DOMPurify = require('dompurify');
 
-  // Code block
-  html = html.replace(/```([\s\S]*?)```/g, '<pre style="background: rgba(120, 120, 120, 0.12); padding: 8px 12px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 12.5px; margin: 8px 0; border: 1px solid var(--border-color); color: var(--text-primary);"><code>$1</code></pre>');
+    const rawHtml = marked.parse(text, { breaks: true, gfm: true }) as string;
+    const cleanHtml = DOMPurify.sanitize(rawHtml, {
+      ALLOWED_TAGS: ['p', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'br', 'a', 'h1', 'h2', 'h3', 'blockquote', 'hr'],
+      ALLOWED_ATTR: ['href', 'target', 'rel'],
+      FORCE_BODY: true,
+    });
 
-  // Inline code
-  html = html.replace(/`([^`\n]+)`/g, '<code style="background: rgba(120, 120, 120, 0.12); padding: 2px 5px; border-radius: 4px; font-family: monospace; font-size: 12.5px; color: #e11d48;">$1</code>');
-
-  // Bold
-  html = html.replace(/\*\*([^\*]+)\*\*/g, '<strong>$1</strong>');
-
-  // Italic
-  html = html.replace(/\*([^\*]+)\*/g, '<em>$1</em>');
-
-  // Bullet lists
-  html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li style="margin-left: 16px; margin-bottom: 4px; list-style-type: disc;">$1</li>');
-
-  const parts = html.split(/(<pre[\s\S]*?<\/pre>)/g);
-  for (let i = 0; i < parts.length; i++) {
-    if (!parts[i].startsWith('<pre')) {
-      parts[i] = parts[i].replace(/\n/g, '<br />');
-    }
+    return (
+      <div
+        className="ai-markdown-content"
+        dangerouslySetInnerHTML={{ __html: cleanHtml }}
+        style={{ fontSize: '13px', lineHeight: '1.5', color: 'var(--text-primary)' }}
+      />
+    );
+  } catch {
+    // Fallback: render as plain text if libraries fail to load
+    return (
+      <div
+        className="ai-markdown-content"
+        style={{ fontSize: '13px', lineHeight: '1.5', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}
+      >
+        {text}
+      </div>
+    );
   }
-  html = parts.join('');
-
-  return <div className="ai-markdown-content" dangerouslySetInnerHTML={{ __html: html }} style={{ fontSize: '13px', lineHeight: '1.5', color: 'var(--text-primary)' }} />;
 };

@@ -1337,7 +1337,7 @@
 
 .project-detail__tasks-list-view.my-tasks {
   .my-tasks__task-row {
-    grid-template-columns: 32px 1fr 140px 100px 240px 80px 40px;
+    grid-template-columns: 32px 1fr 140px 110px 240px 80px 40px;
   }
 }
 
@@ -1357,5 +1357,22 @@
     background: rgba(99, 102, 241, 0.06) !important;
     border: 1px dashed var(--primary) !important;
     opacity: 0.6 !important;
+  }
+}
+
+.interactive-status-tag {
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease-in-out;
+
+  &:hover {
+    filter: brightness(1.18);
+    transform: translateY(-0.5px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  &:active {
+    transform: translateY(0);
+    box-shadow: none;
   }
 }

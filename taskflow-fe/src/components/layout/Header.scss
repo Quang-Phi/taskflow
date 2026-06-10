@@ -239,3 +239,36 @@
 .custom-notification-close:hover {
   color: var(--text-primary) !important;
 }
+
+.header-timer-stop-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 18px !important;
+  border-radius: 50% !important;
+  background-color: #ef4444 !important;
+  border: none !important;
+  cursor: pointer !important;
+  margin-left: 4px !important;
+  flex-shrink: 0 !important;
+  padding: 0 !important;
+  transition: background-color 0.2s ease, transform 0.1s ease !important;
+
+  &:hover {
+    background-color: #dc2626 !important;
+    transform: scale(1.05) !important;
+  }
+
+  &:active {
+    transform: scale(0.95) !important;
+  }
+
+  .stop-square {
+    width: 6px !important;
+    height: 6px !important;
+    background-color: #ffffff !important;
+    border-radius: 1px !important;
+    display: inline-block !important;
+  }
+}

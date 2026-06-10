@@ -303,9 +303,15 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         return;
       }
 
+      const fromStatus = project.statuses.find(s => s.id === from);
+      const toStatus = project.statuses.find(s => s.id === to);
+      const fromName = fromStatus ? fromStatus.name : from;
+      const toName = toStatus ? toStatus.name : to;
+      const transName = `${fromName} → ${toName}`;
+
       const newTr: Transition = {
         id: `t_${Date.now()}`,
-        name: '',
+        name: transName,
         from,
         to,
         allowed_roles: [],
@@ -353,9 +359,12 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       return;
     }
 
+    const toStatus = project.statuses.find(s => s.id === toId);
+    const toName = toStatus ? toStatus.name : toId;
+
     const newGt: GlobalTransition = {
       id: `gt_${Date.now()}`,
-      name: '',
+      name: `* → ${toName}`,
       to: toId,
       allowed_roles: [],
       rules: []
